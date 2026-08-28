@@ -1,0 +1,28 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+build/
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+*.hprof
+.kotlin/
+
+# Kiro CLI session exports (chat history, not part of the app)
+*-session.json
+
+# Internal project spec/instructions (not part of the public source)
+CLAUDE.md
+
+# Rust
+target/
+Cargo.lock
+
+# Machine-specific gradle overrides (JDK path, etc.)
+gradle.properties.local
+
+# Room schema history is intentionally committed (used for migration validation)
+!app/schemas/
