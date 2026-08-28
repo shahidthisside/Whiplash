@@ -1,0 +1,333 @@
+package com.whiplash.music.ui.home
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.whiplash.music.WhiplashApplication
+import com.whiplash.music.domain.model.PlayableItem
+import com.whiplash.music.ui.player.SongActionsContent
+import com.whiplash.music.ui.player.SongActionsViewModel
+import com.whiplash.music.ui.player.SongActionsViewModelFactory
+import com.whiplash.music.ui.theme.GlassArtworkThumbnail
+import com.whiplash.music.ui.theme.GlassIconButton
+import com.whiplash.music.ui.theme.GlassListItem
+import com.whiplash.music.ui.theme.GlassSheet
+import com.whiplash.music.ui.theme.GlassTokens
+import com.whiplash.music.ui.theme.WhiplashColors
+import com.whiplash.music.ui.theme.WhiplashRadius
+
+/**
+ * Home screen (section 31). "Speed dial" (YouTube-Music-style 3x3 grid of
+ * recently played artwork — real listening history, not fabricated) and
+ * Quick Picks (real search-backed suggestions). Sections only render when
+ * they have real backing data — no empty/fake placeholder sections.
+ */
+private enum class SheetOrigin { SPEED_DIAL, QUICK_PICKS }
+
+@androidx.compose.material3.ExperimentalMaterial3Api
+@ExperimentalFoundationApi
+@Composable
+fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit) {
+    val context = LocalContext.current
+    val app = context.applicationContext as WhiplashApplication
+    val viewModel: HomeViewModel = viewModel(
+        factory = HomeViewModelFactory(app.libraryRepository, app.youtubeSearchRepository),
+    )
+    val songActionsViewModel: SongActionsViewModel = viewModel(
+        factory = SongActionsViewModelFactory(app.libraryRepository),
+    )
+    val speedDial by viewModel.speedDial.collectAsState()
+    val quickPicks by viewModel.quickPicks.collectAsState()
+    val isLoadingQuickPicks by viewModel.isLoadingQuickPicks.collectAsState()
+    val haptic = LocalHapticFeedback.current
+    var actionsSheetItem by remember { mutableStateOf<PlayableItem?>(null) }
+    var actionsSheetOrigin by remember { mutableStateOf(SheetOrigin.SPEED_DIAL) }
+    var addToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
+    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+
+    if (speedDial.isEmpty() && quickPicks.isEmpty() && !isLoadingQuickPicks) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = "Play something to see it here.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = WhiplashColors.textSecondary,
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd),
+        verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
+    ) {
+        if (speedDial.isNotEmpty()) {
+            item {
+                SectionHeader(title = "Speed dial", onClear = viewModel::clearHistory)
+            }
+            item {
+                SpeedDialGrid(
+                    items = speedDial,
+                    onPlayTrack = onPlayTrack,
+                    onLongPressTrack = { track ->
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        actionsSheetOrigin = SheetOrigin.SPEED_DIAL
+                        actionsSheetItem = track
+                    },
+                )
+            }
+        }
+
+        if (quickPicks.isNotEmpty() || isLoadingQuickPicks) {
+            item {
+                Text(
+                    text = "Quick Picks",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = WhiplashColors.textPrimary,
+                    modifier = Modifier.padding(top = GlassTokens.spaceMd, bottom = GlassTokens.spaceXs),
+                )
+            }
+            if (isLoadingQuickPicks && quickPicks.isEmpty()) {
+                item {
+                    Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = WhiplashColors.accent)
+                    }
+                }
+            }
+            items(quickPicks, key = { "quickpick:${it.id}" }) { track ->
+                GlassListItem(
+                    title = track.title,
+                    subtitle = track.artist,
+                    onClick = { onPlayTrack(track) },
+                    onLongClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        actionsSheetOrigin = SheetOrigin.QUICK_PICKS
+                        actionsSheetItem = track
+                    },
+                    leading = { GlassArtworkThumbnail(artworkUri = track.artworkUri) },
+                )
+            }
+        }
+    }
+
+    // 3-dot / long-press song actions sheet (section 51), including
+    // Pin/Unpin to Speed dial — reachable via long-press on either a Speed
+    // dial tile or a Quick Picks row, since Speed dial tiles have no room
+    // for an inline 3-dot button of their own at that tile size.
+    val sheetItem = actionsSheetItem
+    if (sheetItem != null) {
+        val isFavorite by app.libraryRepository.observeIsFavorite(sheetItem).collectAsState(initial = false)
+        val isPinned by app.libraryRepository.observeIsPinned(sheetItem).collectAsState(initial = false)
+        GlassSheet(onDismissRequest = { actionsSheetItem = null }) {
+            SongActionsContent(
+                item = sheetItem,
+                isFavorite = isFavorite,
+                onPlayNext = {
+                    app.playbackController.playNext(sheetItem)
+                    actionsSheetItem = null
+                },
+                onAddToQueue = {
+                    app.playbackController.addToQueue(sheetItem)
+                    actionsSheetItem = null
+                },
+                onToggleFavorite = {
+                    songActionsViewModel.toggleFavorite(sheetItem, isCurrentlyFavorite = isFavorite)
+                    actionsSheetItem = null
+                },
+                onStartRadio = if (sheetItem is PlayableItem.YoutubeTrack) {
+                    { app.playbackController.playNow(sheetItem); actionsSheetItem = null }
+                } else null,
+                onShare = if (sheetItem is PlayableItem.YoutubeTrack) {
+                    { com.whiplash.music.ui.player.shareYoutubeTrack(context, sheetItem); actionsSheetItem = null }
+                } else null,
+                onAddToPlaylist = {
+                    addToPlaylistItem = sheetItem
+                    actionsSheetItem = null
+                },
+                isPinned = isPinned,
+                onTogglePinned = {
+                    songActionsViewModel.togglePinned(sheetItem, isCurrentlyPinned = isPinned)
+                    actionsSheetItem = null
+                },
+                onRemoveFromSpeedDial = if (actionsSheetOrigin == SheetOrigin.SPEED_DIAL) {
+                    {
+                        songActionsViewModel.removeFromSpeedDial(sheetItem)
+                        actionsSheetItem = null
+                    }
+                } else null,
+                onRemoveFromQuickPicks = if (actionsSheetOrigin == SheetOrigin.QUICK_PICKS && sheetItem is PlayableItem.YoutubeTrack) {
+                    {
+                        viewModel.removeFromQuickPicks(sheetItem)
+                        actionsSheetItem = null
+                    }
+                } else null,
+            )
+        }
+    }
+
+    val playlistTargetItem = addToPlaylistItem
+    if (playlistTargetItem != null) {
+        val playlists by app.libraryRepository.observePlaylists().collectAsState(initial = emptyList())
+        GlassSheet(onDismissRequest = { addToPlaylistItem = null }) {
+            com.whiplash.music.ui.player.AddToPlaylistContent(
+                playlists = playlists,
+                onSelectPlaylist = { playlist ->
+                    songActionsViewModel.addToPlaylist(playlistTargetItem, playlist.id)
+                    addToPlaylistItem = null
+                },
+                onCreateNew = { showCreatePlaylistDialog = true },
+            )
+        }
+    }
+
+    if (showCreatePlaylistDialog) {
+        com.whiplash.music.ui.theme.GlassTextInputDialog(
+            title = "New playlist",
+            confirmLabel = "Create",
+            onConfirm = { name ->
+                val item = playlistTargetItem
+                if (item != null) songActionsViewModel.createPlaylistAndAdd(name, item)
+                showCreatePlaylistDialog = false
+                addToPlaylistItem = null
+            },
+            onDismiss = { showCreatePlaylistDialog = false },
+        )
+    }
+}
+
+/**
+ * 3x3 grid of square, rounded artwork tiles — matches YouTube Music's
+ * "Speed dial" redesign of its former "Listen again" carousel (real
+ * design reference researched before building this). Uses a fixed
+ * 3-column grid sized to the available width rather than LazyVerticalGrid's
+ * own scrolling (the grid never needs to scroll internally — it's capped
+ * at 9 items and lives inside the outer LazyColumn).
+ */
+@ExperimentalFoundationApi
+@Composable
+private fun SpeedDialGrid(
+    items: List<PlayableItem>,
+    onPlayTrack: (PlayableItem) -> Unit,
+    onLongPressTrack: (PlayableItem) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+        items.chunked(3).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+            ) {
+                row.forEach { track ->
+                    SpeedDialTile(
+                        track = track,
+                        onClick = { onPlayTrack(track) },
+                        onLongClick = { onLongPressTrack(track) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                // Pad the last row with empty spacers so a partial row (e.g. 7 items -> 3+3+1)
+                // still aligns to the same 3-column grid instead of stretching the lone tile wide.
+                repeat(3 - row.size) {
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@ExperimentalFoundationApi
+@Composable
+private fun SpeedDialTile(
+    track: PlayableItem,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(WhiplashRadius.medium))
+                .background(WhiplashColors.surfaceElevated)
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        ) {
+            if (track.artworkUri != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(track.artworkUri)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Text(
+            text = track.title,
+            style = MaterialTheme.typography.labelMedium,
+            color = WhiplashColors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = GlassTokens.spaceXs),
+        )
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String, onClear: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = GlassTokens.spaceSm, bottom = GlassTokens.spaceXs),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = WhiplashColors.textPrimary,
+        )
+        GlassIconButton(contentDescription = "Clear $title", onClick = onClear, size = 40.dp) {
+            androidx.compose.material3.Icon(
+                Icons.Filled.Close,
+                contentDescription = null,
+                tint = WhiplashColors.textSecondary,
+            )
+        }
+    }
+}
