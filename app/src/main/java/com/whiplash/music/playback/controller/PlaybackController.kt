@@ -1,0 +1,788 @@
+package com.whiplash.music.playback.controller
+
+import android.content.ComponentName
+import android.content.Context
+import androidx.media3.common.Player
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import com.whiplash.music.data.repository.LibraryRepository
+import com.whiplash.music.data.repository.SettingsRepository
+import com.whiplash.music.domain.model.PlayableItem
+import com.whiplash.music.playback.provider.FallbackResult
+import com.whiplash.music.playback.provider.PlaybackManager
+import com.whiplash.music.playback.provider.newpipe.NewPipePlaybackProvider
+import com.whiplash.music.playback.service.WhiplashPlaybackService
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.MoreExecutors
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+/**
+ * The only class that talks to a Media3 [MediaController] directly
+ * (section 12: Compose UI -> ViewModel -> PlaybackController ->
+ * MediaController -> MediaSessionService -> ExoPlayer).
+ *
+ * ViewModels depend on this class, never on [MediaController] or
+ * [androidx.media3.exoplayer.ExoPlayer] directly, so the playback
+ * transport can evolve without UI-layer changes.
+ *
+ * Owns a domain-level queue (section 21) as the source of truth, separate
+ * from Media3's own internal playlist, because [PlayableItem.YoutubeTrack]
+ * entries need an async provider resolve (section 8) before Media3 can be
+ * given a real URI — something Media3's playlist APIs alone can't express.
+ * [LocalTrack][PlayableItem.LocalTrack] entries have a URI immediately and
+ * play with no added latency.
+ */
+class PlaybackController(
+    private val context: Context,
+    private val playbackManager: PlaybackManager,
+    private val settingsRepository: SettingsRepository,
+    private val libraryRepository: LibraryRepository,
+    private val newPipePlaybackProvider: NewPipePlaybackProvider,
+) {
+
+    private var controller: MediaController? = null
+    private var connectionFuture: ListenableFuture<MediaController>? = null
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var positionTickerJob: Job? = null
+
+    /** Guards against double-handling the same STATE_ENDED event (see [handleTrackEnded]). Reset whenever a new playback attempt actually starts (see [startMediaItem]). */
+    private var handledEnded: Boolean = false
+
+    /** Guards against a stale resolve (from a previous playIndex call) landing after a newer one started. */
+    private var resolveGeneration: Int = 0
+
+    /** Domain-level queue, source of truth for section 21 queue features. */
+    private var queue: MutableList<PlayableItem> = mutableListOf()
+    private var currentIndex: Int = -1
+
+    /** Tracks which queue indices have already had a Media3 MediaItem prepared, to avoid re-resolving. */
+    private val preparedIndices = mutableSetOf<Int>()
+
+    /** Pre-resolved stream for the upcoming track, filled in shortly before the current track ends (section 18: gapless). */
+    private var prefetched: PrefetchedStream? = null
+    private var prefetchJob: Job? = null
+
+    private data class PrefetchedStream(val forItemId: String, val streamUrl: String, val artworkUrl: String?)
+
+    private var sleepTimerJob: Job? = null
+
+    /**
+     * High-res artwork URLs already resolved for tracks the user hasn't
+     * played yet (currently: the immediate next queue item, kept in sync
+     * with [prefetched] in [prefetchNeighborStreamsAndArtwork]). Keyed by
+     * [PlayableItemMediaItemMapper.mediaIdOf] so it's safe to look up by
+     * the same stable id used everywhere else in this class. Consulted by
+     * [playIndex] so a track that already has its high-res artwork ready
+     * never displays the original — often lower-resolution — artwork at
+     * all, eliminating the low-res-then-high-res "blink" rather than just
+     * deduplicating the transition animation around it.
+     */
+    private val artworkPreloadCache = mutableMapOf<String, String>()
+
+    private val _state = MutableStateFlow(PlaybackState())
+    val state: StateFlow<PlaybackState> = _state
+
+    private val playerListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            _state.update { it.copy(isPlaying = isPlaying) }
+            updatePositionTicker(isPlaying)
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            _state.update { it.copy(isBuffering = playbackState == Player.STATE_BUFFERING) }
+            // Handle natural end-of-track directly and immediately here
+            // (section 13 autoplay), rather than relying solely on the
+            // 500ms position-poll loop in updatePositionTicker: that loop
+            // is cancelled by onIsPlayingChanged(false) — which ExoPlayer
+            // also fires the moment STATE_ENDED is reached, since isPlaying
+            // = playWhenReady && state == STATE_READY becomes false at
+            // STATE_ENDED — creating a real race where the ticker job can
+            // be cancelled before it gets to act on STATE_ENDED, silently
+            // stopping playback instead of advancing (confirmed as the
+            // root cause of a real user-reported bug: "song plays fully
+            // then stops" despite Autoplay=on and a non-empty queue).
+            if (playbackState == Player.STATE_ENDED) handleTrackEnded()
+        }
+
+        override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
+            refreshPositionAndDuration()
+        }
+
+        override fun onEvents(player: Player, events: Player.Events) {
+            refreshPositionAndDuration()
+        }
+    }
+
+    fun connect(onReady: () -> Unit = {}) {
+        if (controller != null || connectionFuture != null) return
+        val sessionToken = SessionToken(context, ComponentName(context, WhiplashPlaybackService::class.java))
+        val future = MediaController.Builder(context, sessionToken).buildAsync()
+        connectionFuture = future
+        future.addListener(
+            {
+                controller = future.get().also { it.addListener(playerListener) }
+                refreshPositionAndDuration()
+                onReady()
+            },
+            MoreExecutors.directExecutor(),
+        )
+    }
+
+    fun release() {
+        positionTickerJob?.cancel()
+        controller?.removeListener(playerListener)
+        controller?.release()
+        controller = null
+        connectionFuture = null
+    }
+
+    /** Replaces the queue with [items] and starts playback at [startIndex] (section 21). */
+    fun playQueue(items: List<PlayableItem>, startIndex: Int) {
+        if (items.isEmpty()) return
+        queue = items.toMutableList()
+        preparedIndices.clear()
+        currentIndex = startIndex.coerceIn(0, queue.lastIndex)
+        _state.update { it.copy(queue = queue.toList(), currentIndex = currentIndex) }
+        playIndex(currentIndex)
+    }
+
+    /** Convenience for the common single-track case: replaces the queue with just [item]. */
+    fun playNow(item: PlayableItem) = playQueue(listOf(item), 0)
+
+    /** Appends [item] to the end of the queue without interrupting current playback (section 21: "add to queue"). */
+    fun addToQueue(item: PlayableItem) {
+        queue.add(item)
+        _state.update { it.copy(queue = queue.toList()) }
+    }
+
+    /** Inserts [item] immediately after the currently playing track (section 21: "play next"). */
+    fun playNext(item: PlayableItem) {
+        val insertAt = (currentIndex + 1).coerceIn(0, queue.size)
+        queue.add(insertAt, item)
+        shiftPreparedIndicesAfterInsert(insertAt)
+        _state.update { it.copy(queue = queue.toList()) }
+    }
+
+    /** Removes the item at [index]. If it's the currently playing item, advances to the next one. */
+    fun removeFromQueue(index: Int) {
+        if (index !in queue.indices) return
+        queue.removeAt(index)
+        preparedIndices.remove(index)
+        val shifted = preparedIndices.filter { it > index }.toSet()
+        preparedIndices.removeAll { it > index }
+        preparedIndices.addAll(shifted.map { it - 1 })
+
+        when {
+            queue.isEmpty() -> {
+                currentIndex = -1
+                controller?.stop()
+                controller?.clearMediaItems()
+                _state.update { it.copy(queue = emptyList(), currentIndex = -1, currentItem = null, isPlaying = false) }
+            }
+            index < currentIndex -> {
+                currentIndex -= 1
+                controller?.removeMediaItem(index)
+                _state.update { it.copy(queue = queue.toList(), currentIndex = currentIndex) }
+            }
+            index == currentIndex -> {
+                // Removed the now-playing track: play whatever now occupies this index (or stop if it was last).
+                _state.update { it.copy(queue = queue.toList()) }
+                if (currentIndex > queue.lastIndex) currentIndex = queue.lastIndex
+                if (currentIndex >= 0) playIndex(currentIndex) else {
+                    controller?.stop()
+                    controller?.clearMediaItems()
+                    _state.update { it.copy(currentItem = null, isPlaying = false) }
+                }
+            }
+            else -> _state.update { it.copy(queue = queue.toList()) }
+        }
+    }
+
+    /** Moves a queue item from [from] to [to] (section 21: "reorder"). */
+    fun moveInQueue(from: Int, to: Int) {
+        if (from !in queue.indices || to !in queue.indices || from == to) return
+        val item = queue.removeAt(from)
+        queue.add(to, item)
+        currentIndex = when {
+            currentIndex == from -> to
+            from < currentIndex && to >= currentIndex -> currentIndex - 1
+            from > currentIndex && to <= currentIndex -> currentIndex + 1
+            else -> currentIndex
+        }
+        preparedIndices.clear() // conservative: re-resolve on demand rather than track a shifted mapping through an arbitrary move
+        _state.update { it.copy(queue = queue.toList(), currentIndex = currentIndex) }
+    }
+
+    /** Removes every item except the currently playing one (section 21: "clear"). */
+    fun clearQueueExceptCurrent() {
+        if (currentIndex < 0 || queue.isEmpty()) return
+        val current = queue[currentIndex]
+        queue = mutableListOf(current)
+        currentIndex = 0
+        preparedIndices.clear()
+        _state.update { it.copy(queue = queue.toList(), currentIndex = 0) }
+    }
+
+    private fun shiftPreparedIndicesAfterInsert(insertAt: Int) {
+        val shifted = preparedIndices.filter { it >= insertAt }.map { it + 1 }
+        preparedIndices.removeAll { it >= insertAt }
+        preparedIndices.addAll(shifted)
+    }
+
+    /**
+     * Starts playback of the queue item at [index]. [PlayableItem.LocalTrack]
+     * plays immediately (URI already known). [PlayableItem.YoutubeTrack]
+     * first resolves a stream via [playbackManager] (automatic fallback,
+     * section 8) — [PlaybackState.isResolvingStream]=true immediately so
+     * there is no perceived dead air while that network round-trip happens.
+     */
+    private fun playIndex(index: Int) {
+        if (index !in queue.indices) return
+        val item = queue[index]
+        currentIndex = index
+        val generation = ++resolveGeneration
+        prefetchJob?.cancel()
+
+        // Stop the previous track's audio immediately (not just update the
+        // UI state) so switching tracks is instant to the ear — otherwise
+        // the old MediaItem keeps audibly playing for the entire async
+        // stream-resolve window below, which is what made it sound like
+        // "the previous song is still playing" when skipping to a new one.
+        // Local tracks resolve synchronously right after this anyway, so
+        // this only causes a brief, expected silence for YouTube tracks
+        // (filled by isResolvingStream's buffering indicator in the UI).
+        controller?.pause()
+        controller?.volume = 1f // undo any in-progress fade from the track this interrupted
+
+        // If we already have this track's high-res artwork cached (from a
+        // gapless prefetch, or because it's already sitting in the
+        // artworkPreloadCache below), show that immediately instead of the
+        // item's original — often lower-resolution — search-time thumbnail.
+        // This is what actually eliminates the low-res-then-high-res
+        // "blink" for prefetched transitions, rather than just deduplicating
+        // the transition animation (the contentKey fix from before): here
+        // there is no low-res frame shown at all, because we never assign
+        // the item's original artworkUri in the first place.
+        val mediaId = PlayableItemMediaItemMapper.mediaIdOf(item)
+        val cachedArtwork = (prefetched?.takeIf { it.forItemId == item.id }?.artworkUrl)
+            ?: artworkPreloadCache[mediaId]
+        artworkPreloadCache.remove(mediaId) // consumed; will be freshly populated for the new neighbors by prefetchNeighborStreamsAndArtwork
+        val displayItem = if (cachedArtwork != null && item is PlayableItem.YoutubeTrack) {
+            item.copy(artworkUri = cachedArtwork)
+        } else item
+        if (displayItem !== item && currentIndex in queue.indices) queue[currentIndex] = displayItem
+
+        // Pre-warm Coil's cache for whatever artwork the immediate previous
+        // and next queue items already have (their existing artworkUri —
+        // whether that's a low-res search thumbnail or an already-upgraded
+        // high-res one). This doesn't fetch new high-res URLs by itself
+        // (that only happens for the upcoming item via prefetchNeighborStreamsAndArtwork,
+        // since it piggybacks on a resolve that's needed anyway) — it just
+        // ensures neither neighbor needs a cold network fetch + decode the
+        // moment the user actually navigates to it.
+        preloadNeighborArtwork(index)
+
+        _state.update {
+            it.copy(
+                currentItem = displayItem,
+                currentIndex = index,
+                playbackError = null,
+                isPlaying = false,
+                // Reset position/duration in the SAME state update that swaps
+                // currentItem, rather than waiting for Media3's onEvents/
+                // onMediaMetadataChanged callback (which only fires once
+                // prepare() completes below). Without this, the artwork/
+                // title/artist visibly changed to the new track immediately
+                // while the seek bar kept showing the previous track's
+                // position/duration until the new stream finished loading —
+                // a jarring, half-updated transition rather than one clean
+                // instant switch.
+                positionMs = 0L,
+                durationMs = 0L,
+                isResolvingStream = item is PlayableItem.YoutubeTrack && prefetched?.forItemId != item.id,
+            )
+        }
+
+        scope.launch { libraryRepository.recordPlayed(item) }
+
+        // Resolve high-res artwork for BOTH neighbors as soon as this track
+        // starts — not just in the last few seconds before it ends (that
+        // window only helps if the user waits for a natural transition; a
+        // manual tap of Next/Previous at any other point in the track had
+        // zero prefetch benefit before this, which is exactly why the
+        // "next song artwork still blinks" report kept recurring). This
+        // makes the high-res artwork resolve start immediately in the
+        // background regardless of when the user actually navigates.
+        prefetchNeighborStreamsAndArtwork(index)
+
+        when (item) {
+            is PlayableItem.LocalTrack -> startMediaItem(item, resolvedStreamUrl = null)
+            is PlayableItem.YoutubeTrack -> {
+                val cached = prefetched?.takeIf { it.forItemId == item.id }
+                if (cached != null) {
+                    // Gapless (section 18): this track's stream was already resolved
+                    // while the previous one was still playing, so there is no
+                    // network round-trip — and therefore no perceptible gap — here.
+                    // Artwork was already applied above (displayItem), so no
+                    // separate upgrade step or second state update is needed here.
+                    prefetched = null
+                    startMediaItem(displayItem, resolvedStreamUrl = cached.streamUrl)
+                    maybeExtendQueueWithRecommendations(item)
+                } else {
+                    scope.launch {
+                        val quality = settingsRepository.audioQuality.first()
+                        libraryRepository.cacheSong(item)
+                        val result = playbackManager.resolveStream(item, quality)
+                        if (generation != resolveGeneration) return@launch // superseded by a newer playIndex call
+
+                        when (result) {
+                            is FallbackResult.Success -> {
+                                val upgraded = upgradeArtworkIfCurrent(item, result.value.resolvedArtworkUrl)
+                                _state.update { it.copy(isResolvingStream = false, currentItem = upgraded ?: it.currentItem) }
+                                startMediaItem(upgraded ?: item, resolvedStreamUrl = result.value.streamUrl)
+                                maybeExtendQueueWithRecommendations(item)
+                            }
+                            is FallbackResult.Failure -> {
+                                _state.update {
+                                    it.copy(
+                                        isResolvingStream = false,
+                                        playbackError = PlaybackError(
+                                            itemTitle = item.title,
+                                            message = result.failure.message ?: "Playback failed",
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Pre-resolves the stream + high-res artwork for the upcoming queue
+     * item, AND just the high-res artwork for the previous one, as soon as
+     * the current track starts playing (section 18: gapless; also the fix
+     * for artwork "blinking" on manual skip — see call site in [playIndex]
+     * for why this must run immediately rather than only in the last few
+     * seconds of the current track). The next item gets its full stream
+     * resolved (not just artwork) since that's also what makes forward
+     * gapless transitions possible; the previous item only needs artwork
+     * since going backward doesn't reuse a cached stream the same way.
+     */
+    private fun prefetchNeighborStreamsAndArtwork(fromIndex: Int) {
+        prefetchJob?.cancel()
+        val nextItem = nextIndex()?.let { queue.getOrNull(it) } as? PlayableItem.YoutubeTrack
+        val prevItem = previousIndex()?.let { queue.getOrNull(it) } as? PlayableItem.YoutubeTrack
+
+        if (nextItem != null && prefetched?.forItemId != nextItem.id) {
+            prefetchJob = scope.launch {
+                try {
+                    val quality = settingsRepository.audioQuality.first()
+                    val result = playbackManager.resolveStream(nextItem, quality)
+                    if (result is FallbackResult.Success) {
+                        prefetched = PrefetchedStream(nextItem.id, result.value.streamUrl, result.value.resolvedArtworkUrl)
+                        result.value.resolvedArtworkUrl?.let { url ->
+                            artworkPreloadCache[PlayableItemMediaItemMapper.mediaIdOf(nextItem)] = url
+                            preloadArtworkBitmap(url)
+                        }
+                    }
+                } catch (_: Exception) {
+                    // Prefetch is a latency optimization only; a failure here just
+                    // means the next track resolves normally (with its usual
+                    // brief isResolvingStream window) when it actually starts.
+                }
+            }
+        }
+
+        if (prevItem != null && artworkPreloadCache[PlayableItemMediaItemMapper.mediaIdOf(prevItem)] == null) {
+            scope.launch {
+                try {
+                    // getPlayerInfo (not getStream) is used here deliberately:
+                    // we only want the metadata (for its high-res artwork),
+                    // not a playable stream URL, since navigating backward
+                    // re-resolves a fresh stream at that time anyway (a
+                    // stream resolved now could expire before the user
+                    // actually goes back to it).
+                    val artworkUrl = newPipePlaybackProvider.getPlayerInfo(prevItem.id).artworkUrl
+                    if (artworkUrl != null) {
+                        artworkPreloadCache[PlayableItemMediaItemMapper.mediaIdOf(prevItem)] = artworkUrl
+                        preloadArtworkBitmap(artworkUrl)
+                    }
+                } catch (_: Exception) {
+                    // Same as above: artwork prefetch is a nice-to-have only.
+                }
+            }
+        }
+    }
+
+    /**
+     * Warms Coil's memory cache for [artworkUrl] so that when this track
+     * actually starts playing, [coil.compose.AsyncImage] can render it
+     * immediately from cache rather than needing a fresh network fetch +
+     * decode — this is what removes any residual flash/delay beyond just
+     * picking the right URL up front.
+     */
+    private fun preloadArtworkBitmap(artworkUrl: String) {
+        val loader = coil.Coil.imageLoader(context)
+        val request = coil.request.ImageRequest.Builder(context)
+            .data(artworkUrl)
+            .build()
+        loader.enqueue(request)
+    }
+
+    /** Warms Coil's cache for the previous and next queue items' current artwork (see [playIndex]). */
+    private fun preloadNeighborArtwork(index: Int) {
+        listOf(index - 1, index + 1).forEach { neighborIndex ->
+            queue.getOrNull(neighborIndex)?.artworkUri?.let { preloadArtworkBitmap(it) }
+        }
+    }
+
+    /**
+     * YouTube-style autoplay/radio (sections 13, 22): when the currently
+     * playing track is the last one in the queue and autoplay is enabled,
+     * fetch related tracks and append them so playback continues instead
+     * of just stopping. Only triggers for the LAST queue item, not every
+     * track, so it doesn't fight with a user who deliberately queued a
+     * short, finite list and wants it to end. Deduplicates against
+     * everything already in the queue so repeats don't pile up across
+     * multiple autoplay extensions in the same session.
+     */
+    private fun maybeExtendQueueWithRecommendations(justStarted: PlayableItem.YoutubeTrack) {
+        scope.launch {
+            if (!settingsRepository.autoplayEnabled.first()) return@launch
+            val indexOfItem = queue.indexOfFirst { it.id == justStarted.id && it.source == justStarted.source }
+            if (indexOfItem != queue.lastIndex) return@launch // not the last item; nothing to extend yet
+
+            try {
+                val related = newPipePlaybackProvider.getRelatedTracks(justStarted.id)
+                val existingIds = queue.map { it.id }.toSet()
+                val toAdd = related.filter { it.id !in existingIds }.take(MAX_AUTOPLAY_ADDITIONS)
+                if (toAdd.isEmpty()) return@launch
+
+                queue.addAll(toAdd)
+                _state.update { it.copy(queue = queue.toList()) }
+            } catch (_: Exception) {
+                // Autoplay extension is a nice-to-have; a failure here must
+                // never disrupt the track that's already playing (matches
+                // the same safety principle used for stream-resolution
+                // failures elsewhere in this class).
+            }
+        }
+    }
+
+    /**
+     * Returns an updated [PlayableItem.YoutubeTrack] with [betterArtworkUrl]
+     * applied, but only if [resolvedFor] is still the item currently
+     * playing (avoids clobbering a newer track's artwork with a stale
+     * resolve's result) and only if a non-blank URL was actually resolved.
+     */
+    private fun upgradeArtworkIfCurrent(
+        resolvedFor: PlayableItem.YoutubeTrack,
+        betterArtworkUrl: String?,
+    ): PlayableItem? {
+        val current = _state.value.currentItem
+        if (betterArtworkUrl.isNullOrBlank() || current?.id != resolvedFor.id || current !is PlayableItem.YoutubeTrack) {
+            return current
+        }
+        val updated = current.copy(artworkUri = betterArtworkUrl)
+        if (currentIndex in queue.indices) queue[currentIndex] = updated
+        return updated
+    }
+
+    private fun startMediaItem(item: PlayableItem, resolvedStreamUrl: String?) {
+        handledEnded = false
+        val mediaItem = PlayableItemMediaItemMapper.toMediaItem(item, resolvedStreamUrl)
+        controller?.apply {
+            setMediaItem(mediaItem)
+            prepare()
+            play()
+        }
+        scope.launch {
+            val speed = settingsRepository.playbackSpeed.first()
+            if (speed != 1.0f) controller?.setPlaybackParameters(androidx.media3.common.PlaybackParameters(speed))
+        }
+        scope.launch { maybeFadeIn() }
+    }
+
+    /** Sets playback speed (section 18), applied immediately to the live player. */
+    fun setPlaybackSpeed(speed: Float) {
+        controller?.setPlaybackParameters(androidx.media3.common.PlaybackParameters(speed))
+        scope.launch { settingsRepository.setPlaybackSpeed(speed) }
+    }
+
+    private suspend fun maybeFadeIn() {
+        if (settingsRepository.crossfadeDurationMs.first() <= 0) {
+            controller?.volume = 1f
+            return
+        }
+        val c = controller ?: return
+        val steps = 12
+        val stepDelay = FADE_STEP_MS
+        for (i in 0..steps) {
+            c.volume = i / steps.toFloat()
+            delay(stepDelay)
+        }
+        c.volume = 1f
+    }
+
+    private suspend fun fadeOutBeforeTransition() {
+        val fadeMs = settingsRepository.crossfadeDurationMs.first()
+        if (fadeMs <= 0) return
+        val c = controller ?: return
+        val steps = 12
+        val stepDelay = (fadeMs / steps).coerceAtLeast(10).toLong()
+        for (i in steps downTo 0) {
+            c.volume = i / steps.toFloat()
+            delay(stepDelay)
+        }
+    }
+
+    fun play() = controller?.play()
+
+    fun pause() = controller?.pause()
+
+    fun togglePlayPause() {
+        val c = controller ?: return
+        if (c.isPlaying) c.pause() else c.play()
+    }
+
+    fun seekTo(positionMs: Long) = controller?.seekTo(positionMs)
+
+    /** Advances to the next queue item, honoring shuffle/repeat (section 21). */
+    fun seekToNext() {
+        val next = nextIndex() ?: return
+        playIndex(next)
+    }
+
+    /** Returns to the previous queue item (section 21). */
+    fun seekToPrevious() {
+        val prev = previousIndex() ?: return
+        playIndex(prev)
+    }
+
+    private fun nextIndex(): Int? {
+        if (queue.isEmpty()) return null
+        val state = _state.value
+        return when {
+            state.repeatMode == RepeatMode.ONE -> currentIndex
+            state.shuffleEnabled -> queue.indices.filter { it != currentIndex }.randomOrNull() ?: currentIndex
+            currentIndex + 1 <= queue.lastIndex -> currentIndex + 1
+            state.repeatMode == RepeatMode.ALL -> 0
+            else -> null
+        }
+    }
+
+    private fun previousIndex(): Int? {
+        if (queue.isEmpty()) return null
+        val state = _state.value
+        return when {
+            state.shuffleEnabled -> queue.indices.filter { it != currentIndex }.randomOrNull() ?: currentIndex
+            currentIndex - 1 >= 0 -> currentIndex - 1
+            state.repeatMode == RepeatMode.ALL -> queue.lastIndex
+            else -> null
+        }
+    }
+
+    /**
+     * Whether [seekToNext] would actually do anything right now — used by
+     * [com.whiplash.music.playback.service.QueueAwareForwardingPlayer] to
+     * advertise real Next availability to the system (notification/lock
+     * screen/Bluetooth/OEM surfaces), since the underlying ExoPlayer's own
+     * single-item timeline can never express this (see that class's doc).
+     */
+    fun hasNext(): Boolean = nextIndex() != null
+
+    /** Whether [seekToPrevious] would actually do anything right now (see [hasNext]). */
+    fun hasPrevious(): Boolean = previousIndex() != null
+
+    fun setShuffleEnabled(enabled: Boolean) {
+        _state.update { it.copy(shuffleEnabled = enabled) }
+    }
+
+    fun setRepeatMode(mode: RepeatMode) {
+        _state.update { it.copy(repeatMode = mode) }
+    }
+
+    /**
+     * Sets or clears the sleep timer (section 60). [SleepTimerMode.Duration]
+     * counts down and pauses playback (gracefully — not an abrupt cut, see
+     * [fadeOutAndPauseForSleepTimer]) when it reaches zero. The two
+     * "end of" modes don't run a countdown at all; they're checked directly
+     * from the natural end-of-track path in [updatePositionTicker] instead,
+     * since they mean "the next natural stopping point" rather than a fixed
+     * time.
+     */
+    fun setSleepTimer(mode: SleepTimerMode?) {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+
+        if (mode == null) {
+            _state.update { it.copy(sleepTimer = null, sleepTimerRemainingMs = null) }
+            return
+        }
+
+        _state.update {
+            it.copy(
+                sleepTimer = mode,
+                sleepTimerRemainingMs = (mode as? SleepTimerMode.Duration)?.totalMs,
+            )
+        }
+
+        if (mode is SleepTimerMode.Duration) {
+            sleepTimerJob = scope.launch {
+                var remaining = mode.totalMs
+                while (remaining > 0) {
+                    delay(1000)
+                    remaining -= 1000
+                    _state.update { it.copy(sleepTimerRemainingMs = remaining.coerceAtLeast(0)) }
+                }
+                fadeOutAndPauseForSleepTimer()
+                _state.update { it.copy(sleepTimer = null, sleepTimerRemainingMs = null) }
+            }
+        }
+        // EndOfSong / EndOfQueue: no job to run here — handled reactively
+        // in updatePositionTicker when a track actually ends.
+    }
+
+    /** A graceful fade-to-silence rather than an abrupt stop, so the sleep timer doesn't jolt the listener awake. */
+    private suspend fun fadeOutAndPauseForSleepTimer() {
+        val c = controller ?: return
+        val steps = 20
+        for (i in steps downTo 0) {
+            c.volume = i / steps.toFloat()
+            delay(80)
+        }
+        c.pause()
+        c.volume = 1f
+    }
+
+    private fun refreshPositionAndDuration() {
+        val c = controller ?: return
+        _state.update { current ->
+            // Guard against a listener callback (onEvents/onMediaMetadataChanged
+            // fire on essentially every player change, including the pause()
+            // call at the top of playIndex()) reporting the OLD MediaItem's
+            // still-valid position/duration AFTER we've already reset them to
+            // 0 for the track that's about to play. Without this check, the
+            // reset in playIndex() could be immediately overwritten with
+            // stale values from the outgoing track before prepare() for the
+            // new one ever runs, which is exactly what made the seek bar
+            // appear to "wait" before resetting instead of resetting
+            // instantly when the track changed.
+            val controllerMediaId = c.currentMediaItem?.mediaId
+            val expectedMediaId = current.currentItem?.let { PlayableItemMediaItemMapper.mediaIdOf(it) }
+            if (controllerMediaId != null && expectedMediaId != null && controllerMediaId != expectedMediaId) {
+                return@update current
+            }
+            current.copy(
+                positionMs = c.currentPosition.coerceAtLeast(0),
+                durationMs = c.duration.coerceAtLeast(0),
+                isPlaying = c.isPlaying,
+            )
+        }
+    }
+
+    /**
+     * Position updates from Player.Listener alone only fire on discrete
+     * events (play/pause/seek/track change), which is not enough for a
+     * smoothly advancing progress bar. Poll every 500ms only while actually
+     * playing (section 64: avoid unnecessary work) and stop immediately on
+     * pause/stop. Also detects natural end-of-track to auto-advance the
+     * queue (section 13: autoplay) once ExoPlayer reports STATE_ENDED for a
+     * single-MediaItem player (we manage the queue ourselves rather than
+     * handing Media3 the whole playlist, since YouTube items need an async
+     * resolve Media3's playlist APIs can't express).
+     */
+    /**
+     * Called once, directly and immediately, when ExoPlayer reaches
+     * STATE_ENDED (see the [Player.Listener.onPlaybackStateChanged]
+     * override for why this must not depend on the polling ticker). Guards
+     * against double-handling via [handledEndedForItem], since both this
+     * direct callback and a stale/racing ticker iteration could otherwise
+     * observe the same STATE_ENDED and both try to advance the queue.
+     */
+    private fun handleTrackEnded() {
+        if (handledEnded) return
+        handledEnded = true
+
+        val c = controller ?: return
+        val timer = _state.value.sleepTimer
+        val atLastQueueItem = nextIndex() == null
+        when {
+            timer is SleepTimerMode.EndOfSong -> {
+                setSleepTimer(null)
+                c.pause()
+            }
+            timer is SleepTimerMode.EndOfQueue && atLastQueueItem -> {
+                setSleepTimer(null)
+                c.pause()
+            }
+            else -> seekToNext()
+        }
+    }
+
+    private fun updatePositionTicker(isPlaying: Boolean) {
+        positionTickerJob?.cancel()
+        if (!isPlaying) return
+        positionTickerJob = scope.launch {
+            var prefetchTriggered = false
+            var fadeOutTriggered = false
+            while (true) {
+                refreshPositionAndDuration()
+                val c = controller
+                if (c != null && c.playbackState == Player.STATE_ENDED) {
+                    // Safety net only: the direct onPlaybackStateChanged
+                    // callback (see handleTrackEnded) is the primary path
+                    // and fires immediately/reliably without this loop's
+                    // 500ms polling delay. handleTrackEnded is idempotent
+                    // (guarded by handledEndedForItem), so calling it here
+                    // too is harmless if it already ran.
+                    handleTrackEnded()
+                    return@launch
+                }
+                val state = _state.value
+                val remainingMs = state.durationMs - state.positionMs
+                if (!prefetchTriggered && state.durationMs > 0 && remainingMs in 0..PREFETCH_LEAD_MS) {
+                    prefetchTriggered = true
+                    // Safety-net re-trigger near the end of the track, in case
+                    // the queue changed after playback started (reorder/add)
+                    // and the neighbor prefetch done at track-start in
+                    // playIndex() is now stale. The normal case — where
+                    // nothing changed — is a harmless no-op here since
+                    // prefetched/artworkPreloadCache already have the right
+                    // entries from playIndex().
+                    prefetchNeighborStreamsAndArtwork(state.currentIndex)
+                }
+                val fadeMs = settingsRepository.crossfadeDurationMs.first()
+                if (!fadeOutTriggered && fadeMs > 0 && state.durationMs > 0 && remainingMs in 0..fadeMs.toLong()) {
+                    fadeOutTriggered = true
+                    launch { fadeOutBeforeTransition() }
+                }
+                delay(500)
+            }
+        }
+    }
+
+    private companion object {
+        /** Caps how many related tracks autoplay appends at once, to avoid an unbounded queue (section 22: "do not unexpectedly add enormous queues"). */
+        const val MAX_AUTOPLAY_ADDITIONS = 10
+
+        /** How far before track-end to start resolving the next stream (section 18: gapless). */
+        const val PREFETCH_LEAD_MS = 8_000L
+
+        /** Volume-ramp step interval for fade in/out (section 18). */
+        const val FADE_STEP_MS = 40L
+    }
+}
