@@ -46,6 +46,7 @@ fun PlayableItemsList(
     modifier: Modifier = Modifier,
     contentPadding: androidx.compose.foundation.layout.PaddingValues =
         androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
+    header: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
@@ -62,6 +63,17 @@ fun PlayableItemsList(
         verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
         contentPadding = contentPadding,
     ) {
+        // Rendered as the first lazy item (not a separate non-scrolling
+        // Column above this LazyColumn) so screens like Album/Artist
+        // detail — where the header includes large artwork — scroll as
+        // one continuous list. Splitting the header into its own
+        // non-scrolling container was the real cause of a reported bug:
+        // tall artwork could push the header+track list below the
+        // viewport with no way to scroll back up past it, since only the
+        // inner list (not the header above it) was ever scrollable.
+        if (header != null) {
+            item(key = "__header__") { header() }
+        }
         itemsIndexed(items, key = { _, item -> "${item.source}:${item.id}" }) { index, item ->
             GlassListItem(
                 title = item.title,

@@ -50,6 +50,7 @@ fun AlbumDetailScreen(
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: AlbumDetailViewModel = viewModel(
+        key = "album:$url",
         factory = AlbumDetailViewModelFactory(app.youtubeDetailProvider, url),
     )
     val state by viewModel.state.collectAsState()
@@ -95,63 +96,87 @@ private fun AlbumDetailContent(
     detail: com.whiplash.music.domain.model.YoutubePlaylistDetail,
     onPlayQueue: (List<PlayableItem>, Int) -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = GlassTokens.spaceMd),
-    ) {
+    if (detail.tracks.isEmpty()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            AlbumDetailHeader(detail, onPlayQueue)
+            Text(
+                text = "No tracks found for this album.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = WhiplashColors.textSecondary,
+            )
+        }
+        return
+    }
+
+    // The header (artwork/title/Play/Shuffle) is rendered as the first
+    // item of this same LazyColumn — not a separate non-scrolling Column
+    // above it — so the whole screen scrolls together. Previously the
+    // header lived outside the list, and the artwork's aspectRatio(1f)
+    // box (as tall as the screen is wide) could push the track list below
+    // the viewport with no way to scroll back up past it — reported as
+    // "album art stuck on screen, not scrolling."
+    PlayableItemsList(
+        items = detail.tracks,
+        onPlayQueue = onPlayQueue,
+        modifier = Modifier.fillMaxSize(),
+        header = { AlbumDetailHeader(detail, onPlayQueue) },
+    )
+}
+
+@androidx.compose.material3.ExperimentalMaterial3Api
+@Composable
+private fun AlbumDetailHeader(
+    detail: com.whiplash.music.domain.model.YoutubePlaylistDetail,
+    onPlayQueue: (List<PlayableItem>, Int) -> Unit,
+) {
+    Column {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(WhiplashRadius.extraLarge))
-                .background(WhiplashColors.surfaceElevated),
+                .padding(vertical = GlassTokens.spaceMd),
         ) {
-            if (detail.artworkUrl != null) {
-                val context = LocalContext.current
-                AsyncImage(
-                    model = ImageRequest.Builder(context).data(detail.artworkUrl).crossfade(true).build(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(WhiplashRadius.extraLarge))
+                    .background(WhiplashColors.surfaceElevated),
+            ) {
+                if (detail.artworkUrl != null) {
+                    val context = LocalContext.current
+                    AsyncImage(
+                        model = ImageRequest.Builder(context).data(detail.artworkUrl).crossfade(true).build(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
-    }
 
-    Text(
-        text = detail.title,
-        style = MaterialTheme.typography.headlineSmall,
-        color = WhiplashColors.textPrimary,
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
-    )
-    detail.uploaderName?.let {
         Text(
-            text = it,
-            style = MaterialTheme.typography.bodyMedium,
-            color = WhiplashColors.textSecondary,
+            text = detail.title,
+            style = MaterialTheme.typography.headlineSmall,
+            color = WhiplashColors.textPrimary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
-    }
-
-    androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
-
-    if (detail.tracks.isNotEmpty()) {
-        Row(horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
-            GlassButton(text = "Play", onClick = { onPlayQueue(detail.tracks, 0) })
-            GlassButton(text = "Shuffle", onClick = { onPlayQueue(detail.tracks.shuffled(), 0) })
+        detail.uploaderName?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = WhiplashColors.textSecondary,
+            )
         }
+
         androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
-        PlayableItemsList(
-            items = detail.tracks,
-            onPlayQueue = onPlayQueue,
-            modifier = Modifier.fillMaxSize(),
-        )
-    } else {
-        Text(
-            text = "No tracks found for this album.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = WhiplashColors.textSecondary,
-        )
+
+        if (detail.tracks.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+                GlassButton(text = "Play", onClick = { onPlayQueue(detail.tracks, 0) })
+                GlassButton(text = "Shuffle", onClick = { onPlayQueue(detail.tracks.shuffled(), 0) })
+            }
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
+        }
     }
 }

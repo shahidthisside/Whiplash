@@ -62,6 +62,7 @@ fun ArtistDetailScreen(
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: ArtistDetailViewModel = viewModel(
+        key = "artist:$channelUrl",
         factory = ArtistDetailViewModelFactory(app.youtubeDetailProvider, channelUrl),
     )
     val state by viewModel.state.collectAsState()
