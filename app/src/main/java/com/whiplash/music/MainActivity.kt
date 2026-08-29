@@ -77,10 +77,41 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        requestHighestRefreshRate()
         setContent {
             WhiplashTheme {
                 WhiplashApp()
             }
+        }
+    }
+
+    /**
+     * Requests the display's highest available refresh rate for this
+     * window (e.g. 90Hz/120Hz on devices that support it), rather than
+     * silently running at whatever the OS's conservative power-saving
+     * default is. Without this, some OEM skins keep an app's window at
+     * 60Hz even on a 120Hz-capable device/display, which reads as visible
+     * choppiness compared to apps that explicitly opt in — this was a
+     * real, user-reported issue ("app feels choppy... not adapting to my
+     * phone's 120Hz refresh rate"), not a misperception: Compose's own
+     * animations only ever run as smoothly as the surface they're
+     * composited onto is actually being refreshed.
+     *
+     * Only compares modes at the CURRENT resolution (never requests a
+     * mode that would also change resolution) and picks whichever has the
+     * highest refreshRate among those — the standard, documented pattern
+     * for this API. The system is still free to override this at its own
+     * discretion (e.g. low battery, thermal throttling), per Android's
+     * own refresh-rate documentation.
+     */
+    private fun requestHighestRefreshRate() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val currentMode = window.windowManager.defaultDisplay.mode
+        val bestMode = window.windowManager.defaultDisplay.supportedModes
+            .filter { it.physicalWidth == currentMode.physicalWidth && it.physicalHeight == currentMode.physicalHeight }
+            .maxByOrNull { it.refreshRate }
+        if (bestMode != null && bestMode.refreshRate > currentMode.refreshRate) {
+            window.attributes = window.attributes.apply { preferredDisplayModeId = bestMode.modeId }
         }
     }
 }
@@ -98,6 +129,43 @@ private enum class AppTab(val label: String) {
 private sealed interface SearchDestination {
     data class Album(val url: String) : SearchDestination
     data class Artist(val channelUrl: String) : SearchDestination
+}
+
+/**
+ * Hosts [GlassMiniPlayer] with its own independent [PlaybackController]
+ * state collection, rather than reading that state in [WhiplashApp]'s own
+ * body. [com.whiplash.music.playback.controller.PlaybackState] updates
+ * every ~500ms while a track is playing (the position ticker, for a
+ * smoothly advancing progress bar) — reading it directly in a composable
+ * as broad as [WhiplashApp] put its entire tab-switching content and
+ * bottom nav in the same recomposition scope as that tick, a real,
+ * measurable contributor to reported UI choppiness during playback.
+ * Scoping the collection to this small leaf composable keeps that
+ * recomposition work contained to just the mini-player itself.
+ */
+@Composable
+private fun MiniPlayerHost(
+    playerViewModel: PlayerViewModel,
+    onExpand: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val state by playerViewModel.state.collectAsState()
+    val currentItem = state.currentItem ?: return
+    GlassMiniPlayer(
+        title = currentItem.title,
+        artist = currentItem.artist,
+        artworkUri = currentItem.artworkUri,
+        isPlaying = state.isPlaying,
+        isBuffering = state.isBuffering || state.isResolvingStream,
+        progressFraction = if (state.durationMs > 0) {
+            state.positionMs.toFloat() / state.durationMs.toFloat()
+        } else 0f,
+        onTogglePlayPause = playerViewModel::togglePlayPause,
+        onExpand = onExpand,
+        onPrevious = playerViewModel::seekToPrevious,
+        onNext = playerViewModel::seekToNext,
+        modifier = modifier,
+    )
 }
 
 @androidx.compose.material3.ExperimentalMaterial3Api
@@ -233,26 +301,24 @@ private fun WhiplashApp() {
 
                     // Mini-player pinned to the bottom of the content area,
                     // above the bottom nav bar, visible whenever there is a
-                    // current item.
-                    if (playbackState.currentItem != null) {
-                        GlassMiniPlayer(
-                            title = playbackState.currentItem?.title.orEmpty(),
-                            artist = playbackState.currentItem?.artist.orEmpty(),
-                            artworkUri = playbackState.currentItem?.artworkUri,
-                            isPlaying = playbackState.isPlaying,
-                            isBuffering = playbackState.isBuffering || playbackState.isResolvingStream,
-                            progressFraction = if (playbackState.durationMs > 0) {
-                                playbackState.positionMs.toFloat() / playbackState.durationMs.toFloat()
-                            } else 0f,
-                            onTogglePlayPause = playerViewModel::togglePlayPause,
-                            onExpand = { isPlayerExpanded = true },
-                            onPrevious = playerViewModel::seekToPrevious,
-                            onNext = playerViewModel::seekToNext,
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(GlassTokens.spaceMd),
-                        )
-                    }
+                    // current item. Extracted into its own composable that
+                    // collects playback state independently (see
+                    // MiniPlayerHost's doc) so the 500ms position-tick
+                    // recomposition this state produces during playback
+                    // stays scoped to this one leaf, instead of being read
+                    // directly in WhiplashApp()'s own body — where it would
+                    // put the entire tab-switching Box (Home/Search/Library/
+                    // etc., whichever is currently selected) in the same
+                    // recomposition scope, a real, measurable contributor to
+                    // "choppy" scrolling/interaction while a song is
+                    // playing, reported by a user on a 120Hz device.
+                    MiniPlayerHost(
+                        playerViewModel = playerViewModel,
+                        onExpand = { isPlayerExpanded = true },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(GlassTokens.spaceMd),
+                    )
                 }
 
                 GlassBottomBar(
