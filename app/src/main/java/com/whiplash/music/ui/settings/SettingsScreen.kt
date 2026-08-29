@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.whiplash.music.WhiplashApplication
 import com.whiplash.music.domain.model.AudioQuality
+import com.whiplash.music.ui.theme.GlassButton
 import com.whiplash.music.ui.theme.GlassCard
 import com.whiplash.music.ui.theme.GlassTokens
 import com.whiplash.music.ui.theme.ThemeVariant
@@ -61,7 +62,7 @@ import androidx.compose.foundation.clickable
 fun SettingsScreen() {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
-    val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository))
+    val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository, app.audioCacheManager))
 
     val audioQuality by viewModel.audioQuality.collectAsState()
     val autoplayEnabled by viewModel.autoplayEnabled.collectAsState()
@@ -69,6 +70,19 @@ fun SettingsScreen() {
     val crossfadeDurationMs by viewModel.crossfadeDurationMs.collectAsState()
     val playbackSpeed by viewModel.playbackSpeed.collectAsState()
     val themeVariant by viewModel.themeVariant.collectAsState()
+    val audioCacheEnabled by viewModel.audioCacheEnabled.collectAsState()
+    val cacheSizeBytes by viewModel.cacheSizeBytes.collectAsState()
+
+    // The ViewModel is scoped to the Activity (no navigation-graph store
+    // separation for this simple tab structure), so its init{} only runs
+    // once ever — but this composable itself leaves and re-enters
+    // composition every time the user switches away from and back to the
+    // Settings tab, so re-checking here keeps the displayed size accurate
+    // after playing more tracks or clearing the cache elsewhere, without
+    // needing a continuous poll while the screen isn't even visible.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.refreshCacheSize()
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd),
@@ -145,6 +159,48 @@ fun SettingsScreen() {
         }
 
         item {
+            SectionLabel("Storage")
+            Spacer(Modifier.height(GlassTokens.spaceSm))
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceLg)) {
+                    // --- Audio cache toggle ---
+                    SettingToggleRow(
+                        title = "Cache Songs",
+                        subtitle = "Store recently played songs on this device so they start instantly next time, instead of streaming again. Off frees up storage but replays always re-download.",
+                        checked = audioCacheEnabled,
+                        onCheckedChange = viewModel::setAudioCacheEnabled,
+                    )
+
+                    Divider()
+
+                    // --- Cache size + clear ---
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        SettingRow(
+                            title = "Cached data",
+                            subtitle = formatCacheSize(cacheSizeBytes),
+                        )
+                        GlassButton(
+                            text = "Clear cache",
+                            onClick = viewModel::clearCache,
+                            // Bright/pressable only when there's actually
+                            // something to clear — GlassButton's own
+                            // enabled=false state already fades it out via
+                            // GlassTokens.opacityDisabled, giving a real
+                            // "not currently actionable" affordance instead
+                            // of a button that always looks clickable but
+                            // silently does nothing when the cache is empty.
+                            enabled = cacheSizeBytes > 0L,
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
             SectionLabel("Appearance")
             Spacer(Modifier.height(GlassTokens.spaceSm))
             GlassCard(modifier = Modifier.fillMaxWidth()) {
@@ -170,6 +226,13 @@ private fun SectionLabel(text: String) {
         style = MaterialTheme.typography.titleMedium,
         color = WhiplashColors.textPrimary,
     )
+}
+
+/** Real cached-bytes size formatted for display (e.g. "42.3 MB"), matching Spotify's own storage settings pattern. */
+private fun formatCacheSize(bytes: Long): String {
+    if (bytes <= 0L) return "No cached songs yet."
+    val mb = bytes / (1024.0 * 1024.0)
+    return if (mb >= 1024.0) "%.1f GB used".format(mb / 1024.0) else "%.1f MB used".format(mb)
 }
 
 @Composable

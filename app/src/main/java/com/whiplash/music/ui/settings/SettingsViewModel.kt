@@ -4,14 +4,21 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.whiplash.music.data.repository.SettingsRepository
 import com.whiplash.music.domain.model.AudioQuality
+import com.whiplash.music.playback.cache.AudioCacheManager
 import com.whiplash.music.ui.theme.ThemeVariant
 import com.whiplash.music.ui.theme.WhiplashColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-class SettingsViewModel(private val repository: SettingsRepository) : ViewModel() {
+class SettingsViewModel(
+    private val repository: SettingsRepository,
+    private val cacheManager: AudioCacheManager,
+) : ViewModel() {
 
     val audioQuality: StateFlow<AudioQuality> = repository.audioQuality
         .stateIn(viewModelScope, SharingStarted.Eagerly, AudioQuality.AUTO)
@@ -30,6 +37,36 @@ class SettingsViewModel(private val repository: SettingsRepository) : ViewModel(
 
     val themeVariant: StateFlow<ThemeVariant> = repository.themeVariant
         .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeVariant.CLASSIC)
+
+    /** Whether resolved YouTube streams are cached to disk (see SettingsRepository.audioCacheEnabled doc). */
+    val audioCacheEnabled: StateFlow<Boolean> = repository.audioCacheEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    /** Real current on-disk cache size, refreshed on load and after Clear cache — not an estimate. */
+    private val _cacheSizeBytes = MutableStateFlow(0L)
+    val cacheSizeBytes: StateFlow<Long> = _cacheSizeBytes
+
+    init {
+        refreshCacheSize()
+    }
+
+    fun refreshCacheSize() {
+        viewModelScope.launch {
+            _cacheSizeBytes.value = withContext(Dispatchers.IO) { cacheManager.currentCacheSizeBytes() }
+        }
+    }
+
+    fun setAudioCacheEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setAudioCacheEnabled(enabled) }
+    }
+
+    /** Real "Clear cache" action (same as Spotify's Storage settings) — deletes every cached byte on disk. */
+    fun clearCache() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { cacheManager.clearCache() }
+            refreshCacheSize()
+        }
+    }
 
     // Theme application to the live WhiplashColors state now happens
     // eagerly at true app startup (see WhiplashApplication.onCreate) so

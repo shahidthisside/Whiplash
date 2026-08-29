@@ -43,11 +43,23 @@ fun GlassButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
+    // opacityElevated (0.65) — the same value used for elevated card
+    // surfaces — reads as a plain mid-gray for a light accent color like
+    // Classic Graphite's cream (visually confirmed via a real on-device
+    // pixel sample: (155,154,149), nearly identical to the math for 0.65
+    // alpha over black, and clearly NOT distinguishable from the disabled
+    // state at 0.38 alpha the way a toggle switch's fully-opaque knob is).
+    // A primary action button (Play/Shuffle/Retry/Clear cache) needs to
+    // read as genuinely solid/bright, matching how real apps render their
+    // primary pill buttons — so this uses a much higher, near-opaque
+    // value specifically for GlassButton's enabled state, while still
+    // keeping GlassTokens.opacityDisabled for the real "not currently
+    // actionable" affordance.
     val opacity by animateFloatAsState(
         targetValue = when {
             !enabled -> GlassTokens.opacityDisabled
-            pressed -> GlassTokens.opacityElevated + GlassTokens.opacityPressedDelta
-            else -> GlassTokens.opacityElevated
+            pressed -> 0.92f
+            else -> 1.0f
         },
         animationSpec = tween(GlassTokens.animFast),
         label = "glassButtonOpacity",
