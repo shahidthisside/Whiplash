@@ -39,6 +39,10 @@ class WhiplashApplication : Application() {
 
     val settingsRepository: SettingsRepository by lazy { SettingsRepository(this) }
 
+    val audioCacheManager: com.whiplash.music.playback.cache.AudioCacheManager by lazy {
+        com.whiplash.music.playback.cache.AudioCacheManager(this)
+    }
+
     val libraryRepository: LibraryRepository by lazy {
         LibraryRepository(
             historyDao = database.historyDao(),

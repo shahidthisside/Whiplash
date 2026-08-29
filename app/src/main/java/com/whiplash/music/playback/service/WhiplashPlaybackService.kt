@@ -3,10 +3,18 @@ package com.whiplash.music.playback.service
 import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.whiplash.music.WhiplashApplication
+import com.whiplash.music.playback.cache.TogglableCacheDataSourceFactory
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 
 /**
  * Owns the single [ExoPlayer] instance and [MediaSession] for the app.
@@ -20,9 +28,30 @@ import com.whiplash.music.WhiplashApplication
 class WhiplashPlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
+    private val serviceScope = CoroutineScope(Dispatchers.Main.immediate + Job())
+
+    /**
+     * Live-updating flag read by [TogglableCacheDataSourceFactory] on every
+     * new data source request, kept in sync with the real Settings toggle
+     * below (see the collector in [onCreate]) — not read once at startup,
+     * since the user can flip the setting while a track is already
+     * playing and the very next track (or the next chunk of the current
+     * one, once ExoPlayer's internal loader opens a fresh DataSource)
+     * should immediately reflect the change.
+     */
+    @Volatile
+    private var audioCacheEnabled = true
 
     override fun onCreate() {
         super.onCreate()
+        val app = application as WhiplashApplication
+
+        val cachingFactory = TogglableCacheDataSourceFactory(
+            cacheManager = app.audioCacheManager,
+            plainFactory = DefaultDataSource.Factory(this),
+            isCacheEnabled = { audioCacheEnabled },
+        )
+
         val player = ExoPlayer.Builder(this)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -33,7 +62,19 @@ class WhiplashPlaybackService : MediaSessionService() {
             )
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
+            // Real on-disk streaming cache (section: audio caching) — a
+            // resolved YouTube stream that was already played is served
+            // from disk on a replay instead of re-fetching over the
+            // network, the same behavior Spotify/YouTube Music's own
+            // caches provide. Toggle lives in Settings and is respected
+            // live via the collector below, not just at player-construction
+            // time.
+            .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(cachingFactory))
             .build()
+
+        app.settingsRepository.audioCacheEnabled
+            .onEach { audioCacheEnabled = it }
+            .launchIn(serviceScope)
 
         // Wrap the raw player so the system (notification/lock screen/
         // Bluetooth/OEM "island" surfaces) sees real Next/Previous
@@ -48,7 +89,7 @@ class WhiplashPlaybackService : MediaSessionService() {
         // custom listener-wrapping scheme (an earlier attempt at that
         // broke notification posting entirely on-device, so it was
         // reverted in favor of this simpler, verified-working approach).
-        val playbackController = (application as WhiplashApplication).playbackController
+        val playbackController = app.playbackController
         val forwardingPlayer = QueueAwareForwardingPlayer(player, playbackController)
 
         mediaSession = MediaSession.Builder(this, forwardingPlayer)
@@ -72,6 +113,7 @@ class WhiplashPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        serviceScope.coroutineContext[Job]?.cancel()
         mediaSession?.run {
             player.release()
             release()

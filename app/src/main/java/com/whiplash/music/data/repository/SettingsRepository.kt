@@ -80,6 +80,21 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[SPEED_KEY] = speed }
     }
 
+    /**
+     * Whether resolved YouTube audio streams are cached to disk so a
+     * replayed track starts instantly without a fresh network fetch —
+     * the same behavior Spotify/YouTube Music's own streaming cache
+     * provides (bounded size, oldest-unused-first eviction; never
+     * presented as an offline "download"). Defaults on, matching how
+     * every comparable app ships this by default; the user can turn it
+     * off entirely if they'd rather avoid the disk usage.
+     */
+    val audioCacheEnabled: Flow<Boolean> = dataStore.data.map { prefs -> prefs[AUDIO_CACHE_ENABLED_KEY] ?: true }
+
+    suspend fun setAudioCacheEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[AUDIO_CACHE_ENABLED_KEY] = enabled }
+    }
+
     private companion object {
         val AUDIO_QUALITY_KEY: Preferences.Key<String> = stringPreferencesKey("audio_quality")
         val AUTOPLAY_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("autoplay_enabled")
@@ -87,5 +102,6 @@ class SettingsRepository(context: Context) {
         val CROSSFADE_KEY: Preferences.Key<Int> = intPreferencesKey("crossfade_duration_ms")
         val GAPLESS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("gapless_enabled")
         val SPEED_KEY: Preferences.Key<Float> = floatPreferencesKey("playback_speed")
+        val AUDIO_CACHE_ENABLED_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("audio_cache_enabled")
     }
 }

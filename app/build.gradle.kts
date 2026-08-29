@@ -75,6 +75,7 @@ dependencies {
     implementation(libs.media3.session)
     implementation(libs.media3.common)
     implementation(libs.media3.datasource)
+    implementation(libs.media3.database)
 
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
