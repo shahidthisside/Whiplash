@@ -90,9 +90,36 @@ fun PlayableItemsList(
     // onLoadMore != null so callers that don't opt into pagination (every
     // existing caller) never even install this effect.
     if (onLoadMore != null) {
-        LaunchedEffect(listState, items.size) {
-            snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
-                .collect { lastVisibleIndex ->
+        // Keyed on listState alone — NOT on items.size. Restarting this
+        // LaunchedEffect every time a new page was appended (the
+        // previous version keyed on items.size too) tore down and
+        // recreated the snapshotFlow collector at exactly the moment new
+        // items were being inserted — the single highest-risk instant
+        // for a stutter during a fast fling, and part of a reported bug:
+        // scrolling fast made the list appear to freeze at the last
+        // loaded item even after more items had actually finished
+        // loading underneath.
+        LaunchedEffect(listState) {
+            // The snapshotFlow block itself reads lastVisibleIndex,
+            // isLoadingMore, AND items.size — not just lastVisibleIndex —
+            // so it re-emits whenever any of the three changes, not only
+            // on a fresh scroll delta. This closes the other half of the
+            // same reported bug: if the last visible item's index happens
+            // to stay the same while a fast fling is settled right at the
+            // threshold (a common outcome of a fling that overshoots and
+            // rests exactly there), the previous version — which only
+            // read lastVisibleIndex inside the tracked block — would
+            // never re-check once isLoadingMore cleared, since nothing
+            // it was actually tracking as a snapshot read had changed.
+            // The list only "unstuck" on the next slow scroll because
+            // that produced a genuinely new lastVisibleIndex value. Now a
+            // page finishing loading (isLoadingMore flipping true->false)
+            // or new items landing (items.size changing) is itself enough
+            // to re-run the check and fire onLoadMore() again if still
+            // within range, with no scroll gesture required in between.
+            snapshotFlow {
+                Triple(listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index, isLoadingMore, items.size)
+            }.collect { (lastVisibleIndex, currentlyLoadingMore, _) ->
                     if (lastVisibleIndex == null) return@collect
                     // Account for the optional header occupying index 0
                     // and the loading-footer item at the very end — both
@@ -101,7 +128,7 @@ fun PlayableItemsList(
                     // own last index, offset by whether a header exists.
                     val headerOffset = if (header != null) 1 else 0
                     val lastItemIndex = headerOffset + items.lastIndex
-                    if (!isLoadingMore && lastVisibleIndex >= lastItemIndex - LOAD_MORE_THRESHOLD) {
+                    if (!currentlyLoadingMore && lastVisibleIndex >= lastItemIndex - LOAD_MORE_THRESHOLD) {
                         onLoadMore()
                     }
                 }

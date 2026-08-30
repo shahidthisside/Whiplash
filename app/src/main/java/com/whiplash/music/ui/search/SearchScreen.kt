@@ -287,14 +287,15 @@ private fun PlaylistResultsList(
         return
     }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    androidx.compose.runtime.LaunchedEffect(listState, items.size) {
-        androidx.compose.runtime.snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
-            .collect { lastVisibleIndex ->
-                if (lastVisibleIndex != null && !isLoadingMore && lastVisibleIndex >= items.lastIndex - LOAD_MORE_THRESHOLD) {
-                    onLoadMore()
+    androidx.compose.runtime.LaunchedEffect(listState) {
+            androidx.compose.runtime.snapshotFlow {
+                Triple(listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index, isLoadingMore, items.size)
+            }.collect { (lastVisibleIndex, currentlyLoadingMore, _) ->
+                    if (lastVisibleIndex != null && !currentlyLoadingMore && lastVisibleIndex >= items.lastIndex - LOAD_MORE_THRESHOLD) {
+                        onLoadMore()
+                    }
                 }
-            }
-    }
+        }
     LazyColumn(
         state = listState,
         verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
@@ -355,14 +356,15 @@ private fun ArtistResultsList(
         return
     }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    androidx.compose.runtime.LaunchedEffect(listState, items.size) {
-        androidx.compose.runtime.snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
-            .collect { lastVisibleIndex ->
-                if (lastVisibleIndex != null && !isLoadingMore && lastVisibleIndex >= items.lastIndex - LOAD_MORE_THRESHOLD) {
-                    onLoadMore()
+    androidx.compose.runtime.LaunchedEffect(listState) {
+            androidx.compose.runtime.snapshotFlow {
+                Triple(listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index, isLoadingMore, items.size)
+            }.collect { (lastVisibleIndex, currentlyLoadingMore, _) ->
+                    if (lastVisibleIndex != null && !currentlyLoadingMore && lastVisibleIndex >= items.lastIndex - LOAD_MORE_THRESHOLD) {
+                        onLoadMore()
+                    }
                 }
-            }
-    }
+        }
     LazyColumn(
         state = listState,
         verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
