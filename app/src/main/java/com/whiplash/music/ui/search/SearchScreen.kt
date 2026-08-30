@@ -125,7 +125,22 @@ fun SearchScreen(
         androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
 
         when {
-            !state.hasSearched && state.query.isBlank() -> IdleState(
+            // A blank query always means idle/recent-searches, full stop —
+            // this must not depend on hasSearched. hasSearched only ever
+            // gets reset to false at the very top of onQueryChanged's
+            // blank-query branch, but that ViewModel state update and this
+            // screen's recomposition are not guaranteed to always land in
+            // the same frame as query itself clearing (e.g. a completed
+            // search leaves hasSearched=true, and if any downstream state
+            // update lands a moment after the blank-query reset — real,
+            // reproducible with a fast clear right as background
+            // albums/artists lookups are still in flight — hasSearched
+            // could still read true here). The previous `&&`-based check
+            // required both conditions to flip in perfect lockstep, so a
+            // cleared search bar could fall through to "No results found"
+            // instead of the idle/recent-searches state — a real, reported
+            // bug, not just a theoretical edge case.
+            state.query.isBlank() -> IdleState(
                 recentSearches = recentSearches,
                 onSuggestionTap = viewModel::onQueryChanged,
                 onRemoveRecentSearch = viewModel::removeRecentSearch,
@@ -488,13 +503,11 @@ private val SEARCH_SUGGESTIONS = listOf("Coldplay", "Lofi beats", "Top hits 2026
 @Composable
 private fun NoResultsState() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        GlassCard {
-            Text(
-                text = "No results found",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
+        Text(
+            text = "No results found",
+            style = MaterialTheme.typography.titleMedium,
+            color = WhiplashColors.textSecondary,
+        )
     }
 }
 
