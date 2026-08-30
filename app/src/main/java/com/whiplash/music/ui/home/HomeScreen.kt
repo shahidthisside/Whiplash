@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -118,11 +120,10 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
 
         if (quickPicks.isNotEmpty() || isLoadingQuickPicks) {
             item {
-                Text(
-                    text = "Quick Picks",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = WhiplashColors.textPrimary,
-                    modifier = Modifier.padding(top = GlassTokens.spaceMd, bottom = GlassTokens.spaceXs),
+                SectionHeader(
+                    title = "Quick Picks",
+                    onRefresh = { viewModel.loadQuickPicks() },
+                    isRefreshing = isLoadingQuickPicks,
                 )
             }
             if (isLoadingQuickPicks && quickPicks.isEmpty()) {
@@ -325,7 +326,13 @@ private fun SpeedDialTile(
 }
 
 @Composable
-private fun SectionHeader(title: String, onHistory: (() -> Unit)? = null, onClear: () -> Unit) {
+private fun SectionHeader(
+    title: String,
+    onHistory: (() -> Unit)? = null,
+    onRefresh: (() -> Unit)? = null,
+    isRefreshing: Boolean = false,
+    onClear: (() -> Unit)? = null,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = GlassTokens.spaceSm, bottom = GlassTokens.spaceXs),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -346,12 +353,42 @@ private fun SectionHeader(title: String, onHistory: (() -> Unit)? = null, onClea
                     )
                 }
             }
-            PlainIconButton(contentDescription = "Clear $title", onClick = onClear, size = 40.dp) {
-                androidx.compose.material3.Icon(
-                    Icons.Filled.Close,
-                    contentDescription = null,
-                    tint = WhiplashColors.textSecondary,
-                )
+            if (onRefresh != null) {
+                // Swaps the static refresh icon for a real spinner while
+                // a refresh is actually in flight, so tapping it gives
+                // visible feedback that something is happening rather
+                // than looking like a no-op — and disables the button
+                // meanwhile so a second tap can't stack another reload
+                // on top of the one already running.
+                PlainIconButton(
+                    contentDescription = if (isRefreshing) "Refreshing $title" else "Refresh $title",
+                    onClick = onRefresh,
+                    size = 40.dp,
+                    enabled = !isRefreshing,
+                ) {
+                    if (isRefreshing) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            color = WhiplashColors.accent,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    } else {
+                        androidx.compose.material3.Icon(
+                            Icons.Filled.Refresh,
+                            contentDescription = null,
+                            tint = WhiplashColors.textSecondary,
+                        )
+                    }
+                }
+            }
+            if (onClear != null) {
+                PlainIconButton(contentDescription = "Clear $title", onClick = onClear, size = 40.dp) {
+                    androidx.compose.material3.Icon(
+                        Icons.Filled.Close,
+                        contentDescription = null,
+                        tint = WhiplashColors.textSecondary,
+                    )
+                }
             }
         }
     }
