@@ -258,24 +258,30 @@ private fun PermissionRequestState(
     onOpenSettings: () -> Unit,
 ) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        GlassCard {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "Music permission needed",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = "Whiplash needs access to your device's audio files to show your local music library.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
-                GlassButton(
-                    text = if (permanentlyDenied) "Open Settings" else "Grant Access",
-                    onClick = if (permanentlyDenied) onOpenSettings else onRequestPermission,
-                )
-            }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(GlassTokens.spaceLg),
+        ) {
+            Text(
+                text = "Music permission needed",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
+            Text(
+                text = "Whiplash needs access to your device's audio files to show your local music library.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
+            GlassButton(
+                text = if (permanentlyDenied) "Open Settings" else "Grant Access",
+                onClick = if (permanentlyDenied) onOpenSettings else onRequestPermission,
+            )
         }
     }
 }
