@@ -3,6 +3,7 @@ package com.whiplash.music.ui.artist
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.whiplash.music.domain.model.YoutubeArtistDetail
+import com.whiplash.music.domain.model.toUserFacingMessage
 import com.whiplash.music.playback.provider.newpipe.YoutubeDetailProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,7 +33,7 @@ class ArtistDetailViewModel(
             try {
                 _state.value = ArtistDetailUiState.Loaded(detailProvider.getArtistDetail(channelUrl))
             } catch (e: Exception) {
-                _state.value = ArtistDetailUiState.Error(e.message ?: "Couldn't load this artist")
+                _state.value = ArtistDetailUiState.Error(e.toUserFacingMessage("Couldn't load this artist"))
             }
         }
     }

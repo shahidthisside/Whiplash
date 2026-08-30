@@ -6,6 +6,7 @@ import com.whiplash.music.data.repository.YoutubeSearchRepository
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.domain.model.YoutubeArtistResult
 import com.whiplash.music.domain.model.YoutubePlaylistResult
+import com.whiplash.music.domain.model.toUserFacingMessage
 import com.whiplash.music.playback.provider.ProviderFailure
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -80,7 +81,7 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
                 val fresh = repository.search(query)
                 _state.update { it.copy(results = fresh) }
             } catch (failure: ProviderFailure) {
-                songsError = failure.message ?: "Search failed"
+                songsError = failure.toUserFacingMessage("Search failed")
             }
 
             // Albums/playlists/artists are independent, best-effort lookups:

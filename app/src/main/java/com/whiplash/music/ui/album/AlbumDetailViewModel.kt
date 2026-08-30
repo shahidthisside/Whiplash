@@ -3,6 +3,7 @@ package com.whiplash.music.ui.album
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.whiplash.music.domain.model.YoutubePlaylistDetail
+import com.whiplash.music.domain.model.toUserFacingMessage
 import com.whiplash.music.playback.provider.newpipe.YoutubeDetailProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,7 +33,7 @@ class AlbumDetailViewModel(
             try {
                 _state.value = AlbumDetailUiState.Loaded(detailProvider.getPlaylistDetail(url))
             } catch (e: Exception) {
-                _state.value = AlbumDetailUiState.Error(e.message ?: "Couldn't load this album")
+                _state.value = AlbumDetailUiState.Error(e.toUserFacingMessage("Couldn't load this album"))
             }
         }
     }
