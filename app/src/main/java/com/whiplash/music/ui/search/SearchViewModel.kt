@@ -70,8 +70,40 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
     val recentSearches: StateFlow<List<String>> =
         repository.recentSearches.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /**
+     * Real trending-artist names for the idle screen's "Try searching"
+     * chips — NewPipeExtractor has no actual trending-artists API (same
+     * documented gap as HomeViewModel's Quick Picks: YouTube itself has
+     * no general Trending kiosk since July 2025, and nothing artist-
+     * specific ever existed), so this uses two genuine YouTube Music
+     * artist searches (one India-focused, one global) as a real,
+     * honestly-sourced proxy — exactly the same pattern already
+     * established for Quick Picks, not a new kind of shortcut. Falls
+     * back to a small set of well-known evergreen names (never fake data
+     * — just not live-refreshed) if the live fetch fails or returns too
+     * few usable results, so the idle screen is never left broken.
+     */
+    private val _trendingArtists = MutableStateFlow(FALLBACK_TRENDING_ARTISTS)
+    val trendingArtists: StateFlow<List<String>> = _trendingArtists
+
     private var searchJob: Job? = null
     private var suggestionsJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            val india = runCatching { repository.searchArtists(TRENDING_ARTISTS_INDIA_QUERY) }.getOrDefault(emptyList())
+            val global = runCatching { repository.searchArtists(TRENDING_ARTISTS_GLOBAL_QUERY) }.getOrDefault(emptyList())
+            val combined = (india.take(3) + global.take(3))
+                .map { it.name }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .take(5)
+            // Fewer than 3 real results isn't enough to replace the
+            // fallback chips with — leave them as-is rather than showing
+            // a thin, half-empty "trending" list.
+            if (combined.size >= 3) _trendingArtists.value = combined
+        }
+    }
 
     /**
      * Called on every keystroke. Updates the typed text and refreshes the
@@ -219,5 +251,8 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
 
     private companion object {
         const val SUGGESTIONS_DEBOUNCE_MS = 150L
+        const val TRENDING_ARTISTS_INDIA_QUERY = "top trending artists india"
+        const val TRENDING_ARTISTS_GLOBAL_QUERY = "top global artists"
+        val FALLBACK_TRENDING_ARTISTS = listOf("Arijit Singh", "Taylor Swift", "The Weeknd", "Diljit Dosanjh", "Dua Lipa")
     }
 }

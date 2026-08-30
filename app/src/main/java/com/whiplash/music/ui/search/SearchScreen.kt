@@ -90,6 +90,7 @@ fun SearchScreen(
     val viewModel: SearchViewModel = viewModel(factory = SearchViewModelFactory(app.youtubeSearchRepository))
     val state by viewModel.state.collectAsState()
     val recentSearches by viewModel.recentSearches.collectAsState()
+    val trendingArtists by viewModel.trendingArtists.collectAsState()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     // "Clear all" recent searches is destructive and irreversible, same as
@@ -138,6 +139,7 @@ fun SearchScreen(
             // A blank query always means idle/recent-searches, full stop.
             state.query.isBlank() -> IdleState(
                 recentSearches = recentSearches,
+                trendingArtists = trendingArtists,
                 onSuggestionTap = { query ->
                     dismissKeyboard()
                     viewModel.submitSearch(query)
@@ -348,10 +350,10 @@ private fun EmptyTabState(message: String) {
     }
 }
 
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun IdleState(
     recentSearches: List<String>,
+    trendingArtists: List<String>,
     onSuggestionTap: (String) -> Unit,
     onRemoveRecentSearch: (String) -> Unit,
     onClearRecentSearches: () -> Unit,
@@ -422,10 +424,7 @@ private fun IdleState(
             androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceLg))
         }
 
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             if (recentSearches.isEmpty()) {
                 Text(
                     text = "Search for any song.",
@@ -435,22 +434,39 @@ private fun IdleState(
                 androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceLg))
             }
             Text(
-                text = "Try searching",
+                text = "Trending artists",
                 style = MaterialTheme.typography.labelMedium,
                 color = WhiplashColors.textSecondary,
                 modifier = Modifier.fillMaxWidth(),
             )
             androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
-            androidx.compose.foundation.layout.FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
-                verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
-            ) {
-                SEARCH_SUGGESTIONS.forEach { suggestion ->
-                    com.whiplash.music.ui.theme.GlassChip(
-                        text = suggestion,
-                        selected = false,
-                        onClick = { onSuggestionTap(suggestion) },
+            // Plain vertical rows, matching the recent-searches list right
+            // above (and how Spotify/YouTube Music present this kind of
+            // "try searching" list) — a real, reported UI issue: the
+            // previous version used bordered/pill-shaped GlassChip tags in
+            // a wrapping row, which read as visually heavy/inconsistent
+            // next to the plain rows used everywhere else on this screen.
+            trendingArtists.forEach { artist ->
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSuggestionTap(artist) }
+                        .padding(vertical = GlassTokens.spaceSm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = null,
+                        tint = WhiplashColors.textTertiary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = artist,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = WhiplashColors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = GlassTokens.spaceMd),
                     )
                 }
             }
@@ -533,7 +549,6 @@ private fun rememberShimmerAlpha(): androidx.compose.runtime.State<Float> {
     )
 }
 
-private val SEARCH_SUGGESTIONS = listOf("Coldplay", "Lofi beats", "Top hits 2026", "The Weeknd", "Workout mix")
 
 /**
  * YouTube Music/Spotify-style live autocomplete suggestions — the only
