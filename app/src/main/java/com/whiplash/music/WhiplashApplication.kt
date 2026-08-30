@@ -43,6 +43,10 @@ class WhiplashApplication : Application() {
         com.whiplash.music.playback.cache.AudioCacheManager(this)
     }
 
+    val backupManager: com.whiplash.music.data.backup.BackupManager by lazy {
+        com.whiplash.music.data.backup.BackupManager(this, database)
+    }
+
     val libraryRepository: LibraryRepository by lazy {
         LibraryRepository(
             historyDao = database.historyDao(),
@@ -87,7 +91,7 @@ class WhiplashApplication : Application() {
     }
 
     val playbackController: PlaybackController by lazy {
-        PlaybackController(this, playbackManager, settingsRepository, libraryRepository, newPipePlaybackProvider)
+        PlaybackController(this, playbackManager, settingsRepository, libraryRepository, newPipePlaybackProvider, audioCacheManager)
     }
 
     override fun onCreate() {

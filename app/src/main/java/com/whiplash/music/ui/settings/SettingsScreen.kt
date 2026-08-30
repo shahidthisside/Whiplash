@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,7 +63,7 @@ import androidx.compose.foundation.clickable
 fun SettingsScreen() {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
-    val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository, app.audioCacheManager))
+    val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository, app.audioCacheManager, app.backupManager))
 
     val audioQuality by viewModel.audioQuality.collectAsState()
     val autoplayEnabled by viewModel.autoplayEnabled.collectAsState()
@@ -70,8 +71,61 @@ fun SettingsScreen() {
     val crossfadeDurationMs by viewModel.crossfadeDurationMs.collectAsState()
     val playbackSpeed by viewModel.playbackSpeed.collectAsState()
     val themeVariant by viewModel.themeVariant.collectAsState()
+    val seekBarStyle by viewModel.seekBarStyle.collectAsState()
     val audioCacheEnabled by viewModel.audioCacheEnabled.collectAsState()
     val cacheSizeBytes by viewModel.cacheSizeBytes.collectAsState()
+    val lastBackupTimeMs by viewModel.lastBackupTimeMs.collectAsState()
+    val backupResult by viewModel.backupResult.collectAsState()
+
+    var showRestoreConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<android.net.Uri?>(null) }
+
+    // Toast feedback for backup/restore, matching the existing simple,
+    // generic "no internet" / "couldn't play this song" Toast pattern in
+    // MainActivity — never raw exception text (section: keep user-facing
+    // errors simple, like Spotify/YouTube Music).
+    androidx.compose.runtime.LaunchedEffect(backupResult) {
+        val message = when (backupResult) {
+            SettingsViewModel.BackupResult.BackupSuccess -> "Backup saved"
+            SettingsViewModel.BackupResult.BackupFailed -> "Couldn't create backup"
+            SettingsViewModel.BackupResult.RestoreFailed -> "Couldn't restore backup"
+            null -> null
+        }
+        if (message != null) {
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+            viewModel.onBackupResultShown()
+        }
+    }
+
+    val backupLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri -> if (uri != null) viewModel.backup(uri) }
+
+    val restoreLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) showRestoreConfirm = uri }
+
+    if (showRestoreConfirm != null) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Restore this backup?",
+            message = "This replaces your current playlists, favorites, history, pinned songs, and settings with what's in the backup file. This can't be undone. The app will restart.",
+            confirmLabel = "Restore",
+            onConfirm = {
+                val uri = showRestoreConfirm!!
+                showRestoreConfirm = null
+                viewModel.restore(uri) {
+                    // A live Room connection can't have its backing file
+                    // replaced out from under it (see BackupManager.restore
+                    // doc), so a full process restart is the only correct
+                    // way to pick up the restored data everywhere at once.
+                    val restartIntent = android.content.Intent(context, com.whiplash.music.MainActivity::class.java)
+                    restartIntent.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    context.startActivity(restartIntent)
+                    kotlin.system.exitProcess(0)
+                }
+            },
+            onDismiss = { showRestoreConfirm = null },
+        )
+    }
 
     // The ViewModel is scoped to the Activity (no navigation-graph store
     // separation for this simple tab structure), so its init{} only runs
@@ -97,12 +151,20 @@ fun SettingsScreen() {
                     // --- Audio Quality ---
                     SettingRow(
                         title = "Audio Quality",
-                        subtitle = "Applies to YouTube Music playback. Higher quality uses more data.",
+                        subtitle = "Applies to playback. Higher quality uses more data.",
                     )
-                    AudioQualitySelector(
-                        selected = audioQuality,
-                        onSelect = viewModel::setAudioQuality,
-                    )
+                    // Only rendered once the real persisted value is known
+                    // (audioQuality is null for at most one frame right
+                    // after this screen is first created) — this is what
+                    // actually prevents the "flashes Auto, then jumps to
+                    // the real saved value" glitch, rather than merely
+                    // shortening it.
+                    audioQuality?.let { quality ->
+                        AudioQualitySelector(
+                            selected = quality,
+                            onSelect = viewModel::setAudioQuality,
+                        )
+                    }
 
                     Divider()
 
@@ -201,21 +263,175 @@ fun SettingsScreen() {
         }
 
         item {
+            SectionLabel("Backup & Restore")
+            Spacer(Modifier.height(GlassTokens.spaceSm))
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceLg)) {
+                    SettingRow(
+                        title = "Local backup",
+                        subtitle = "Saves your playlists, favorites, history, pinned songs, and settings to a file you choose.\n" +
+                            formatLastBackupSubtitle(lastBackupTimeMs),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
+                    ) {
+                        GlassButton(
+                            text = "Back up now",
+                            modifier = Modifier.weight(1f),
+                            onClick = { backupLauncher.launch(com.whiplash.music.data.backup.BackupManager.suggestedFileName()) },
+                        )
+                        GlassButton(
+                            text = "Restore",
+                            modifier = Modifier.weight(1f),
+                            onClick = { restoreLauncher.launch(arrayOf("application/zip", "application/octet-stream")) },
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
             SectionLabel("Appearance")
             Spacer(Modifier.height(GlassTokens.spaceSm))
             GlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column {
-                    SettingRow(
-                        title = "Theme",
-                        subtitle = "Currently using ${themeVariant.displayName}.",
-                    )
-                    Spacer(Modifier.height(GlassTokens.spaceMd))
-                    ThemeGrid(selected = themeVariant, onSelect = viewModel::setThemeVariant)
+                Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceLg)) {
+                    Column {
+                        SettingRow(
+                            title = "Theme",
+                            subtitle = "Currently using ${themeVariant.displayName}.",
+                        )
+                        Spacer(Modifier.height(GlassTokens.spaceMd))
+                        ThemeGrid(selected = themeVariant, onSelect = viewModel::setThemeVariant)
+                    }
+
+                    Divider()
+
+                    Column {
+                        SettingRow(
+                            title = "Progress Bar Style",
+                            subtitle = "Choose how the full player's seek bar looks. Currently using ${seekBarStyle.displayName}.",
+                        )
+                        Spacer(Modifier.height(GlassTokens.spaceMd))
+                        SeekBarStylePicker(selected = seekBarStyle, onSelect = viewModel::setSeekBarStyle)
+                    }
                 }
             }
         }
 
         item { Spacer(Modifier.height(GlassTokens.spaceLg)) }
+    }
+}
+
+/** Swatch grid for picking the full player's seek bar style — 4 real, distinct styles, each with a small live preview matching its actual on-screen look. */
+@Composable
+private fun SeekBarStylePicker(selected: com.whiplash.music.ui.theme.SeekBarStyle, onSelect: (com.whiplash.music.ui.theme.SeekBarStyle) -> Unit) {
+    val options = com.whiplash.music.ui.theme.SeekBarStyle.entries.toList()
+    Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+        options.forEach { style ->
+            val isSelected = style == selected
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(WhiplashRadius.medium))
+                    .background(if (isSelected) WhiplashColors.surfaceElevated else Color.Transparent)
+                    .border(
+                        width = GlassTokens.borderWidth,
+                        color = if (isSelected) WhiplashColors.accent else WhiplashColors.glassBorder,
+                        shape = RoundedCornerShape(WhiplashRadius.medium),
+                    )
+                    .clickable(role = androidx.compose.ui.semantics.Role.Button) { onSelect(style) }
+                    .padding(GlassTokens.spaceMd),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
+            ) {
+                SeekBarStylePreview(style = style, modifier = Modifier.weight(1f))
+                Text(
+                    text = style.displayName,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (isSelected) WhiplashColors.textPrimary else WhiplashColors.textSecondary,
+                )
+                if (isSelected) {
+                    Icon(Icons.Filled.Check, contentDescription = null, tint = WhiplashColors.accent, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+    }
+}
+
+/** A small, static preview of each seek bar style at a fixed ~55% fraction, so the user can see the real shape before picking it. */
+@Composable
+private fun SeekBarStylePreview(style: com.whiplash.music.ui.theme.SeekBarStyle, modifier: Modifier = Modifier) {
+    val previewFraction = 0.55f
+    val activeColor = WhiplashColors.textPrimary
+    val inactiveColor = WhiplashColors.glassBorderStrong
+    androidx.compose.foundation.Canvas(modifier = modifier.height(20.dp)) {
+        val midY = size.height / 2f
+        when (style) {
+            com.whiplash.music.ui.theme.SeekBarStyle.CLASSIC -> {
+                val splitX = size.width * previewFraction
+                drawRoundRect(
+                    color = inactiveColor,
+                    topLeft = androidx.compose.ui.geometry.Offset(0f, midY - 1.5.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(size.width, 3.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx()),
+                )
+                drawRoundRect(
+                    color = activeColor,
+                    topLeft = androidx.compose.ui.geometry.Offset(0f, midY - 1.5.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(splitX, 3.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx()),
+                )
+                drawCircle(color = activeColor, radius = 5.dp.toPx(), center = androidx.compose.ui.geometry.Offset(splitX, midY))
+            }
+            com.whiplash.music.ui.theme.SeekBarStyle.WAVY -> {
+                val splitX = size.width * previewFraction
+                val amplitudePx = 4.dp.toPx()
+                val wavelengthPx = 16.dp.toPx()
+                val wavePath = androidx.compose.ui.graphics.Path()
+                wavePath.moveTo(0f, midY)
+                var x = 0f
+                while (x < splitX) {
+                    val nextX = (x + wavelengthPx / 2f).coerceAtMost(splitX)
+                    val progress = (x / wavelengthPx) * (2 * Math.PI).toFloat()
+                    val y = midY + amplitudePx * kotlin.math.sin(progress)
+                    wavePath.lineTo(nextX, y)
+                    x = nextX
+                }
+                drawPath(wavePath, color = activeColor, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                drawLine(
+                    color = inactiveColor,
+                    start = androidx.compose.ui.geometry.Offset(splitX, midY),
+                    end = androidx.compose.ui.geometry.Offset(size.width, midY),
+                    strokeWidth = 2.5.dp.toPx(),
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                )
+            }
+            com.whiplash.music.ui.theme.SeekBarStyle.WAVEFORM -> {
+                val random = kotlin.random.Random(seed = 42)
+                val barCount = 20
+                val heights = List(barCount) { 0.35f + random.nextFloat() * 0.65f }
+                val barWidth = size.width / (barCount * 1.6f)
+                val gap = barWidth * 0.6f
+                val activeBars = (previewFraction * barCount).toInt()
+                for (i in 0 until barCount) {
+                    val barHeightPx = size.height * heights[i]
+                    val xOffset = i * (barWidth + gap)
+                    val color = if (i <= activeBars) activeColor else inactiveColor
+                    drawRoundRect(
+                        color = color,
+                        topLeft = androidx.compose.ui.geometry.Offset(xOffset, (size.height - barHeightPx) / 2f),
+                        size = androidx.compose.ui.geometry.Size(barWidth, barHeightPx),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f, barWidth / 2f),
+                    )
+                }
+            }
+            com.whiplash.music.ui.theme.SeekBarStyle.MINIMAL -> {
+                val splitX = size.width * previewFraction
+                drawLine(inactiveColor, androidx.compose.ui.geometry.Offset(0f, midY), androidx.compose.ui.geometry.Offset(size.width, midY), strokeWidth = 1.5.dp.toPx())
+                drawLine(activeColor, androidx.compose.ui.geometry.Offset(0f, midY), androidx.compose.ui.geometry.Offset(splitX, midY), strokeWidth = 1.5.dp.toPx())
+            }
+        }
     }
 }
 
@@ -233,6 +449,13 @@ private fun formatCacheSize(bytes: Long): String {
     if (bytes <= 0L) return "No cached songs yet."
     val mb = bytes / (1024.0 * 1024.0)
     return if (mb >= 1024.0) "%.1f GB used".format(mb / 1024.0) else "%.1f MB used".format(mb)
+}
+
+/** "Last backup: <date> at <time>" if one exists, otherwise a plain "never backed up yet" state — never a fabricated/default timestamp. */
+private fun formatLastBackupSubtitle(lastBackupTimeMs: Long?): String {
+    if (lastBackupTimeMs == null) return "You haven't backed up yet."
+    val formatter = java.text.SimpleDateFormat("MMM d, yyyy 'at' h:mm a", java.util.Locale.getDefault())
+    return "Last backup: ${formatter.format(java.util.Date(lastBackupTimeMs))}."
 }
 
 @Composable

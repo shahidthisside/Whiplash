@@ -18,10 +18,24 @@ import kotlinx.coroutines.withContext
 class SettingsViewModel(
     private val repository: SettingsRepository,
     private val cacheManager: AudioCacheManager,
+    private val backupManager: com.whiplash.music.data.backup.BackupManager,
 ) : ViewModel() {
 
-    val audioQuality: StateFlow<AudioQuality> = repository.audioQuality
-        .stateIn(viewModelScope, SharingStarted.Eagerly, AudioQuality.AUTO)
+    /**
+     * Null until the real persisted value has been read from DataStore at
+     * least once — [SettingsScreen] uses this (not a hardcoded default) to
+     * decide whether to render the Audio Quality selector at all yet. Using
+     * a hardcoded fallback like [AudioQuality.AUTO] as the initial value
+     * here (the previous approach) meant every fresh app launch briefly
+     * rendered "Auto" selected and then visibly jumped to the user's real
+     * saved setting (e.g. "High") the instant DataStore's first real
+     * emission arrived a frame or two later — a real, reported UI glitch,
+     * not just a theoretical race. Deferring the selector's first render
+     * until this is non-null eliminates the flash entirely rather than
+     * just making the window narrower.
+     */
+    val audioQuality: StateFlow<AudioQuality?> = repository.audioQuality
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val autoplayEnabled: StateFlow<Boolean> = repository.autoplayEnabled
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
@@ -38,9 +52,60 @@ class SettingsViewModel(
     val themeVariant: StateFlow<ThemeVariant> = repository.themeVariant
         .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeVariant.CLASSIC)
 
+    /** Selected full-player seek bar visual style (see SettingsRepository.seekBarStyle doc). */
+    val seekBarStyle: StateFlow<com.whiplash.music.ui.theme.SeekBarStyle> = repository.seekBarStyle
+        .stateIn(viewModelScope, SharingStarted.Eagerly, com.whiplash.music.ui.theme.SeekBarStyle.CLASSIC)
+
+    fun setSeekBarStyle(style: com.whiplash.music.ui.theme.SeekBarStyle) {
+        viewModelScope.launch { repository.setSeekBarStyle(style) }
+    }
+
     /** Whether resolved YouTube streams are cached to disk (see SettingsRepository.audioCacheEnabled doc). */
     val audioCacheEnabled: StateFlow<Boolean> = repository.audioCacheEnabled
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    /** Epoch millis of the last successful manual backup, null if never backed up (see SettingsRepository doc). */
+    val lastBackupTimeMs: StateFlow<Long?> = repository.lastBackupTimeMs
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** One-shot result of the most recent backup/restore attempt, for a Toast/snackbar — never raw exception text (section: keep user-facing errors simple). */
+    private val _backupResult = MutableStateFlow<BackupResult?>(null)
+    val backupResult: StateFlow<BackupResult?> = _backupResult
+
+    fun onBackupResultShown() {
+        _backupResult.value = null
+    }
+
+    /** Writes a full backup zip to [destination] (a Uri from the system "Save as" picker). */
+    fun backup(destination: android.net.Uri) {
+        viewModelScope.launch {
+            val success = backupManager.backup(destination)
+            if (success) {
+                repository.setLastBackupTimeMs(System.currentTimeMillis())
+            }
+            _backupResult.value = if (success) BackupResult.BackupSuccess else BackupResult.BackupFailed
+        }
+    }
+
+    /**
+     * Restores from [source] (a Uri from the system "Open" picker). The
+     * caller (SettingsScreen) is responsible for fully restarting the app
+     * process right after a successful result — see [BackupManager.restore]'s
+     * doc for why a live Room connection can't just keep running against a
+     * file that was swapped out from underneath it.
+     */
+    fun restore(source: android.net.Uri, onRestored: () -> Unit) {
+        viewModelScope.launch {
+            val success = backupManager.restore(source)
+            if (success) {
+                onRestored()
+            } else {
+                _backupResult.value = BackupResult.RestoreFailed
+            }
+        }
+    }
+
+    enum class BackupResult { BackupSuccess, BackupFailed, RestoreFailed }
 
     /** Real current on-disk cache size, refreshed on load and after Clear cache — not an estimate. */
     private val _cacheSizeBytes = MutableStateFlow(0L)

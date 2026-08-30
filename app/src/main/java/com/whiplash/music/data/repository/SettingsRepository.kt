@@ -59,6 +59,17 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[THEME_KEY] = variant.name }
     }
 
+    /** Selected full-player seek bar visual style (section: Appearance). Defaults to the original Classic style. */
+    val seekBarStyle: Flow<com.whiplash.music.ui.theme.SeekBarStyle> = dataStore.data.map { prefs ->
+        prefs[SEEK_BAR_STYLE_KEY]?.let { stored ->
+            runCatching { com.whiplash.music.ui.theme.SeekBarStyle.valueOf(stored) }.getOrNull()
+        } ?: com.whiplash.music.ui.theme.SeekBarStyle.CLASSIC
+    }
+
+    suspend fun setSeekBarStyle(style: com.whiplash.music.ui.theme.SeekBarStyle) {
+        dataStore.edit { prefs -> prefs[SEEK_BAR_STYLE_KEY] = style.name }
+    }
+
     /** Crossfade duration between tracks, 0 = off (section 18). Defaults off. */
     val crossfadeDurationMs: Flow<Int> = dataStore.data.map { prefs -> prefs[CROSSFADE_KEY] ?: 0 }
 
@@ -95,13 +106,22 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[AUDIO_CACHE_ENABLED_KEY] = enabled }
     }
 
+    /** Epoch millis of the last successful manual backup (section: Backup & Restore), null if never backed up. */
+    val lastBackupTimeMs: Flow<Long?> = dataStore.data.map { prefs -> prefs[LAST_BACKUP_TIME_KEY] }
+
+    suspend fun setLastBackupTimeMs(timeMs: Long) {
+        dataStore.edit { prefs -> prefs[LAST_BACKUP_TIME_KEY] = timeMs }
+    }
+
     private companion object {
         val AUDIO_QUALITY_KEY: Preferences.Key<String> = stringPreferencesKey("audio_quality")
         val AUTOPLAY_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("autoplay_enabled")
         val THEME_KEY: Preferences.Key<String> = stringPreferencesKey("theme_variant")
+        val SEEK_BAR_STYLE_KEY: Preferences.Key<String> = stringPreferencesKey("seek_bar_style")
         val CROSSFADE_KEY: Preferences.Key<Int> = intPreferencesKey("crossfade_duration_ms")
         val GAPLESS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("gapless_enabled")
         val SPEED_KEY: Preferences.Key<Float> = floatPreferencesKey("playback_speed")
         val AUDIO_CACHE_ENABLED_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("audio_cache_enabled")
+        val LAST_BACKUP_TIME_KEY: Preferences.Key<Long> = androidx.datastore.preferences.core.longPreferencesKey("last_backup_time_ms")
     }
 }
