@@ -68,7 +68,16 @@ fun GlassToastHost(modifier: Modifier = Modifier) {
         AnimatedVisibility(
             visible = currentMessage != null,
             enter = fadeIn(tween(GlassTokens.animRegular)) + slideInVertically(tween(GlassTokens.animRegular)) { it / 2 },
-            exit = fadeOut(tween(GlassTokens.animFast)) + slideOutVertically(tween(GlassTokens.animFast)) { it / 2 },
+            // Dismissal previously used animFast (120ms) — too short to
+            // smoothly interpolate a frosted/blurred surface (GlassSurface
+            // applies a real backdrop blur, which is a comparatively
+            // expensive draw-time effect), so it visibly stuttered/snapped
+            // right at the end instead of gently fading away — a real,
+            // reported UI issue, not just a perception one. Matching the
+            // enter animation's duration (220ms) fixes this: the same
+            // motion that reads as smooth going in now reads as smooth
+            // going out too.
+            exit = fadeOut(tween(GlassTokens.animRegular)) + slideOutVertically(tween(GlassTokens.animRegular)) { it / 2 },
         ) {
             GlassSurface(
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(WhiplashRadius.pill),
