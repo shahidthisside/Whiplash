@@ -3,6 +3,8 @@ package com.whiplash.music.ui.search
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -304,7 +306,12 @@ private fun IdleState(
     onRemoveRecentSearch: (String) -> Unit,
     onClearRecentSearches: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize().padding(top = GlassTokens.spaceLg)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(top = GlassTokens.spaceLg, bottom = GlassTokens.miniPlayerReservedHeight),
+    ) {
         if (recentSearches.isNotEmpty()) {
             androidx.compose.foundation.layout.Row(
                 modifier = Modifier.fillMaxWidth(),
