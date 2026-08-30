@@ -91,7 +91,7 @@ fun SettingsScreen() {
             null -> null
         }
         if (message != null) {
-            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+            com.whiplash.music.ui.common.ToastController.show(message)
             viewModel.onBackupResultShown()
         }
     }

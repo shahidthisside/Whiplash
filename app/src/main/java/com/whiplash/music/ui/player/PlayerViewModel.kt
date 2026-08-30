@@ -73,8 +73,10 @@ class PlayerViewModel(
 
     fun toggleFavoriteCurrent() {
         val item = state.value.currentItem ?: return
+        val wasFavorite = isCurrentFavorite.value
         viewModelScope.launch {
-            libraryRepository.toggleFavorite(item, isCurrentlyFavorite = isCurrentFavorite.value)
+            libraryRepository.toggleFavorite(item, isCurrentlyFavorite = wasFavorite)
+            com.whiplash.music.ui.common.ToastController.show(if (wasFavorite) "Removed from favorites" else "Added to favorites")
         }
     }
 

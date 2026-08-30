@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.whiplash.music.data.repository.LibraryRepository
 import com.whiplash.music.data.repository.YoutubeSearchRepository
 import com.whiplash.music.domain.model.PlayableItem
+import com.whiplash.music.ui.common.ToastController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -84,10 +85,14 @@ class HomeViewModel(
      */
     fun removeFromQuickPicks(item: PlayableItem.YoutubeTrack) {
         _quickPicks.value = _quickPicks.value.filter { it.id != item.id }
+        ToastController.show("Removed from Quick Picks")
     }
 
     fun clearHistory() {
-        viewModelScope.launch { libraryRepository.clearHistory() }
+        viewModelScope.launch {
+            libraryRepository.clearHistory()
+            ToastController.show("History cleared")
+        }
     }
 
     private companion object {

@@ -130,6 +130,7 @@ class SettingsViewModel(
         viewModelScope.launch {
             withContext(Dispatchers.IO) { cacheManager.clearCache() }
             refreshCacheSize()
+            com.whiplash.music.ui.common.ToastController.show("Cache cleared")
         }
     }
 

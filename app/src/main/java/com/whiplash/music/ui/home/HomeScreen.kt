@@ -210,7 +210,7 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
             com.whiplash.music.ui.player.AddToPlaylistContent(
                 playlists = playlists,
                 onSelectPlaylist = { playlist ->
-                    songActionsViewModel.addToPlaylist(playlistTargetItem, playlist.id)
+                    songActionsViewModel.addToPlaylist(playlistTargetItem, playlist.id, playlist.name)
                     addToPlaylistItem = null
                 },
                 onCreateNew = { showCreatePlaylistDialog = true },

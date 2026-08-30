@@ -133,7 +133,10 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
 
     /** Clears the entire recent-searches list. */
     fun clearRecentSearches() {
-        viewModelScope.launch { repository.clearSearchHistory() }
+        viewModelScope.launch {
+            repository.clearSearchHistory()
+            com.whiplash.music.ui.common.ToastController.show("Recent searches cleared")
+        }
     }
 
     private companion object {

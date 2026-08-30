@@ -228,7 +228,7 @@ private fun WhiplashApp() {
         }
     }
 
-    // A plain, brief system Toast on a failed play attempt — matching the
+    // A plain, brief in-app toast on a failed play attempt — matching the
     // standard, simple "no internet connection" popup every mainstream
     // music app (Spotify, YouTube Music) shows for a few seconds, rather
     // than surfacing the raw underlying failure (e.g. a DNS resolution
@@ -240,7 +240,7 @@ private fun WhiplashApp() {
     LaunchedEffect(playbackState.playbackError) {
         val error = playbackState.playbackError ?: return@LaunchedEffect
         val message = if (error.isNetworkFailure) "No internet connection" else "Couldn't play this song"
-        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+        com.whiplash.music.ui.common.ToastController.show(message)
     }
 
     // Collapse the full player on system back instead of the default
@@ -442,6 +442,15 @@ private fun WhiplashApp() {
                     )
                 }
             }
+
+            // App-wide toast host (section: feedback for silent actions —
+            // favoriting, pinning, playlist/queue changes, etc.), drawn
+            // last so it renders above even the expanded full player.
+            com.whiplash.music.ui.theme.GlassToastHost(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = GlassTokens.spaceXl + GlassTokens.miniPlayerReservedHeight),
+            )
         }
     }
 }

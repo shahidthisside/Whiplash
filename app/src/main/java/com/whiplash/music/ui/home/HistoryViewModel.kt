@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.whiplash.music.data.repository.LibraryRepository
 import com.whiplash.music.domain.model.PlayableItem
+import com.whiplash.music.ui.common.ToastController
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -28,6 +29,9 @@ class HistoryViewModel(private val libraryRepository: LibraryRepository) : ViewM
      * independent ones that could drift out of sync with each other.
      */
     fun clearHistory() {
-        viewModelScope.launch { libraryRepository.clearHistory() }
+        viewModelScope.launch {
+            libraryRepository.clearHistory()
+            ToastController.show("History cleared")
+        }
     }
 }

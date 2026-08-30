@@ -166,7 +166,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                         .padding(vertical = GlassTokens.spaceSm)
                         .clickable(
                             onClick = {
-                                viewModel.deletePlaylist(toDelete.id)
+                                viewModel.deletePlaylist(toDelete.id, toDelete.name)
                                 playlistPendingDelete = null
                             },
                         ),

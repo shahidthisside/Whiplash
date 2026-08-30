@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.whiplash.music.ui.common.ToastController
 import com.whiplash.music.data.repository.LibraryRepository
 import com.whiplash.music.data.repository.SettingsRepository
 import com.whiplash.music.domain.model.PlayableItem
@@ -166,6 +167,7 @@ class PlaybackController(
     fun addToQueue(item: PlayableItem) {
         queue.add(item)
         _state.update { it.copy(queue = queue.toList()) }
+        ToastController.show("Added to queue")
     }
 
     /** Inserts [item] immediately after the currently playing track (section 21: "play next"). */
@@ -174,11 +176,13 @@ class PlaybackController(
         queue.add(insertAt, item)
         shiftPreparedIndicesAfterInsert(insertAt)
         _state.update { it.copy(queue = queue.toList()) }
+        ToastController.show("Playing next")
     }
 
     /** Removes the item at [index]. If it's the currently playing item, advances to the next one. */
     fun removeFromQueue(index: Int) {
         if (index !in queue.indices) return
+        val wasCurrentIndex = index == currentIndex
         queue.removeAt(index)
         preparedIndices.remove(index)
         val shifted = preparedIndices.filter { it > index }.toSet()
@@ -209,6 +213,14 @@ class PlaybackController(
             }
             else -> _state.update { it.copy(queue = queue.toList()) }
         }
+
+        // Removing the currently playing track has an immediately visible
+        // effect (the next track starts, or playback stops) — a toast on
+        // top of that is redundant. Removing any other row is much less
+        // obviously confirmed (especially if that part of the queue sheet
+        // isn't even in view), so it gets the same brief confirmation as
+        // every other queue action.
+        if (!wasCurrentIndex) ToastController.show("Removed from queue")
     }
 
     /** Moves a queue item from [from] to [to] (section 21: "reorder"). */
@@ -234,6 +246,7 @@ class PlaybackController(
         currentIndex = 0
         preparedIndices.clear()
         _state.update { it.copy(queue = queue.toList(), currentIndex = 0) }
+        ToastController.show("Queue cleared")
 
         // maybeExtendQueueWithRecommendations() is normally only triggered
         // from playIndex() when a track *starts* playing and happens to be
