@@ -125,55 +125,52 @@ fun SearchScreen(
             query = state.query,
             onQueryChange = viewModel::onQueryChanged,
             placeholder = "Search songs, artists...",
+            onSearchAction = {
+                dismissKeyboard()
+                viewModel.submitSearch(state.query)
+            },
             modifier = Modifier.fillMaxWidth(),
         )
 
         androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
 
         when {
-            // A blank query always means idle/recent-searches, full stop —
-            // this must not depend on hasSearched. hasSearched only ever
-            // gets reset to false at the very top of onQueryChanged's
-            // blank-query branch, but that ViewModel state update and this
-            // screen's recomposition are not guaranteed to always land in
-            // the same frame as query itself clearing (e.g. a completed
-            // search leaves hasSearched=true, and if any downstream state
-            // update lands a moment after the blank-query reset — real,
-            // reproducible with a fast clear right as background
-            // albums/artists lookups are still in flight — hasSearched
-            // could still read true here). The previous `&&`-based check
-            // required both conditions to flip in perfect lockstep, so a
-            // cleared search bar could fall through to "No results found"
-            // instead of the idle/recent-searches state — a real, reported
-            // bug, not just a theoretical edge case.
+            // A blank query always means idle/recent-searches, full stop.
             state.query.isBlank() -> IdleState(
                 recentSearches = recentSearches,
-                onSuggestionTap = viewModel::onQueryChanged,
+                onSuggestionTap = { query ->
+                    dismissKeyboard()
+                    viewModel.submitSearch(query)
+                },
                 onRemoveRecentSearch = viewModel::removeRecentSearch,
                 onClearRecentSearches = { showClearSearchHistoryConfirm = true },
             )
-            // While a search is pending (debounce still running, or the
-            // real search itself hasn't returned anything yet), show
-            // YouTube Music-style live suggestions instead of "No results
-            // found" — a real, reported bug: every keystroke's ~400ms
-            // debounce window fell through to NoResultsState because
-            // isSearching (only true once the debounce elapses and a
-            // network call is in flight) doesn't cover that gap, and
-            // hasSearched from any previous completed search that session
-            // was often still true. isPendingSearch covers this whole
-            // window explicitly, from the moment the query becomes
-            // non-blank until real results land. Once the debounce
-            // elapses and a real network search is actually in flight
-            // (isSearching), the skeleton loader takes over instead —
-            // suggestions are for the "waiting to search" gap, not the
-            // "actively searching" one.
-            state.isPendingSearch && !state.isSearching && state.results.isEmpty() && state.albums.isEmpty() &&
-                state.artists.isEmpty() && state.playlists.isEmpty() -> SuggestionsState(
-                suggestions = state.suggestions,
-                onSuggestionTap = viewModel::onSuggestionTapped,
-            )
+            // YouTube Music/Spotify-style: typing alone only ever narrows
+            // live autocomplete suggestions — it never runs a real search.
+            // A real search only happens once the user commits (tapping a
+            // suggestion/recent search, or the keyboard's search action —
+            // see submitSearch). isSearching is checked *before* this
+            // suggestions branch (not after) — a real, reported bug:
+            // the instant a suggestion is tapped, hasSearched is still
+            // false for a frame or two (it only flips true once the real
+            // search's results actually land), so with isSearching
+            // checked second, that whole "actively searching but not
+            // done yet" window matched this branch instead and rendered
+            // a bare blank screen once submitSearch clears suggestions
+            // (the same field this branch reads) — the loading skeleton
+            // never got a chance to show at all, and for a search that
+            // fully resolved in a few hundred ms, a plain black gap
+            // was often all a real device/network combination made
+            // actually visible.
             state.isSearching && state.results.isEmpty() && state.albums.isEmpty() &&
                 state.artists.isEmpty() && state.playlists.isEmpty() -> LoadingState()
+            !state.hasSearched -> SuggestionsState(
+                suggestions = state.suggestions,
+                onSuggestionTap = { suggestion ->
+                    dismissKeyboard()
+                    viewModel.onSuggestionTapped(suggestion)
+                },
+            )
             state.results.isEmpty() && state.errorMessage != null -> ErrorState(state.errorMessage!!, onRetry = viewModel::retry)
             state.results.isEmpty() && state.albums.isEmpty() && state.artists.isEmpty() &&
                 state.playlists.isEmpty() && state.hasSearched -> NoResultsState()
@@ -539,19 +536,19 @@ private fun rememberShimmerAlpha(): androidx.compose.runtime.State<Float> {
 private val SEARCH_SUGGESTIONS = listOf("Coldplay", "Lofi beats", "Top hits 2026", "The Weeknd", "Workout mix")
 
 /**
- * YouTube Music-style live autocomplete suggestions, shown while a search
- * is pending (debounce still running) instead of a blank/incorrect state.
- * Falls back to a lightweight skeleton if no suggestions have arrived yet
- * either (e.g. the very first keystroke, before even the lightweight
- * suggestions debounce has elapsed) — never a bare blank screen, and
- * never "No results found" for a search that hasn't actually run yet.
+ * YouTube Music/Spotify-style live autocomplete suggestions — the only
+ * thing shown while the user is typing but hasn't yet submitted a real
+ * search (tapped a suggestion/recent search, or pressed the keyboard's
+ * search action). Renders nothing while the lightweight suggestions
+ * lookup for the current text is still in flight (it settles in ~150ms
+ * plus one network round trip — genuinely too fast to warrant a loading
+ * skeleton, which is reserved for the real, much longer multi-category
+ * search once a query is actually submitted) rather than a stray flash
+ * of an unrelated previous state.
  */
 @Composable
 private fun SuggestionsState(suggestions: List<String>, onSuggestionTap: (String) -> Unit) {
-    if (suggestions.isEmpty()) {
-        LoadingState()
-        return
-    }
+    if (suggestions.isEmpty()) return
     Column(modifier = Modifier.fillMaxSize()) {
         suggestions.forEach { suggestion ->
             androidx.compose.foundation.layout.Row(

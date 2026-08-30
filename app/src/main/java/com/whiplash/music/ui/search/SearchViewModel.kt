@@ -26,46 +26,41 @@ data class SearchUiState(
     val artists: List<YoutubeArtistResult> = emptyList(),
     val suggestions: List<String> = emptyList(),
     val isSearching: Boolean = false,
-    /**
-     * True the moment the query becomes non-blank, until either a real
-     * search result lands or the query is cleared again. Distinct from
-     * [isSearching] (which only turns true once the debounce has actually
-     * elapsed and a network call is in flight) — this covers the gap in
-     * between, so the UI has a real "waiting to search" state instead of
-     * incorrectly falling through to "No results found" while the
-     * debounce timer is still running (a real, reported bug: typing
-     * showed "No results found" for the whole 400ms debounce window on
-     * every single keystroke, only replaced by real results once typing
-     * paused).
-     */
-    val isPendingSearch: Boolean = false,
     val hasSearched: Boolean = false,
     val errorMessage: String? = null,
 )
 
 /**
- * Debounces user input, shows cached results instantly if available
- * (section 53), then runs a real search and reports errors without
- * crashing the UI. Search failures are informational only — they never
- * touch [com.whiplash.music.playback.controller.PlaybackController], so a
- * failed search cannot disrupt any currently playing track.
+ * YouTube Music/Spotify-style search: typing only ever fetches live
+ * autocomplete suggestions (a real NewPipeExtractor
+ * YoutubeSuggestionExtractor lookup, section: never fabricate a feature
+ * — this genuinely queries YouTube's own suggestion endpoint), lightly
+ * debounced since a suggestions dropdown is expected to feel close to
+ * instant. The actual multi-category search (songs/albums/artists/
+ * playlists, section 32/37) only ever runs when the user *commits* to a
+ * query — tapping a suggestion, tapping a recent search, or pressing the
+ * keyboard's search action — never automatically while still typing.
  *
- * Runs four independent searches per query (songs/albums/playlists/artists,
- * section 32/37) using the real, distinct NewPipeExtractor content filters
- * confirmed to exist (music_songs/music_albums/music_playlists/music_artists).
- * Each category fails independently — an albums-search failure doesn't
- * blank out songs that already loaded successfully.
+ * This is a deliberate behavior change from an earlier version of this
+ * screen that auto-searched on every keystroke after a debounce: that
+ * meant a real network search fired continuously while typing, racing
+ * against the suggestions lookup in an unpredictable way (which
+ * particular result won a given keystroke's race depended on per-request
+ * network timing) and never matched how any mainstream music app
+ * actually behaves — typing narrows suggestions, only submitting runs a
+ * real search.
  *
- * Also owns YouTube Music-style "recent searches": a submitted query
- * (debounce elapsed and the search actually ran) is remembered so it can
- * be recalled from the idle/empty search screen later, independent of the
- * short-lived result cache used to speed up re-searching.
+ * Runs four independent searches per submitted query (songs/albums/
+ * playlists/artists, section 32/37) using the real, distinct
+ * NewPipeExtractor content filters confirmed to exist (music_songs/
+ * music_albums/music_playlists/music_artists). Each category fails
+ * independently — an albums-search failure doesn't blank out songs that
+ * already loaded successfully.
  *
- * And YouTube Music-style live autocomplete suggestions while typing (a
- * real NewPipeExtractor YoutubeSuggestionExtractor lookup, section: never
- * fabricate a feature — this genuinely queries YouTube's own suggestion
- * endpoint), debounced much more lightly than the real search itself
- * since a suggestions dropdown is expected to feel closer to instant.
+ * Also owns YouTube Music-style "recent searches": a submitted query is
+ * remembered so it can be recalled from the idle/empty search screen
+ * later, independent of the short-lived result cache used to speed up
+ * re-searching.
  */
 class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewModel() {
 
@@ -78,12 +73,23 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
     private var searchJob: Job? = null
     private var suggestionsJob: Job? = null
 
+    /**
+     * Called on every keystroke. Updates the typed text and refreshes the
+     * suggestions dropdown only — never runs the real search. If a search
+     * was already showing results (the user had previously submitted a
+     * query and is now editing it further), those results are cleared so
+     * stale results don't sit behind/under the fresh suggestions list —
+     * matching YouTube Music/Spotify, where editing the query after a
+     * search always returns you to suggestions, not a mix of old results
+     * and new autocomplete.
+     */
     fun onQueryChanged(query: String) {
+        val wasShowingResults = _state.value.hasSearched
         _state.update { it.copy(query = query) }
-        searchJob?.cancel()
         suggestionsJob?.cancel()
 
         if (query.isBlank()) {
+            searchJob?.cancel()
             _state.update {
                 it.copy(
                     results = emptyList(),
@@ -93,14 +99,26 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
                     suggestions = emptyList(),
                     hasSearched = false,
                     isSearching = false,
-                    isPendingSearch = false,
                     errorMessage = null,
                 )
             }
             return
         }
 
-        _state.update { it.copy(isPendingSearch = true) }
+        if (wasShowingResults) {
+            searchJob?.cancel()
+            _state.update {
+                it.copy(
+                    results = emptyList(),
+                    albums = emptyList(),
+                    playlists = emptyList(),
+                    artists = emptyList(),
+                    hasSearched = false,
+                    isSearching = false,
+                    errorMessage = null,
+                )
+            }
+        }
 
         suggestionsJob = viewModelScope.launch {
             delay(SUGGESTIONS_DEBOUNCE_MS)
@@ -112,14 +130,30 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
                 _state.update { it.copy(suggestions = suggestions) }
             }
         }
+    }
+
+    /**
+     * Commits to [query] and runs the real search — called from tapping a
+     * suggestion, tapping a recent search, or the keyboard's search
+     * action/IME button. This is the *only* path that ever triggers a
+     * real network search; typing alone (see [onQueryChanged]) never does.
+     */
+    fun submitSearch(query: String) {
+        if (query.isBlank()) return
+        // isSearching flips true synchronously, in the same update as the
+        // query itself — not deferred into the coroutine below — so there
+        // is no gap at all between "suggestion tapped" and "loading
+        // skeleton showing": hasSearched is still false at this exact
+        // instant (it only flips once real results land), and without
+        // isSearching also true immediately, that gap fell through to
+        // the suggestions branch with stale/cleared suggestions and
+        // rendered a bare blank screen for a frame or more — a real,
+        // reported bug (tap a suggestion -> brief black screen -> results).
+        _state.update { it.copy(query = query, isSearching = true, suggestions = emptyList()) }
+        suggestionsJob?.cancel()
+        searchJob?.cancel()
 
         searchJob = viewModelScope.launch {
-            delay(DEBOUNCE_MS) // avoid firing a network request per keystroke
-
-            // The debounce elapsing without the query changing again is a
-            // real, deliberate search (not partial typing) — record it now
-            // rather than waiting for the network call to finish, so a
-            // query is remembered even if the search itself later fails.
             repository.recordSearch(query)
 
             val cached = repository.cachedResults(query)
@@ -127,14 +161,26 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
                 _state.update { it.copy(results = cached, hasSearched = true, errorMessage = null) }
             }
 
-            _state.update { it.copy(isSearching = true) }
-
             var songsError: String? = null
             try {
                 val fresh = repository.search(query)
-                _state.update { it.copy(results = fresh) }
+                // hasSearched flips true here, the moment the primary
+                // (songs) result is known — success or failure — rather
+                // than waiting for every category to finish. Previously
+                // this only happened in the final block below, after
+                // albums/playlists/artists had *all* also resolved: the
+                // gap in between (songs loaded, so isSearching's own
+                // results.isEmpty() check no longer held and LoadingState
+                // stopped matching, but hasSearched was still false too)
+                // fell through to the suggestions branch with an already-
+                // emptied suggestions list and rendered a second bare
+                // blank flash — a real, reported bug (skeleton -> black
+                // flicker -> results), distinct from the first "tap
+                // suggestion -> black screen" bug already fixed above.
+                _state.update { it.copy(results = fresh, hasSearched = true, isSearching = false) }
             } catch (failure: ProviderFailure) {
                 songsError = failure.toUserFacingMessage("Search failed")
+                _state.update { it.copy(hasSearched = true, isSearching = false, errorMessage = songsError) }
             }
 
             // Albums/playlists/artists are independent, best-effort lookups:
@@ -147,27 +193,15 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
                 .onSuccess { playlists -> _state.update { it.copy(playlists = playlists) } }
             runCatching { repository.searchArtists(query) }
                 .onSuccess { artists -> _state.update { it.copy(artists = artists) } }
-
-            _state.update {
-                it.copy(
-                    isSearching = false,
-                    isPendingSearch = false,
-                    hasSearched = true,
-                    suggestions = emptyList(),
-                    errorMessage = songsError,
-                )
-            }
         }
     }
 
-    /** Tapping a suggestion runs it immediately, same as tapping a recent search. */
-    fun onSuggestionTapped(suggestion: String) {
-        onQueryChanged(suggestion)
-    }
+    /** Tapping a suggestion commits to it and runs a real search immediately, same as tapping a recent search. */
+    fun onSuggestionTapped(suggestion: String) = submitSearch(suggestion)
 
     fun retry() {
         val current = _state.value.query
-        if (current.isNotBlank()) onQueryChanged(current)
+        if (current.isNotBlank()) submitSearch(current)
     }
 
     /** Removes one entry from the recent-searches list (its row's "x" button). */
@@ -184,7 +218,6 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
     }
 
     private companion object {
-        const val DEBOUNCE_MS = 400L
         const val SUGGESTIONS_DEBOUNCE_MS = 150L
     }
 }
