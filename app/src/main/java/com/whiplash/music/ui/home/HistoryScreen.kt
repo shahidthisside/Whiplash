@@ -25,6 +25,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.whiplash.music.WhiplashApplication
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.ui.player.PlayableItemsList
+import com.whiplash.music.ui.player.SongActionsViewModel
+import com.whiplash.music.ui.player.SongActionsViewModelFactory
 import com.whiplash.music.ui.theme.GlassConfirmDialog
 import com.whiplash.music.ui.theme.GlassTokens
 import com.whiplash.music.ui.theme.PlainIconButton
@@ -44,6 +46,9 @@ fun HistoryScreen(
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: HistoryViewModel = viewModel(factory = HistoryViewModelFactory(app.libraryRepository))
+    val songActionsViewModel: SongActionsViewModel = viewModel(
+        factory = SongActionsViewModelFactory(app.libraryRepository),
+    )
     val history by viewModel.history.collectAsState()
     var showClearConfirm by remember { mutableStateOf(false) }
 
@@ -78,7 +83,12 @@ fun HistoryScreen(
                     )
                 }
             } else {
-                PlayableItemsList(items = history, onPlayQueue = onPlayQueue, modifier = Modifier.fillMaxSize())
+                PlayableItemsList(
+                    items = history,
+                    onPlayQueue = onPlayQueue,
+                    modifier = Modifier.fillMaxSize(),
+                    onRemoveFromHistory = { item -> songActionsViewModel.removeFromHistory(item) },
+                )
             }
         }
     }

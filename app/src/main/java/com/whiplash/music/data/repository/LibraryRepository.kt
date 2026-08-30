@@ -84,6 +84,20 @@ class LibraryRepository(
     suspend fun clearHistory() = historyDao.clear()
 
     /**
+     * Removes [item] from history only (the History screen's own per-item
+     * "Remove from history" action) — deliberately distinct from
+     * [removeFromSpeedDial], which also unpins: a history-only removal
+     * should never silently change a song's pinned status. Pinned songs
+     * still show in Speed dial afterward exactly as before, since Speed
+     * dial's own query already sources pinned tracks independently of
+     * history (see [observePinned]/[speedDial] composition in
+     * HomeViewModel).
+     */
+    suspend fun removeFromHistory(item: PlayableItem) {
+        historyDao.removeAllForTrack(item.id, item.source.toEntity())
+    }
+
+    /**
      * Removes [item] from Speed dial (section 31): deletes every history
      * entry for it (so it stops surfacing as "recently played") AND unpins
      * it if it was pinned, since "remove" should fully remove it from the

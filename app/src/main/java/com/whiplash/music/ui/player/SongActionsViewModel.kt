@@ -56,4 +56,16 @@ class SongActionsViewModel(private val libraryRepository: LibraryRepository) : V
             ToastController.show("Removed from Speed dial")
         }
     }
+
+    /**
+     * Removes [item] from history only (History screen's per-item action)
+     * — distinct from [removeFromSpeedDial]: this never touches pinned
+     * status, only the play-history record.
+     */
+    fun removeFromHistory(item: PlayableItem) {
+        viewModelScope.launch {
+            libraryRepository.removeFromHistory(item)
+            ToastController.show("Removed from history")
+        }
+    }
 }

@@ -62,6 +62,10 @@ fun PlayableItemsList(
     // changes; only Search's Songs tab currently passes these.
     onLoadMore: (() -> Unit)? = null,
     isLoadingMore: Boolean = false,
+    // Optional per-item "Remove from history" action (History screen
+    // only) — null everywhere else (Search/Local Library/Favorites),
+    // where a track has no history-specific removal concept.
+    onRemoveFromHistory: ((PlayableItem) -> Unit)? = null,
 ) {
 
     val context = LocalContext.current
@@ -205,6 +209,12 @@ fun PlayableItemsList(
                     songActionsViewModel.togglePinned(sheetItem, isCurrentlyPinned = isPinned)
                     actionsSheetItem = null
                 },
+                onRemoveFromHistory = if (onRemoveFromHistory != null) {
+                    {
+                        onRemoveFromHistory(sheetItem)
+                        actionsSheetItem = null
+                    }
+                } else null,
             )
         }
     }

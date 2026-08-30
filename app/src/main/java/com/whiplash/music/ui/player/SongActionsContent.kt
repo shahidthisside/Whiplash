@@ -49,6 +49,7 @@ fun SongActionsContent(
     onTogglePinned: (() -> Unit)? = null,
     onRemoveFromSpeedDial: (() -> Unit)? = null,
     onRemoveFromQuickPicks: (() -> Unit)? = null,
+    onRemoveFromHistory: (() -> Unit)? = null,
 ) {
     val haptic = LocalHapticFeedback.current
     Column {
@@ -143,6 +144,13 @@ fun SongActionsContent(
                 icon = { Icon(Icons.Filled.RemoveCircleOutline, contentDescription = null, tint = WhiplashColors.error) },
                 label = "Remove from Quick Picks",
                 onClick = onRemoveFromQuickPicks,
+            )
+        }
+        if (onRemoveFromHistory != null) {
+            SongActionRow(
+                icon = { Icon(Icons.Filled.RemoveCircleOutline, contentDescription = null, tint = WhiplashColors.error) },
+                label = "Remove from history",
+                onClick = onRemoveFromHistory,
             )
         }
 
