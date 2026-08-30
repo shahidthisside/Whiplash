@@ -18,6 +18,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,6 +49,7 @@ class PlaybackController(
     private val settingsRepository: SettingsRepository,
     private val libraryRepository: LibraryRepository,
     private val newPipePlaybackProvider: NewPipePlaybackProvider,
+    private val audioCacheManager: com.whiplash.music.playback.cache.AudioCacheManager,
 ) {
 
     private var controller: MediaController? = null
@@ -231,6 +234,17 @@ class PlaybackController(
         currentIndex = 0
         preparedIndices.clear()
         _state.update { it.copy(queue = queue.toList(), currentIndex = 0) }
+
+        // maybeExtendQueueWithRecommendations() is normally only triggered
+        // from playIndex() when a track *starts* playing and happens to be
+        // the last queue item. Clearing the queue also makes the current
+        // track the last item, but without a fresh playIndex() call — so
+        // without this, autoplay would never get a chance to extend the
+        // queue again, and the track would just stop dead when it finished
+        // naturally, even with Autoplay enabled (confirmed via real device
+        // testing: cleared the queue mid-playback, let the track finish,
+        // and playback stopped instead of continuing).
+        (current as? PlayableItem.YoutubeTrack)?.let { maybeExtendQueueWithRecommendations(it) }
     }
 
     private fun shiftPreparedIndicesAfterInsert(insertAt: Int) {
@@ -329,6 +343,7 @@ class PlaybackController(
             is PlayableItem.LocalTrack -> startMediaItem(item, resolvedStreamUrl = null)
             is PlayableItem.YoutubeTrack -> {
                 val cached = prefetched?.takeIf { it.forItemId == item.id }
+                val mediaId = PlayableItemMediaItemMapper.mediaIdOf(item)
                 if (cached != null) {
                     // Gapless (section 18): this track's stream was already resolved
                     // while the previous one was still playing, so there is no
@@ -336,13 +351,85 @@ class PlaybackController(
                     // Artwork was already applied above (displayItem), so no
                     // separate upgrade step or second state update is needed here.
                     prefetched = null
+                    // Real, reported bug found during full regression testing:
+                    // this fast path (and the isFullyCached one below) started
+                    // playback and extended the queue but never called
+                    // cacheSong — only the slow, full network-resolve branch
+                    // below did. That meant any track reached via gapless
+                    // prefetch or a fully-cached-audio replay never got a row
+                    // written to the songs table, so it silently vanished from
+                    // Speed dial/Favorites/Playlists (their queries join
+                    // against songs for title/artist/artwork) even though
+                    // history correctly recorded it — confirmed directly via
+                    // sqlite (a real trackId present in history with no
+                    // matching row in songs at all). cacheSong is cheap/
+                    // idempotent (an upsert), so calling it here has no
+                    // downside beyond the one it already has in the slow path.
+                    scope.launch { libraryRepository.cacheSong(item) }
                     startMediaItem(displayItem, resolvedStreamUrl = cached.streamUrl)
+                    maybeExtendQueueWithRecommendations(item)
+                } else if (audioCacheManager.isFullyCached(mediaId)) {
+                    // The track's audio is already fully present in the on-disk
+                    // cache from a previous play (same stable cache key as
+                    // PlayableItemMediaItemMapper.mediaIdOf) — skip the network
+                    // stream-resolution round-trip entirely rather than running
+                    // it unconditionally just to obtain *a* URL to hand to
+                    // ExoPlayer. This was the real root cause of "a cached song
+                    // still takes time to reload on replay": the disk cache
+                    // alone only ever saved re-downloading bytes once ExoPlayer
+                    // already had a URL to open, never the resolve step itself.
+                    // The placeholder URI below is safe because
+                    // TogglableCacheDataSourceFactory's ResolvingDataSource layer
+                    // checks the exact same isFullyCached condition before ever
+                    // dereferencing it — for a real cache hit, this URI is
+                    // guaranteed never touched over the network. If cache state
+                    // somehow changed between this check and the actual read
+                    // (e.g. a concurrent Clear Cache), that same layer transparently
+                    // falls back to a fresh resolve keyed off resolveFreshUri,
+                    // so this is not a fragile assumption — it's a fast-path
+                    // hint, not the sole safety mechanism.
+                    //
+                    // Same real bug as the gapless branch above — see its
+                    // comment — applies here too: this fast path also never
+                    // called cacheSong, so a replayed fully-cached track
+                    // could disappear from Speed dial/Favorites/Playlists.
+                    scope.launch { libraryRepository.cacheSong(item) }
+                    _state.update { it.copy(isResolvingStream = false) }
+                    startMediaItem(displayItem, resolvedStreamUrl = "cache://$mediaId")
                     maybeExtendQueueWithRecommendations(item)
                 } else {
                     scope.launch {
                         val quality = settingsRepository.audioQuality.first()
                         libraryRepository.cacheSong(item)
-                        val result = playbackManager.resolveStream(item, quality)
+                        // Wrapped in withTimeout: playbackManager.resolveStream()
+                        // (and the NewPipeExtractor calls under it) has no
+                        // internal timeout of its own beyond individual HTTP
+                        // calls' connect/read timeouts (see OkHttpClient in
+                        // WhiplashApplication) — a StreamInfo.getInfo() resolve
+                        // makes several sequential requests, so a slow/stuck
+                        // upstream can compound well past any single request's
+                        // timeout without ever throwing. Confirmed as a real
+                        // bug via on-device testing: a track sat in
+                        // isResolvingStream/buffering for over 10 minutes with
+                        // zero error surfaced, until the system's own
+                        // notification-manager timeout (unrelated to this
+                        // app's own error handling) eventually intervened.
+                        // This bounds the whole resolve attempt so the user
+                        // always gets a real, actionable error within a
+                        // reasonable window instead of an indefinitely stuck
+                        // loading indicator.
+                        val result = try {
+                            kotlinx.coroutines.withTimeout(RESOLVE_STREAM_TIMEOUT_MS) {
+                                playbackManager.resolveStream(item, quality)
+                            }
+                        } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                            FallbackResult.Failure(
+                                com.whiplash.music.playback.provider.ProviderFailure.NetworkFailure(
+                                    "Timed out resolving ${item.title}",
+                                ),
+                                attempts = emptyList(),
+                            )
+                        }
                         if (generation != resolveGeneration) return@launch // superseded by a newer playIndex call
 
                         when (result) {
@@ -351,6 +438,17 @@ class PlaybackController(
                                 _state.update { it.copy(isResolvingStream = false, currentItem = upgraded ?: it.currentItem) }
                                 startMediaItem(upgraded ?: item, resolvedStreamUrl = result.value.streamUrl)
                                 maybeExtendQueueWithRecommendations(item)
+                                // Persist the upgraded (higher-res) artwork
+                                // over the earlier cacheSong() call's
+                                // search-time thumbnail, so History/
+                                // Favorites/Playlists reconstructing this
+                                // track later via LibraryRepository also
+                                // get the better artwork instead of always
+                                // falling back to the lower-res one that
+                                // was cached before this resolve completed.
+                                if (upgraded is PlayableItem.YoutubeTrack) {
+                                    scope.launch { libraryRepository.cacheSong(upgraded) }
+                                }
                             }
                             is FallbackResult.Failure -> {
                                 _state.update {
@@ -359,6 +457,7 @@ class PlaybackController(
                                         playbackError = PlaybackError(
                                             itemTitle = item.title,
                                             message = result.failure.message ?: "Playback failed",
+                                            isNetworkFailure = result.failure is com.whiplash.music.playback.provider.ProviderFailure.NetworkFailure,
                                         ),
                                     )
                                 }
@@ -390,7 +489,14 @@ class PlaybackController(
             prefetchJob = scope.launch {
                 try {
                     val quality = settingsRepository.audioQuality.first()
-                    val result = playbackManager.resolveStream(nextItem, quality)
+                    // Same withTimeout guard as the main resolve path in
+                    // playIndex() — without it, a hung upstream here would
+                    // leak this prefetch coroutine forever rather than
+                    // falling through to the existing "prefetch is only a
+                    // latency optimization" catch block below.
+                    val result = kotlinx.coroutines.withTimeout(RESOLVE_STREAM_TIMEOUT_MS) {
+                        playbackManager.resolveStream(nextItem, quality)
+                    }
                     if (result is FallbackResult.Success) {
                         prefetched = PrefetchedStream(nextItem.id, result.value.streamUrl, result.value.resolvedArtworkUrl)
                         result.value.resolvedArtworkUrl?.let { url ->
@@ -468,7 +574,33 @@ class PlaybackController(
             try {
                 val related = newPipePlaybackProvider.getRelatedTracks(justStarted.id)
                 val existingIds = queue.map { it.id }.toSet()
-                val toAdd = related.filter { it.id !in existingIds }.take(MAX_AUTOPLAY_ADDITIONS)
+                val candidates = related.filter { it.id !in existingIds }
+
+                // Filter out non-music content before adding to the queue.
+                // YouTube's own generic "related videos" (what NewPipeExtractor's
+                // StreamInfo.relatedItems returns for a watch?v= URL) is not
+                // the same as a music-scoped recommendation feed — it can
+                // freely mix in anything from the same channel/algorithmic
+                // bucket regardless of type (confirmed via real testing:
+                // playing "Perfect" by Ed Sheeran returned a real 948-second
+                // "Entertainment"-category clip and a 791-second "Education"-
+                // category clip alongside genuine songs). Each candidate's
+                // real YouTube category (Music/Comedy/Entertainment/etc,
+                // from the same full watch-page response used elsewhere in
+                // this provider) is checked in parallel and only Music-
+                // categorized items are kept — a real signal YouTube itself
+                // assigns per video, not a guess based on title/duration
+                // heuristics that would be fragile and easy to get wrong.
+                val filtered = candidates.take(MAX_AUTOPLAY_ADDITIONS * 2).map { candidate ->
+                    async {
+                        val info = runCatching { newPipePlaybackProvider.getPlayerInfo(candidate.id) }.getOrNull()
+                        candidate to info?.category
+                    }
+                }.awaitAll()
+                    .filter { (_, category) -> category == null || category.equals("Music", ignoreCase = true) }
+                    .map { (candidate, _) -> candidate }
+
+                val toAdd = filtered.take(MAX_AUTOPLAY_ADDITIONS)
                 if (toAdd.isEmpty()) return@launch
 
                 queue.addAll(toAdd)
@@ -555,10 +687,62 @@ class PlaybackController(
 
     fun togglePlayPause() {
         val c = controller ?: return
+        // If the current item previously failed to resolve (e.g. no
+        // internet when the user first tapped it), there is no prepared
+        // MediaItem for ExoPlayer to play/pause at all — c.play() would be
+        // a silent no-op, which is exactly why tapping the mini-player/
+        // full-player Play button did nothing and never even offered the
+        // same "couldn't play"/"no internet" feedback the initial tap-to-
+        // play gave. Retry the resolve instead, so this button always
+        // either plays or gives the same real feedback, never nothing.
+        if (_state.value.playbackError != null && currentIndex in queue.indices) {
+            playIndex(currentIndex)
+            return
+        }
         if (c.isPlaying) c.pause() else c.play()
     }
 
-    fun seekTo(positionMs: Long) = controller?.seekTo(positionMs)
+    /**
+     * Seeks within the currently playing item. Clamps the target against
+     * the player's own LIVE duration (not whatever the UI's seek bar had
+     * cached when the user released it) so a seek request computed just
+     * before a track transition can never accidentally land at/past the
+     * (possibly already-different) current item's real end and trigger an
+     * immediate, ambiguous STATE_ENDED right on top of the natural
+     * end-of-track path — the deeper root cause behind a real, reported
+     * bug ("seeking near the end of a track sometimes restarts/skips
+     * unexpectedly"). [ui.player.FullPlayerScreen]'s SeekBar already keeps
+     * a safety margin from its own (UI-side) duration snapshot; this is
+     * the second, authoritative layer against the live player state.
+     */
+    fun seekTo(positionMs: Long) {
+        val c = controller ?: return
+        val liveDuration = c.duration
+        val safeTarget = if (liveDuration > 0) {
+            positionMs.coerceIn(0L, (liveDuration - END_OF_TRACK_SEEK_MARGIN_MS).coerceAtLeast(0L))
+        } else {
+            positionMs
+        }
+        c.seekTo(safeTarget)
+        // Optimistically reflect the seek target in state immediately,
+        // rather than waiting for the next refreshPositionAndDuration()
+        // (from onEvents, or the next 500ms ticker iteration). MediaController.
+        // seekTo() is asynchronous — it does not synchronously update
+        // c.currentPosition — so without this, there is a real window
+        // (confirmed via real, reported repeated-tapping on the seek bar)
+        // where _state.positionMs still holds whatever was last polled up
+        // to ~500ms ago. FullPlayerScreen's SeekBar stops treating a tap
+        // as "dragging" (and so falls back to state.positionMs for what it
+        // renders) the instant this function is called, so any gap here
+        // was directly visible as the bar briefly snapping backward to a
+        // stale position before catching up to where the user actually
+        // tapped — worse with rapid successive taps, since each one
+        // reopened the same window. This does not create a genuine mismatch:
+        // the very next real onEvents callback (which always fires once
+        // the seek actually completes) overwrites this with the true
+        // value anyway.
+        _state.update { it.copy(positionMs = safeTarget) }
+    }
 
     /** Advances to the next queue item, honoring shuffle/repeat (section 21). */
     fun seekToNext() {
@@ -782,7 +966,22 @@ class PlaybackController(
         /** How far before track-end to start resolving the next stream (section 18: gapless). */
         const val PREFETCH_LEAD_MS = 8_000L
 
+        /** See [seekTo]'s doc — never let a manual seek land within this margin of the live player's real duration. */
+        const val END_OF_TRACK_SEEK_MARGIN_MS = 1000L
+
         /** Volume-ramp step interval for fade in/out (section 18). */
         const val FADE_STEP_MS = 40L
+
+        /**
+         * Hard ceiling on a single playbackManager.resolveStream() attempt
+         * (which itself may try multiple providers in sequence, see
+         * PlaybackManager's fallback loop). Generous enough to comfortably
+         * cover a real multi-request StreamInfo.getInfo() resolve under
+         * normal conditions, but bounded so a hung/degraded upstream always
+         * surfaces a real error instead of leaving the UI buffering
+         * indefinitely (see the real bug this fixes, documented at the
+         * withTimeout call site in playIndex()).
+         */
+        const val RESOLVE_STREAM_TIMEOUT_MS = 30_000L
     }
 }

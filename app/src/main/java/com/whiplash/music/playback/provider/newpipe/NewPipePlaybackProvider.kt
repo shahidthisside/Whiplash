@@ -112,6 +112,7 @@ class NewPipePlaybackProvider(
                 album = null,
                 artworkUrl = streamInfo.thumbnails.maxByOrNull { it.height }?.url,
                 durationMs = streamInfo.duration.takeIf { it >= 0 }?.times(1000),
+                category = streamInfo.category,
             )
         }
     }
@@ -158,6 +159,23 @@ class NewPipePlaybackProvider(
      * Runs [block], recording success/failure into [healthTracker] and
      * translating every exception into a [ProviderFailure] subtype.
      * [ProviderFailure]s thrown by [block] itself pass through unchanged.
+     *
+     * Deliberately does NOT record a failure against this provider's
+     * health for [ProviderFailure.NetworkFailure] (real root cause of a
+     * reported bug: a device-level "no internet" failure was being
+     * misattributed as "the NewPipe provider itself is unreliable" —
+     * repeated taps while offline quickly pushed the failure rate over
+     * [ProviderHealthTracker]'s TEMPORARILY_UNAVAILABLE threshold, putting
+     * the only configured provider into a real multi-second-to-minutes
+     * cooldown. Since there is only one provider, once benched every
+     * subsequent play attempt failed with "All providers unavailable"
+     * REGARDLESS of the network coming back — the actual explanation for
+     * why reconnecting and re-tapping the same song still failed, while a
+     * different song also failed until enough real wall-clock time passed
+     * for the cooldown to lapse on its own). A connectivity problem is
+     * about the device, not about whether NewPipeExtractor/YouTube's own
+     * extraction logic is working — it must never count against provider
+     * health or trigger a cooldown.
      */
     private suspend fun <T> runCatchingProviderFailure(block: suspend () -> T): T {
         try {
@@ -165,11 +183,12 @@ class NewPipePlaybackProvider(
             healthTracker.recordSuccess(id)
             return result
         } catch (e: ProviderFailure) {
-            healthTracker.recordFailure(id)
+            if (e !is ProviderFailure.NetworkFailure) healthTracker.recordFailure(id)
             throw e
         } catch (e: Exception) {
-            healthTracker.recordFailure(id)
-            throw e.toProviderFailure()
+            val failure = e.toProviderFailure()
+            if (failure !is ProviderFailure.NetworkFailure) healthTracker.recordFailure(id)
+            throw failure
         }
     }
 

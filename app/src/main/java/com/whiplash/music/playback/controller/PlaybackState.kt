@@ -34,5 +34,15 @@ sealed interface SleepTimerMode {
     data object EndOfQueue : SleepTimerMode
 }
 
-/** UI-facing description of a playback failure that could not be resolved by any provider. */
-data class PlaybackError(val itemTitle: String, val message: String)
+/**
+ * UI-facing description of a playback failure that could not be resolved
+ * by any provider. [isNetworkFailure] lets the UI show a specific "No
+ * internet connection" message for connectivity problems and a generic
+ * "Couldn't play this song" for everything else, without the UI needing
+ * to know about [com.whiplash.music.playback.provider.ProviderFailure]'s
+ * internal type hierarchy or ever surface a raw exception message to the
+ * user (section: keep user-facing errors simple, standard, and brief —
+ * matching Spotify/YouTube Music's own short connectivity toasts rather
+ * than exposing technical failure detail).
+ */
+data class PlaybackError(val itemTitle: String, val message: String, val isNetworkFailure: Boolean = false)

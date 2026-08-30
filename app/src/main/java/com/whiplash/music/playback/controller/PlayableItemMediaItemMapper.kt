@@ -14,6 +14,18 @@ import com.whiplash.music.domain.model.PlayableItem
  * and must be refreshed by the provider layer) — the caller resolves one
  * via [com.whiplash.music.playback.provider.PlaybackManager] first and
  * passes it in as [resolvedStreamUrl].
+ *
+ * [PlayableItem.YoutubeTrack] also gets a stable [MediaItem.Builder.setCustomCacheKey]
+ * derived from the track's own id (never the resolved stream URL itself).
+ * YouTube's resolved `googlevideo.com` URLs carry a signature/expiry that
+ * changes on every fresh resolve of the *same* video — without a stable
+ * key, [androidx.media3.datasource.cache.CacheDataSource]'s default
+ * cache-key factory falls back to the request URI itself, so replaying an
+ * already-fully-cached track (whose stream was re-resolved to a new URL
+ * since it was last played) was a guaranteed cache miss: it re-downloaded
+ * into a brand new cache entry rather than reading the existing one,
+ * despite the audio bytes for that track already being on disk. This is
+ * exactly why a cached song still took time to reload on replay.
  */
 object PlayableItemMediaItemMapper {
 
@@ -36,6 +48,7 @@ object PlayableItemMediaItemMapper {
                 // is responsible for resolving one before calling this with
                 // a YoutubeTrack (see PlaybackController.playNow).
                 resolvedStreamUrl?.let { builder.setUri(it.toUri()) }
+                builder.setCustomCacheKey(mediaIdOf(item))
             }
         }
 

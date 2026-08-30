@@ -3,6 +3,7 @@ package com.whiplash.music.ui.player
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.whiplash.music.data.repository.LibraryRepository
+import com.whiplash.music.data.repository.SettingsRepository
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.playback.controller.PlaybackController
 import com.whiplash.music.playback.controller.PlaybackState
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 class PlayerViewModel(
     private val controller: PlaybackController,
     private val libraryRepository: LibraryRepository,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     val state: StateFlow<PlaybackState> = controller.state
@@ -34,6 +36,21 @@ class PlayerViewModel(
                 ?: kotlinx.coroutines.flow.flowOf(false)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    /**
+     * The same global Autoplay setting from Settings (section 22), exposed
+     * here too as a shortcut in the Queue sheet — queue-exhaustion behavior
+     * is exactly what a user checking the queue is often thinking about in
+     * the moment. This mirrors, not replaces, the Settings toggle: both
+     * read/write the same SettingsRepository.autoplayEnabled, so either
+     * surface always reflects the other's changes immediately.
+     */
+    val autoplayEnabled: StateFlow<Boolean> = settingsRepository.autoplayEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    fun setAutoplayEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setAutoplayEnabled(enabled) }
+    }
 
     fun togglePlayPause() = controller.togglePlayPause()
 

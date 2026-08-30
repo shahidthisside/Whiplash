@@ -13,6 +13,7 @@ import com.whiplash.music.playback.cache.TogglableCacheDataSourceFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 
@@ -50,6 +51,26 @@ class WhiplashPlaybackService : MediaSessionService() {
             cacheManager = app.audioCacheManager,
             plainFactory = DefaultDataSource.Factory(this),
             isCacheEnabled = { audioCacheEnabled },
+            resolveFreshUri = { cacheKey ->
+                // Narrow fallback only: fires when PlaybackController's
+                // isFullyCached fast-path placeholder URI (see its
+                // playIndex) turns out to no longer be backed by a full
+                // cache entry by the time the actual read happens (e.g. a
+                // concurrent Clear Cache) — not the normal per-track
+                // resolve path, which stays entirely in PlaybackController.
+                // Runs on a background loading thread; safe to block here,
+                // the same way other open-source Media3-backed YouTube
+                // clients' own ResolvingDataSource resolvers do (e.g.
+                // ViMusic's PlayerService). cacheKey is the stable
+                // "SOURCE:id" from PlayableItemMediaItemMapper.mediaIdOf —
+                // strip the source prefix back to the bare video id
+                // NewPipePlaybackProvider expects.
+                val videoId = cacheKey.substringAfter(':', missingDelimiterValue = cacheKey)
+                kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                    val quality = app.settingsRepository.audioQuality.first()
+                    runCatching { app.newPipePlaybackProvider.getStream(videoId, quality).streamUrl }.getOrNull()
+                }
+            },
         )
 
         val player = ExoPlayer.Builder(this)

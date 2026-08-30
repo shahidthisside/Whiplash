@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -45,7 +46,7 @@ import com.whiplash.music.ui.player.SongActionsContent
 import com.whiplash.music.ui.player.SongActionsViewModel
 import com.whiplash.music.ui.player.SongActionsViewModelFactory
 import com.whiplash.music.ui.theme.GlassArtworkThumbnail
-import com.whiplash.music.ui.theme.GlassIconButton
+import com.whiplash.music.ui.theme.PlainIconButton
 import com.whiplash.music.ui.theme.GlassListItem
 import com.whiplash.music.ui.theme.GlassSheet
 import com.whiplash.music.ui.theme.GlassTokens
@@ -63,7 +64,7 @@ private enum class SheetOrigin { SPEED_DIAL, QUICK_PICKS }
 @androidx.compose.material3.ExperimentalMaterial3Api
 @ExperimentalFoundationApi
 @Composable
-fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit) {
+fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: HomeViewModel = viewModel(
@@ -80,6 +81,7 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit) {
     var actionsSheetOrigin by remember { mutableStateOf(SheetOrigin.SPEED_DIAL) }
     var addToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    var showClearSpeedDialConfirm by remember { mutableStateOf(false) }
 
     if (speedDial.isEmpty() && quickPicks.isEmpty() && !isLoadingQuickPicks) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -99,7 +101,7 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit) {
     ) {
         if (speedDial.isNotEmpty()) {
             item {
-                SectionHeader(title = "Speed dial", onClear = viewModel::clearHistory)
+                SectionHeader(title = "Speed dial", onHistory = onOpenHistory, onClear = { showClearSpeedDialConfirm = true })
             }
             item {
                 SpeedDialGrid(
@@ -229,6 +231,18 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit) {
             onDismiss = { showCreatePlaylistDialog = false },
         )
     }
+
+    if (showClearSpeedDialConfirm) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Clear Speed dial?",
+            message = "This clears your recently played history. Pinned songs will stay. This can't be undone.",
+            onConfirm = {
+                viewModel.clearHistory()
+                showClearSpeedDialConfirm = false
+            },
+            onDismiss = { showClearSpeedDialConfirm = false },
+        )
+    }
 }
 
 /**
@@ -311,7 +325,7 @@ private fun SpeedDialTile(
 }
 
 @Composable
-private fun SectionHeader(title: String, onClear: () -> Unit) {
+private fun SectionHeader(title: String, onHistory: (() -> Unit)? = null, onClear: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = GlassTokens.spaceSm, bottom = GlassTokens.spaceXs),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -322,12 +336,23 @@ private fun SectionHeader(title: String, onClear: () -> Unit) {
             style = MaterialTheme.typography.titleMedium,
             color = WhiplashColors.textPrimary,
         )
-        GlassIconButton(contentDescription = "Clear $title", onClick = onClear, size = 40.dp) {
-            androidx.compose.material3.Icon(
-                Icons.Filled.Close,
-                contentDescription = null,
-                tint = WhiplashColors.textSecondary,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (onHistory != null) {
+                PlainIconButton(contentDescription = "See full history", onClick = onHistory, size = 40.dp) {
+                    androidx.compose.material3.Icon(
+                        Icons.Filled.History,
+                        contentDescription = null,
+                        tint = WhiplashColors.textSecondary,
+                    )
+                }
+            }
+            PlainIconButton(contentDescription = "Clear $title", onClick = onClear, size = 40.dp) {
+                androidx.compose.material3.Icon(
+                    Icons.Filled.Close,
+                    contentDescription = null,
+                    tint = WhiplashColors.textSecondary,
+                )
+            }
         }
     }
 }

@@ -83,6 +83,42 @@ class AudioCacheManager(context: Context) {
     fun currentCacheSizeBytes(): Long = runCatching { getOrCreateCache().cacheSpace }.getOrDefault(0L)
 
     /**
+     * Whether the full content for [cacheKey] (the same stable key set via
+     * [androidx.media3.common.MediaItem.Builder.setCustomCacheKey], see
+     * [com.whiplash.music.playback.controller.PlayableItemMediaItemMapper.mediaIdOf])
+     * is already present on disk with no gaps, using [Cache.isCached] —
+     * the same check other open-source Media3-backed YouTube music clients
+     * use before deciding whether a track needs a fresh network resolve
+     * (e.g. ViMusic's `PlayerService.createDataSourceFactory()`, which
+     * checks `cache.isCached(videoId, dataSpec.position, chunkLength)`
+     * ahead of calling its own stream resolver).
+     *
+     * Used by [com.whiplash.music.playback.controller.PlaybackController]
+     * to skip the network stream-resolution round-trip entirely when a
+     * track is already fully cached — this was the actual root cause of
+     * "a cached song still takes time to reload": the disk cache alone
+     * only ever avoided re-downloading the audio bytes once ExoPlayer had
+     * a URL to read from; it did nothing for the NewPipeExtractor network
+     * call that has to run first to obtain that URL at all, which
+     * [com.whiplash.music.playback.controller.PlaybackController.playIndex]
+     * previously ran unconditionally on every replay.
+     *
+     * Relies on [androidx.media3.datasource.cache.ContentMetadata]'s
+     * content-length record, which [androidx.media3.datasource.cache.CacheDataSource]
+     * writes once a read learns the resource's total length (from the
+     * upstream response) — present as soon as any read of the track has
+     * started, not only once fully finished, so this correctly returns
+     * false for a track that's only partially cached (e.g. skipped away
+     * from before finishing) since such an entry can't serve playback
+     * from position 0 through the end without also needing the network.
+     */
+    fun isFullyCached(cacheKey: String): Boolean = runCatching {
+        val cache = getOrCreateCache()
+        val contentLength = androidx.media3.datasource.cache.ContentMetadata.getContentLength(cache.getContentMetadata(cacheKey))
+        contentLength > 0 && cache.isCached(cacheKey, 0, contentLength)
+    }.getOrDefault(false)
+
+    /**
      * Deletes every cached byte (the real "Clear cache" action Spotify's
      * own storage settings expose — see class doc). Safe to call whether
      * or not a track is currently playing from the cache; ExoPlayer/

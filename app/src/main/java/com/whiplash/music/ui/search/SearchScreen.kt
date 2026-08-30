@@ -21,9 +21,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,7 +44,7 @@ import com.whiplash.music.ui.theme.GlassTabRow
 import com.whiplash.music.ui.theme.GlassTokens
 import com.whiplash.music.ui.theme.WhiplashColors
 
-private enum class SearchResultTab(val label: String) {
+enum class SearchResultTab(val label: String) {
     SONGS("Songs"),
     ALBUMS("Albums"),
     ARTISTS("Artists"),
@@ -77,12 +74,13 @@ fun SearchScreen(
     onPlayTrack: (PlayableItem.YoutubeTrack) -> Unit,
     onOpenAlbum: (YoutubePlaylistResult) -> Unit = {},
     onOpenArtist: (YoutubeArtistResult) -> Unit = {},
+    selectedTab: SearchResultTab = SearchResultTab.SONGS,
+    onSelectedTabChange: (SearchResultTab) -> Unit = {},
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: SearchViewModel = viewModel(factory = SearchViewModelFactory(app.youtubeSearchRepository))
     val state by viewModel.state.collectAsState()
-    var selectedTab by rememberSaveable { mutableStateOf(SearchResultTab.SONGS) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
@@ -129,7 +127,7 @@ fun SearchScreen(
                 GlassTabRow(
                     items = SearchResultTab.entries,
                     selected = selectedTab,
-                    onSelect = { selectedTab = it },
+                    onSelect = onSelectedTabChange,
                     label = { tab ->
                         val count = when (tab) {
                             SearchResultTab.SONGS -> state.results.size
@@ -295,7 +293,7 @@ private fun IdleState(onSuggestionTap: (String) -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "Search YouTube Music for any song.",
+            text = "Search for any song.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

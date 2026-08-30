@@ -12,10 +12,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,8 +31,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.ui.theme.GlassArtworkThumbnail
-import com.whiplash.music.ui.theme.GlassIconButton
 import com.whiplash.music.ui.theme.GlassTokens
+import com.whiplash.music.ui.theme.PlainIconButton
 import com.whiplash.music.ui.theme.WhiplashColors
 import com.whiplash.music.ui.theme.WhiplashRadius
 
@@ -47,6 +49,8 @@ import com.whiplash.music.ui.theme.WhiplashRadius
 fun QueueContent(
     queue: List<PlayableItem>,
     currentIndex: Int,
+    autoplayEnabled: Boolean,
+    onToggleAutoplay: (Boolean) -> Unit,
     onPlayIndex: (Int) -> Unit,
     onRemove: (Int) -> Unit,
     onMove: (from: Int, to: Int) -> Unit,
@@ -63,9 +67,35 @@ fun QueueContent(
                 style = MaterialTheme.typography.titleLarge,
                 color = WhiplashColors.textPrimary,
             )
-            if (queue.size > 1) {
-                GlassIconButton(contentDescription = "Clear queue", onClick = onClear, size = 40.dp) {
-                    Icon(Icons.Filled.DeleteSweep, contentDescription = null, tint = WhiplashColors.textSecondary)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Shortcut for the same Autoplay setting in Settings
+                // (section 22) — surfaced here too since queue-exhaustion
+                // behavior is exactly what a user checking the queue is
+                // often thinking about in the moment, without having to
+                // leave the sheet and navigate to a different tab. Setting
+                // remains fully present and controllable from Settings as
+                // well; this is an additional shortcut, not a replacement.
+                // A single tappable icon (filled+accent when on, outlined+
+                // dim when off) rather than a Material Switch: a full-size
+                // Switch reads as bulky/heavy squeezed into this compact
+                // icon-button row, out of place next to the plain 40dp
+                // icon buttons beside it (confirmed visually, see also the
+                // Favorite heart's identical filled/outlined convention).
+                PlainIconButton(
+                    contentDescription = if (autoplayEnabled) "Autoplay on. Tap to turn off." else "Autoplay off. Tap to turn on.",
+                    onClick = { onToggleAutoplay(!autoplayEnabled) },
+                    size = 40.dp,
+                ) {
+                    Icon(
+                        imageVector = if (autoplayEnabled) Icons.Filled.Autorenew else Icons.Outlined.Autorenew,
+                        contentDescription = null,
+                        tint = if (autoplayEnabled) WhiplashColors.accent else WhiplashColors.textTertiary,
+                    )
+                }
+                if (queue.size > 1) {
+                    PlainIconButton(contentDescription = "Clear queue", onClick = onClear, size = 40.dp) {
+                        Icon(Icons.Filled.DeleteSweep, contentDescription = null, tint = WhiplashColors.textSecondary)
+                    }
                 }
             }
         }
@@ -134,7 +164,7 @@ private fun QueueRow(
         // here, not the underlying icon tap, so it fires on every
         // successful move rather than being tied to a longer gesture.
         if (canMoveUp) {
-            GlassIconButton(
+            PlainIconButton(
                 contentDescription = "Move up",
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -146,7 +176,7 @@ private fun QueueRow(
             }
         }
         if (canMoveDown) {
-            GlassIconButton(
+            PlainIconButton(
                 contentDescription = "Move down",
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -157,7 +187,7 @@ private fun QueueRow(
                 Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = WhiplashColors.textTertiary)
             }
         }
-        GlassIconButton(contentDescription = "Remove from queue", onClick = onRemove, size = 40.dp) {
+        PlainIconButton(contentDescription = "Remove from queue", onClick = onRemove, size = 40.dp) {
             Icon(Icons.Filled.Close, contentDescription = null, tint = WhiplashColors.textTertiary)
         }
     }

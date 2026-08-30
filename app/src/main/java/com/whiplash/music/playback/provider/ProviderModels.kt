@@ -39,4 +39,6 @@ data class ProviderPlayerInfo(
     val album: String?,
     val artworkUrl: String?,
     val durationMs: Long?,
+    /** The video's YouTube category (e.g. "Music", "Comedy", "Entertainment"), if available. */
+    val category: String? = null,
 )

@@ -175,7 +175,7 @@ private fun WhiplashApp() {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val playerViewModel: PlayerViewModel = viewModel(
-        factory = PlayerViewModelFactory(app.playbackController, app.libraryRepository),
+        factory = PlayerViewModelFactory(app.playbackController, app.libraryRepository, app.settingsRepository),
     )
     val playbackState by playerViewModel.state.collectAsState()
     val lyricsViewModel: com.whiplash.music.ui.player.LyricsViewModel = viewModel(
@@ -186,10 +186,27 @@ private fun WhiplashApp() {
     var isPlayerExpanded by rememberSaveable { mutableStateOf(false) }
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.HOME) }
     var openPlaylist by remember { mutableStateOf<com.whiplash.music.domain.model.Playlist?>(null) }
+    // Same collapse-not-exit back pattern as openPlaylist, for the Home
+    // tab's "see full History" screen (reached via Speed dial's History
+    // button — see HomeScreen/SectionHeader).
+    var showHistory by rememberSaveable { mutableStateOf(false) }
     // Simple back-stack for Search tab detail navigation (album/artist),
     // since an artist page can itself open an album (section 40 "albums"
     // tab), needing more than one level of "open detail" state.
     var searchDetailStack by remember { mutableStateOf<List<SearchDestination>>(emptyList()) }
+    // Hoisted up from SearchScreen itself (real, reported bug: SearchScreen
+    // is removed from composition entirely while an album/artist detail
+    // screen is open — see the AppTab.SEARCH branch below — so a plain
+    // rememberSaveable INSIDE SearchScreen for which Songs/Albums/Artists/
+    // Playlists sub-tab was selected did not reliably survive that
+    // removal/reinsertion, and going back from a detail screen always
+    // reset the selection to Songs regardless of what the user had
+    // actually selected before opening that album/artist). Living here
+    // instead means it survives exactly as long as searchDetailStack
+    // itself already correctly does.
+    var selectedSearchResultTab by rememberSaveable {
+        mutableStateOf(com.whiplash.music.ui.search.SearchResultTab.SONGS)
+    }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -211,6 +228,21 @@ private fun WhiplashApp() {
         }
     }
 
+    // A plain, brief system Toast on a failed play attempt — matching the
+    // standard, simple "no internet connection" popup every mainstream
+    // music app (Spotify, YouTube Music) shows for a few seconds, rather
+    // than surfacing the raw underlying failure (e.g. a DNS resolution
+    // exception message) which is meaningless to a regular user. The
+    // message stays generic and short on purpose either way — the user
+    // only needs to know "this didn't work, check your connection" (for a
+    // real connectivity problem) or "this didn't work" (anything else),
+    // never the technical reason.
+    LaunchedEffect(playbackState.playbackError) {
+        val error = playbackState.playbackError ?: return@LaunchedEffect
+        val message = if (error.isNetworkFailure) "No internet connection" else "Couldn't play this song"
+        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
     // Collapse the full player on system back instead of the default
     // Activity behavior (exiting the app). Only intercepts back while the
     // full player is actually open, so normal back navigation elsewhere is
@@ -224,6 +256,11 @@ private fun WhiplashApp() {
     // playlist is open.
     BackHandler(enabled = !isPlayerExpanded && openPlaylist != null) {
         openPlaylist = null
+    }
+
+    // Same pattern for the Home tab's History screen.
+    BackHandler(enabled = !isPlayerExpanded && showHistory) {
+        showHistory = false
     }
 
     // Same pattern for Search tab's album/artist detail navigation — pops
@@ -248,9 +285,19 @@ private fun WhiplashApp() {
 
                 Box(modifier = Modifier.weight(1f)) {
                     when (selectedTab) {
-                        AppTab.HOME -> HomeScreen(
-                            onPlayTrack = { track -> app.playbackController.playNow(track) },
-                        )
+                        AppTab.HOME -> {
+                            if (!showHistory) {
+                                HomeScreen(
+                                    onPlayTrack = { track -> app.playbackController.playNow(track) },
+                                    onOpenHistory = { showHistory = true },
+                                )
+                            } else {
+                                com.whiplash.music.ui.home.HistoryScreen(
+                                    onBack = { showHistory = false },
+                                    onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                                )
+                            }
+                        }
                         AppTab.SEARCH -> {
                             val topDestination = searchDetailStack.lastOrNull()
                             when (topDestination) {
@@ -262,6 +309,8 @@ private fun WhiplashApp() {
                                     onOpenArtist = { artist ->
                                         searchDetailStack = searchDetailStack + SearchDestination.Artist(artist.channelUrl)
                                     },
+                                    selectedTab = selectedSearchResultTab,
+                                    onSelectedTabChange = { selectedSearchResultTab = it },
                                 )
                                 is SearchDestination.Album -> AlbumDetailScreen(
                                     url = topDestination.url,
@@ -370,6 +419,7 @@ private fun WhiplashApp() {
                         ),
                 ) {
                     val isFavorite by playerViewModel.isCurrentFavorite.collectAsState()
+                    val autoplayEnabled by playerViewModel.autoplayEnabled.collectAsState()
                     FullPlayerScreen(
                         state = playbackState,
                         onTogglePlayPause = playerViewModel::togglePlayPause,
@@ -385,6 +435,8 @@ private fun WhiplashApp() {
                         onRemoveFromQueue = playerViewModel::removeFromQueue,
                         onMoveInQueue = playerViewModel::moveInQueue,
                         onClearQueue = playerViewModel::clearQueueExceptCurrent,
+                        autoplayEnabled = autoplayEnabled,
+                        onToggleAutoplay = playerViewModel::setAutoplayEnabled,
                         onSetSleepTimer = playerViewModel::setSleepTimer,
                         lyrics = lyrics,
                     )
