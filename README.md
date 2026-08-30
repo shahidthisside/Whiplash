@@ -14,19 +14,21 @@
 - Multi-provider fallback architecture (`PlaybackManager` + `ProviderHealthTracker`) designed to add additional extraction providers without touching call sites
 - Gapless playback, crossfade, and adjustable playback speed
 - Sleep timer (fixed durations, end-of-song, end-of-queue)
-- Persistent queue with reordering, "play next," and "add to queue"
-- YouTube-style autoplay: automatically extends the queue with related tracks when Autoplay is enabled
+- Persistent queue with reordering, "play next," and "add to queue," plus an Autoplay on/off shortcut right in the Queue sheet
+- YouTube-style autoplay: automatically extends the queue with related, music-only tracks when Autoplay is enabled (a video's YouTube category is checked so non-music results never sneak in)
 - Local/offline device music library (MediaStore-backed), including automatic library refresh via a `ContentObserver` when files change on disk
 
 ### Library & Discovery
 - Unified local + YouTube search (Songs, Albums, Artists, Playlists — each loads and fails independently)
 - Album and Artist detail pages with real metadata, track listings, and playback actions
-- History, Favorites, Playlists, and a Speed Dial / Quick Picks home surface
+- A full History screen (up to 200 recently played tracks), Favorites, Playlists (create/rename/delete), and a Speed Dial / Quick Picks home surface
 - Synchronized lyrics via [LRCLIB](https://lrclib.net) (a free, open lyrics database) with an honest "unavailable" state — lyrics are never fabricated
 
 ### Design & UX
 - A custom dark, frosted-surface design system built on Jetpack Compose + Material 3 (translucent tinted surfaces, soft borders, layered elevation)
 - Six selectable color themes with instant, persisted switching
+- Four full-player seek bar visual styles (Classic, Wavy, Waveform, Minimal), picked live with mini-previews in Settings
+- Local backup and restore: saves playlists, favorites, history, pinned songs, and settings to a single file you choose via the system file picker, and can restore from it later
 - Haptic feedback and micro-interactions on stateful actions (play/pause, favorite, queue reorder, toggles)
 - Swipe gestures on the mini-player (next/previous), always paired with accessible on-screen buttons
 - Accessibility-conscious touch targets (48dp+) and reduced-motion support that respects the system's animator duration scale
