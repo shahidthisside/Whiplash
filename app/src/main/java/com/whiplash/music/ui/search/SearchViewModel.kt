@@ -11,7 +11,9 @@ import com.whiplash.music.playback.provider.ProviderFailure
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -39,11 +41,19 @@ data class SearchUiState(
  * confirmed to exist (music_songs/music_albums/music_playlists/music_artists).
  * Each category fails independently — an albums-search failure doesn't
  * blank out songs that already loaded successfully.
+ *
+ * Also owns YouTube Music-style "recent searches": a submitted query
+ * (debounce elapsed and the search actually ran) is remembered so it can
+ * be recalled from the idle/empty search screen later, independent of the
+ * short-lived result cache used to speed up re-searching.
  */
 class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewModel() {
 
     private val _state = MutableStateFlow(SearchUiState())
     val state: StateFlow<SearchUiState> = _state
+
+    val recentSearches: StateFlow<List<String>> =
+        repository.recentSearches.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private var searchJob: Job? = null
 
@@ -68,6 +78,12 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
 
         searchJob = viewModelScope.launch {
             delay(DEBOUNCE_MS) // avoid firing a network request per keystroke
+
+            // The debounce elapsing without the query changing again is a
+            // real, deliberate search (not partial typing) — record it now
+            // rather than waiting for the network call to finish, so a
+            // query is remembered even if the search itself later fails.
+            repository.recordSearch(query)
 
             val cached = repository.cachedResults(query)
             if (cached != null) {
@@ -108,6 +124,16 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
     fun retry() {
         val current = _state.value.query
         if (current.isNotBlank()) onQueryChanged(current)
+    }
+
+    /** Removes one entry from the recent-searches list (its row's "x" button). */
+    fun removeRecentSearch(query: String) {
+        viewModelScope.launch { repository.removeSearchHistoryEntry(query) }
+    }
+
+    /** Clears the entire recent-searches list. */
+    fun clearRecentSearches() {
+        viewModelScope.launch { repository.clearSearchHistory() }
     }
 
     private companion object {

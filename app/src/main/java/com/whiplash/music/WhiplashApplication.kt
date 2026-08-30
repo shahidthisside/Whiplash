@@ -75,7 +75,7 @@ class WhiplashApplication : Application() {
     }
 
     val youtubeSearchRepository: YoutubeSearchRepository by lazy {
-        YoutubeSearchRepository(youtubeSearchProvider, database.searchCacheDao())
+        YoutubeSearchRepository(youtubeSearchProvider, database.searchCacheDao(), database.searchHistoryDao())
     }
 
     val lrcLibProvider: LrcLibProvider by lazy { LrcLibProvider(okHttpClient) }

@@ -15,6 +15,7 @@ import com.whiplash.music.data.local.dao.PinnedDao
 import com.whiplash.music.data.local.dao.PlaylistDao
 import com.whiplash.music.data.local.dao.ProviderHealthDao
 import com.whiplash.music.data.local.dao.SearchCacheDao
+import com.whiplash.music.data.local.dao.SearchHistoryDao
 import com.whiplash.music.data.local.dao.SongDao
 import com.whiplash.music.data.local.entity.AlbumEntity
 import com.whiplash.music.data.local.entity.ArtistEntity
@@ -28,6 +29,7 @@ import com.whiplash.music.data.local.entity.PlaylistEntity
 import com.whiplash.music.data.local.entity.PlaylistTrackEntity
 import com.whiplash.music.data.local.entity.ProviderHealthEntity
 import com.whiplash.music.data.local.entity.SearchCacheEntity
+import com.whiplash.music.data.local.entity.SearchHistoryEntity
 import com.whiplash.music.data.local.entity.SongEntity
 
 /**
@@ -47,13 +49,14 @@ import com.whiplash.music.data.local.entity.SongEntity
         HistoryEntity::class,
         FavoriteEntity::class,
         SearchCacheEntity::class,
+        SearchHistoryEntity::class,
         LocalSongEntity::class,
         LocalAlbumEntity::class,
         LocalArtistEntity::class,
         ProviderHealthEntity::class,
         PinnedEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -66,6 +69,7 @@ abstract class WhiplashDatabase : RoomDatabase() {
     abstract fun historyDao(): HistoryDao
     abstract fun favoriteDao(): FavoriteDao
     abstract fun searchCacheDao(): SearchCacheDao
+    abstract fun searchHistoryDao(): SearchHistoryDao
     abstract fun localSongDao(): LocalSongDao
     abstract fun localAlbumDao(): LocalAlbumDao
     abstract fun localArtistDao(): LocalArtistDao

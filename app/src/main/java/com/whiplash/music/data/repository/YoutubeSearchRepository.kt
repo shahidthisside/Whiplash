@@ -2,24 +2,62 @@ package com.whiplash.music.data.repository
 
 import android.util.Log
 import com.whiplash.music.data.local.dao.SearchCacheDao
+import com.whiplash.music.data.local.dao.SearchHistoryDao
 import com.whiplash.music.data.local.entity.SearchCacheEntity
+import com.whiplash.music.data.local.entity.SearchHistoryEntity
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.domain.model.YoutubeArtistResult
 import com.whiplash.music.domain.model.YoutubePlaylistResult
 import com.whiplash.music.playback.provider.newpipe.YoutubeSearchProvider
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Bridges [YoutubeSearchProvider] and [SearchCacheDao], caching the most
- * recent result set per query so a repeated search shows results
- * immediately while a fresh network search runs in the background
- * (section 53: "cache -> display immediately -> background refresh").
+ * Bridges [YoutubeSearchProvider], [SearchCacheDao], and [SearchHistoryDao]:
+ * caches the most recent result set per query so a repeated search shows
+ * results immediately while a fresh network search runs in the background
+ * (section 53: "cache -> display immediately -> background refresh"), and
+ * separately remembers submitted query strings as YouTube Music-style
+ * "recent searches" for recall on the idle search screen.
  */
 class YoutubeSearchRepository(
     private val searchProvider: YoutubeSearchProvider,
     private val searchCacheDao: SearchCacheDao,
+    private val searchHistoryDao: SearchHistoryDao,
 ) {
+
+    /** Most recently submitted search queries, newest first. */
+    val recentSearches: Flow<List<String>> =
+        searchHistoryDao.observeRecent().map { entries -> entries.map { it.query } }
+
+    /**
+     * Records [query] as a submitted search (YouTube Music-style recent
+     * search history). Called when the user actually commits to a search
+     * — pressing the keyboard's search action or getting a first result
+     * back — not on every keystroke, so the list stays a meaningful
+     * history rather than filling with partial typing.
+     */
+    suspend fun recordSearch(query: String) {
+        val normalized = normalize(query)
+        if (normalized.isEmpty()) return
+        runCatching {
+            searchHistoryDao.upsert(SearchHistoryEntity(query = normalized, searchedAtEpochMs = System.currentTimeMillis()))
+        }.onFailure { Log.w(TAG, "Failed to record search history for '$normalized'", it) }
+    }
+
+    /** Removes a single entry from recent searches (the per-row "x" button). */
+    suspend fun removeSearchHistoryEntry(query: String) {
+        runCatching { searchHistoryDao.remove(normalize(query)) }
+            .onFailure { Log.w(TAG, "Failed to remove search history entry '$query'", it) }
+    }
+
+    /** Clears all recent searches. */
+    suspend fun clearSearchHistory() {
+        runCatching { searchHistoryDao.clear() }
+            .onFailure { Log.w(TAG, "Failed to clear search history", it) }
+    }
 
     /** Cached results for [query] if present and not older than [maxAgeMs], or null. */
     suspend fun cachedResults(query: String, maxAgeMs: Long = DEFAULT_CACHE_MAX_AGE_MS): List<PlayableItem.YoutubeTrack>? {

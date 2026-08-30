@@ -15,7 +15,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,6 +46,7 @@ import com.whiplash.music.ui.theme.GlassCard
 import com.whiplash.music.ui.theme.GlassSearchField
 import com.whiplash.music.ui.theme.GlassTabRow
 import com.whiplash.music.ui.theme.GlassTokens
+import com.whiplash.music.ui.theme.PlainIconButton
 import com.whiplash.music.ui.theme.WhiplashColors
 
 enum class SearchResultTab(val label: String) {
@@ -81,6 +86,7 @@ fun SearchScreen(
     val app = context.applicationContext as WhiplashApplication
     val viewModel: SearchViewModel = viewModel(factory = SearchViewModelFactory(app.youtubeSearchRepository))
     val state by viewModel.state.collectAsState()
+    val recentSearches by viewModel.recentSearches.collectAsState()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
@@ -117,7 +123,12 @@ fun SearchScreen(
         androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
 
         when {
-            !state.hasSearched && state.query.isBlank() -> IdleState(onSuggestionTap = viewModel::onQueryChanged)
+            !state.hasSearched && state.query.isBlank() -> IdleState(
+                recentSearches = recentSearches,
+                onSuggestionTap = viewModel::onQueryChanged,
+                onRemoveRecentSearch = viewModel::removeRecentSearch,
+                onClearRecentSearches = viewModel::clearRecentSearches,
+            )
             state.isSearching && state.results.isEmpty() && state.albums.isEmpty() &&
                 state.artists.isEmpty() && state.playlists.isEmpty() -> LoadingState()
             state.results.isEmpty() && state.errorMessage != null -> ErrorState(state.errorMessage!!, onRetry = viewModel::retry)
@@ -287,35 +298,104 @@ private fun EmptyTabState(message: String) {
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun IdleState(onSuggestionTap: (String) -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(top = GlassTokens.spaceXl),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = "Search for any song.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceLg))
-        Text(
-            text = "Try searching",
-            style = MaterialTheme.typography.labelMedium,
-            color = WhiplashColors.textSecondary,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
-        androidx.compose.foundation.layout.FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
-            verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
-        ) {
-            SEARCH_SUGGESTIONS.forEach { suggestion ->
-                com.whiplash.music.ui.theme.GlassChip(
-                    text = suggestion,
-                    selected = false,
-                    onClick = { onSuggestionTap(suggestion) },
+private fun IdleState(
+    recentSearches: List<String>,
+    onSuggestionTap: (String) -> Unit,
+    onRemoveRecentSearch: (String) -> Unit,
+    onClearRecentSearches: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize().padding(top = GlassTokens.spaceLg)) {
+        if (recentSearches.isNotEmpty()) {
+            androidx.compose.foundation.layout.Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Recent searches",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = WhiplashColors.textSecondary,
                 )
+                Text(
+                    text = "Clear all",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = WhiplashColors.accent,
+                    modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClearRecentSearches),
+                )
+            }
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
+            Column {
+                recentSearches.forEach { query ->
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSuggestionTap(query) }
+                            .padding(vertical = GlassTokens.spaceSm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Filled.History,
+                            contentDescription = null,
+                            tint = WhiplashColors.textTertiary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Text(
+                            text = query,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = WhiplashColors.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = GlassTokens.spaceMd).weight(1f),
+                        )
+                        PlainIconButton(
+                            contentDescription = "Remove '$query' from recent searches",
+                            onClick = { onRemoveRecentSearch(query) },
+                            size = 32.dp,
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = null,
+                                tint = WhiplashColors.textTertiary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceLg))
+        }
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (recentSearches.isEmpty()) {
+                Text(
+                    text = "Search for any song.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceLg))
+            }
+            Text(
+                text = "Try searching",
+                style = MaterialTheme.typography.labelMedium,
+                color = WhiplashColors.textSecondary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
+            androidx.compose.foundation.layout.FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+                verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+            ) {
+                SEARCH_SUGGESTIONS.forEach { suggestion ->
+                    com.whiplash.music.ui.theme.GlassChip(
+                        text = suggestion,
+                        selected = false,
+                        onClick = { onSuggestionTap(suggestion) },
+                    )
+                }
             }
         }
     }
