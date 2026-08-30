@@ -425,14 +425,6 @@ private fun IdleState(
         }
 
         Column(modifier = Modifier.fillMaxWidth()) {
-            if (recentSearches.isEmpty()) {
-                Text(
-                    text = "Search for any song.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceLg))
-            }
             Text(
                 text = "Trending artists",
                 style = MaterialTheme.typography.labelMedium,
