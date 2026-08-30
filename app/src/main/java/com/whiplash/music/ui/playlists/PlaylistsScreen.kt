@@ -2,8 +2,6 @@ package com.whiplash.music.ui.playlists
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +15,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,11 +35,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.whiplash.music.WhiplashApplication
 import com.whiplash.music.domain.model.Playlist
-import com.whiplash.music.ui.theme.GlassCard
-import com.whiplash.music.ui.theme.GlassIconButton
+import com.whiplash.music.ui.theme.GlassListItem
 import com.whiplash.music.ui.theme.GlassSheet
 import com.whiplash.music.ui.theme.GlassTextInputDialog
 import com.whiplash.music.ui.theme.GlassTokens
+import com.whiplash.music.ui.theme.PlainIconButton
 import com.whiplash.music.ui.theme.WhiplashColors
 import com.whiplash.music.ui.theme.WhiplashRadius
 
@@ -60,21 +60,22 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
 
     var showCreateDialog by remember { mutableStateOf(false) }
     var playlistPendingDelete by remember { mutableStateOf<Playlist?>(null) }
+    var playlistPendingRename by remember { mutableStateOf<Playlist?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceSm),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = GlassTokens.spaceMd, vertical = GlassTokens.spaceSm),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(text = "Playlists", style = MaterialTheme.typography.titleMedium, color = WhiplashColors.textPrimary)
-            GlassIconButton(contentDescription = "New playlist", onClick = { showCreateDialog = true }) {
+            PlainIconButton(contentDescription = "New playlist", onClick = { showCreateDialog = true }, size = 40.dp) {
                 Icon(Icons.Filled.Add, contentDescription = null, tint = WhiplashColors.textPrimary)
             }
         }
 
         if (playlists.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd), contentAlignment = Alignment.Center) {
                 Text(
                     text = "No playlists yet. Tap + to create one.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -83,34 +84,35 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
             }
         } else {
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+                verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
             ) {
                 items(playlists, key = { it.id }) { playlist ->
-                    val interactionSource = remember { MutableInteractionSource() }
-                    GlassCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .combinedClickable(
-                                interactionSource = interactionSource,
-                                indication = null,
-                                onClick = { onOpenPlaylist(playlist) },
-                                onLongClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    playlistPendingDelete = playlist
-                                },
-                            ),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                    GlassListItem(
+                        title = playlist.name,
+                        subtitle = null,
+                        onClick = { onOpenPlaylist(playlist) },
+                        onLongClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            playlistPendingDelete = playlist
+                        },
+                        leading = {
                             Icon(
                                 Icons.AutoMirrored.Filled.QueueMusic,
                                 contentDescription = null,
                                 tint = WhiplashColors.textSecondary,
-                                modifier = Modifier.padding(end = GlassTokens.spaceMd),
                             )
-                            Text(text = playlist.name, style = MaterialTheme.typography.titleSmall, color = WhiplashColors.textPrimary)
-                        }
-                    }
+                        },
+                        trailing = {
+                            PlainIconButton(
+                                contentDescription = "More options for ${playlist.name}",
+                                onClick = { playlistPendingDelete = playlist },
+                                size = 40.dp,
+                            ) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textSecondary)
+                            }
+                        },
+                    )
                 }
             }
         }
@@ -144,6 +146,26 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                         .padding(vertical = GlassTokens.spaceSm)
                         .clickable(
                             onClick = {
+                                playlistPendingRename = toDelete
+                                playlistPendingDelete = null
+                            },
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Edit, contentDescription = null, tint = WhiplashColors.textPrimary)
+                    Text(
+                        text = "Rename playlist",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = WhiplashColors.textPrimary,
+                        modifier = Modifier.padding(start = GlassTokens.spaceMd),
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = GlassTokens.spaceSm)
+                        .clickable(
+                            onClick = {
                                 viewModel.deletePlaylist(toDelete.id)
                                 playlistPendingDelete = null
                             },
@@ -160,5 +182,19 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                 }
             }
         }
+    }
+
+    val toRename = playlistPendingRename
+    if (toRename != null) {
+        GlassTextInputDialog(
+            title = "Rename playlist",
+            initialValue = toRename.name,
+            confirmLabel = "Save",
+            onConfirm = { newName ->
+                viewModel.renamePlaylist(toRename.id, newName, toRename.description)
+                playlistPendingRename = null
+            },
+            onDismiss = { playlistPendingRename = null },
+        )
     }
 }

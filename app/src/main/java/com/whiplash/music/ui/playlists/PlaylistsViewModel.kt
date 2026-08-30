@@ -21,4 +21,8 @@ class PlaylistsViewModel(private val libraryRepository: LibraryRepository) : Vie
     fun deletePlaylist(id: Long) {
         viewModelScope.launch { libraryRepository.deletePlaylist(id) }
     }
+
+    fun renamePlaylist(id: Long, name: String, description: String?) {
+        viewModelScope.launch { libraryRepository.renamePlaylist(id, name, description) }
+    }
 }
