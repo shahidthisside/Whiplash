@@ -91,6 +91,11 @@ fun SearchScreen(
     val recentSearches by viewModel.recentSearches.collectAsState()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    // "Clear all" recent searches is destructive and irreversible, same as
+    // Speed dial's own "Clear" button — same confirmation pattern (section:
+    // destructive actions need a confirmation step) rather than wiping the
+    // whole list on a single accidental tap.
+    var showClearSearchHistoryConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
     // Tapping any result to act on it (play a song, open an album/artist)
     // should close the keyboard automatically — leaving it open after the
@@ -144,7 +149,7 @@ fun SearchScreen(
                 recentSearches = recentSearches,
                 onSuggestionTap = viewModel::onQueryChanged,
                 onRemoveRecentSearch = viewModel::removeRecentSearch,
-                onClearRecentSearches = viewModel::clearRecentSearches,
+                onClearRecentSearches = { showClearSearchHistoryConfirm = true },
             )
             state.isSearching && state.results.isEmpty() && state.albums.isEmpty() &&
                 state.artists.isEmpty() && state.playlists.isEmpty() -> LoadingState()
@@ -179,6 +184,18 @@ fun SearchScreen(
                 }
             }
         }
+    }
+
+    if (showClearSearchHistoryConfirm) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Clear recent searches?",
+            message = "This removes all of your recent searches. This can't be undone.",
+            onConfirm = {
+                viewModel.clearRecentSearches()
+                showClearSearchHistoryConfirm = false
+            },
+            onDismiss = { showClearSearchHistoryConfirm = false },
+        )
     }
 }
 
