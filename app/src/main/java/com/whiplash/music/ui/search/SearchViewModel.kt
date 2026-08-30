@@ -24,7 +24,21 @@ data class SearchUiState(
     val albums: List<YoutubePlaylistResult> = emptyList(),
     val playlists: List<YoutubePlaylistResult> = emptyList(),
     val artists: List<YoutubeArtistResult> = emptyList(),
+    val suggestions: List<String> = emptyList(),
     val isSearching: Boolean = false,
+    /**
+     * True the moment the query becomes non-blank, until either a real
+     * search result lands or the query is cleared again. Distinct from
+     * [isSearching] (which only turns true once the debounce has actually
+     * elapsed and a network call is in flight) — this covers the gap in
+     * between, so the UI has a real "waiting to search" state instead of
+     * incorrectly falling through to "No results found" while the
+     * debounce timer is still running (a real, reported bug: typing
+     * showed "No results found" for the whole 400ms debounce window on
+     * every single keystroke, only replaced by real results once typing
+     * paused).
+     */
+    val isPendingSearch: Boolean = false,
     val hasSearched: Boolean = false,
     val errorMessage: String? = null,
 )
@@ -46,6 +60,12 @@ data class SearchUiState(
  * (debounce elapsed and the search actually ran) is remembered so it can
  * be recalled from the idle/empty search screen later, independent of the
  * short-lived result cache used to speed up re-searching.
+ *
+ * And YouTube Music-style live autocomplete suggestions while typing (a
+ * real NewPipeExtractor YoutubeSuggestionExtractor lookup, section: never
+ * fabricate a feature — this genuinely queries YouTube's own suggestion
+ * endpoint), debounced much more lightly than the real search itself
+ * since a suggestions dropdown is expected to feel closer to instant.
  */
 class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewModel() {
 
@@ -56,10 +76,12 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
         repository.recentSearches.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private var searchJob: Job? = null
+    private var suggestionsJob: Job? = null
 
     fun onQueryChanged(query: String) {
         _state.update { it.copy(query = query) }
         searchJob?.cancel()
+        suggestionsJob?.cancel()
 
         if (query.isBlank()) {
             _state.update {
@@ -68,12 +90,27 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
                     albums = emptyList(),
                     playlists = emptyList(),
                     artists = emptyList(),
+                    suggestions = emptyList(),
                     hasSearched = false,
                     isSearching = false,
+                    isPendingSearch = false,
                     errorMessage = null,
                 )
             }
             return
+        }
+
+        _state.update { it.copy(isPendingSearch = true) }
+
+        suggestionsJob = viewModelScope.launch {
+            delay(SUGGESTIONS_DEBOUNCE_MS)
+            val suggestions = repository.getSuggestions(query)
+            // A newer keystroke may have already changed the query while
+            // this suggestion lookup was in flight — only apply results
+            // that are still relevant to what's currently typed.
+            if (_state.value.query == query) {
+                _state.update { it.copy(suggestions = suggestions) }
+            }
         }
 
         searchJob = viewModelScope.launch {
@@ -114,11 +151,18 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
             _state.update {
                 it.copy(
                     isSearching = false,
+                    isPendingSearch = false,
                     hasSearched = true,
+                    suggestions = emptyList(),
                     errorMessage = songsError,
                 )
             }
         }
+    }
+
+    /** Tapping a suggestion runs it immediately, same as tapping a recent search. */
+    fun onSuggestionTapped(suggestion: String) {
+        onQueryChanged(suggestion)
     }
 
     fun retry() {
@@ -141,5 +185,6 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
 
     private companion object {
         const val DEBOUNCE_MS = 400L
+        const val SUGGESTIONS_DEBOUNCE_MS = 150L
     }
 }

@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -150,6 +151,26 @@ fun SearchScreen(
                 onSuggestionTap = viewModel::onQueryChanged,
                 onRemoveRecentSearch = viewModel::removeRecentSearch,
                 onClearRecentSearches = { showClearSearchHistoryConfirm = true },
+            )
+            // While a search is pending (debounce still running, or the
+            // real search itself hasn't returned anything yet), show
+            // YouTube Music-style live suggestions instead of "No results
+            // found" — a real, reported bug: every keystroke's ~400ms
+            // debounce window fell through to NoResultsState because
+            // isSearching (only true once the debounce elapses and a
+            // network call is in flight) doesn't cover that gap, and
+            // hasSearched from any previous completed search that session
+            // was often still true. isPendingSearch covers this whole
+            // window explicitly, from the moment the query becomes
+            // non-blank until real results land. Once the debounce
+            // elapses and a real network search is actually in flight
+            // (isSearching), the skeleton loader takes over instead —
+            // suggestions are for the "waiting to search" gap, not the
+            // "actively searching" one.
+            state.isPendingSearch && !state.isSearching && state.results.isEmpty() && state.albums.isEmpty() &&
+                state.artists.isEmpty() && state.playlists.isEmpty() -> SuggestionsState(
+                suggestions = state.suggestions,
+                onSuggestionTap = viewModel::onSuggestionTapped,
             )
             state.isSearching && state.results.isEmpty() && state.albums.isEmpty() &&
                 state.artists.isEmpty() && state.playlists.isEmpty() -> LoadingState()
@@ -516,6 +537,48 @@ private fun rememberShimmerAlpha(): androidx.compose.runtime.State<Float> {
 }
 
 private val SEARCH_SUGGESTIONS = listOf("Coldplay", "Lofi beats", "Top hits 2026", "The Weeknd", "Workout mix")
+
+/**
+ * YouTube Music-style live autocomplete suggestions, shown while a search
+ * is pending (debounce still running) instead of a blank/incorrect state.
+ * Falls back to a lightweight skeleton if no suggestions have arrived yet
+ * either (e.g. the very first keystroke, before even the lightweight
+ * suggestions debounce has elapsed) — never a bare blank screen, and
+ * never "No results found" for a search that hasn't actually run yet.
+ */
+@Composable
+private fun SuggestionsState(suggestions: List<String>, onSuggestionTap: (String) -> Unit) {
+    if (suggestions.isEmpty()) {
+        LoadingState()
+        return
+    }
+    Column(modifier = Modifier.fillMaxSize()) {
+        suggestions.forEach { suggestion ->
+            androidx.compose.foundation.layout.Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSuggestionTap(suggestion) }
+                    .padding(vertical = GlassTokens.spaceSm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Search,
+                    contentDescription = null,
+                    tint = WhiplashColors.textTertiary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    text = suggestion,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = WhiplashColors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = GlassTokens.spaceMd),
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun NoResultsState() {

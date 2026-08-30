@@ -92,6 +92,14 @@ class YoutubeSearchRepository(
     /** Real artist search (section 32/37/40). */
     suspend fun searchArtists(query: String): List<YoutubeArtistResult> = searchProvider.searchArtists(normalize(query))
 
+    /**
+     * Real YouTube autocomplete suggestions for the raw, as-typed [query]
+     * (deliberately not [normalize]d — a suggestions dropdown should
+     * reflect exactly what the user is typing, not a lowercased version
+     * of it).
+     */
+    suspend fun getSuggestions(query: String): List<String> = searchProvider.getSuggestions(query)
+
     private fun normalize(query: String): String = query.trim().lowercase()
 
     private fun serialize(results: List<PlayableItem.YoutubeTrack>): String {
