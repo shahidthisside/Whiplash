@@ -24,8 +24,8 @@ import com.whiplash.music.WhiplashApplication
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.domain.model.Playlist
 import com.whiplash.music.ui.player.PlayableItemsList
-import com.whiplash.music.ui.theme.GlassIconButton
 import com.whiplash.music.ui.theme.GlassTokens
+import com.whiplash.music.ui.theme.PlainIconButton
 import com.whiplash.music.ui.theme.WhiplashColors
 
 /** Playlist detail screen (section 38): all tracks in the playlist, play/shuffle, remove. */
@@ -45,10 +45,10 @@ fun PlaylistDetailScreen(
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceSm),
+            modifier = Modifier.fillMaxWidth().padding(top = GlassTokens.spaceSm, bottom = GlassTokens.spaceSm, end = GlassTokens.spaceMd),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            GlassIconButton(contentDescription = "Back", onClick = onBack) {
+            PlainIconButton(contentDescription = "Back", onClick = onBack) {
                 Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = WhiplashColors.textPrimary)
             }
             Text(
@@ -59,10 +59,10 @@ fun PlaylistDetailScreen(
             )
             if (tracks.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
-                    GlassIconButton(contentDescription = "Shuffle play", onClick = { onPlayQueue(tracks.shuffled(), 0) }) {
+                    PlainIconButton(contentDescription = "Shuffle play", onClick = { onPlayQueue(tracks.shuffled(), 0) }) {
                         Icon(Icons.Filled.Shuffle, contentDescription = null, tint = WhiplashColors.textPrimary)
                     }
-                    GlassIconButton(contentDescription = "Play all", onClick = { onPlayQueue(tracks, 0) }) {
+                    PlainIconButton(contentDescription = "Play all", onClick = { onPlayQueue(tracks, 0) }) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = WhiplashColors.textPrimary)
                     }
                 }
