@@ -93,6 +93,31 @@ class YoutubeSearchRepository(
     suspend fun searchArtists(query: String): List<YoutubeArtistResult> = searchProvider.searchArtists(normalize(query))
 
     /**
+     * Starts a new paginated songs search session for [query] — powers
+     * the Songs tab's real infinite scroll. Deliberately not cached:
+     * unlike [search] (whose single first-page result set is cheap and
+     * worth showing instantly on a repeated identical search), a
+     * [com.whiplash.music.playback.provider.newpipe.PaginatedSearchSession]
+     * holds a live, stateful NewPipeExtractor session tied to one search
+     * — there is no meaningful "cached session" to reuse later, and the
+     * first page it returns is exactly the same first page [search]
+     * would return for the same query, so callers that want cache-first
+     * behavior for the first page should still call [cachedResults]/
+     * [search] for that, then start a session only once the user
+     * actually scrolls for more.
+     */
+    fun startSongsSearch(query: String) = searchProvider.startSongsSearch(normalize(query))
+
+    /** Starts a new paginated album search session — powers the Albums tab's infinite scroll (see [startSongsSearch]). */
+    fun startAlbumsSearch(query: String) = searchProvider.startAlbumsSearch(normalize(query))
+
+    /** Starts a new paginated playlist search session — powers the Playlists tab's infinite scroll (see [startSongsSearch]). */
+    fun startPlaylistsSearch(query: String) = searchProvider.startPlaylistsSearch(normalize(query))
+
+    /** Starts a new paginated artist search session — powers the Artists tab's infinite scroll (see [startSongsSearch]). */
+    fun startArtistsSearch(query: String) = searchProvider.startArtistsSearch(normalize(query))
+
+    /**
      * Real YouTube autocomplete suggestions for the raw, as-typed [query]
      * (deliberately not [normalize]d — a suggestions dropdown should
      * reflect exactly what the user is typing, not a lowercased version

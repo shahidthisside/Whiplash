@@ -197,10 +197,29 @@ fun SearchScreen(
                         results = state.results,
                         isRefreshing = state.isSearching,
                         onPlayTrack = handlePlayTrack,
+                        onLoadMore = { viewModel.loadMore(SearchResultTab.SONGS) },
+                        isLoadingMore = state.isLoadingMoreSongs,
                     )
-                    SearchResultTab.ALBUMS -> PlaylistResultsList(state.albums, isAlbum = true, onClick = handleOpenAlbum)
-                    SearchResultTab.PLAYLISTS -> PlaylistResultsList(state.playlists, isAlbum = false, onClick = handleOpenAlbum)
-                    SearchResultTab.ARTISTS -> ArtistResultsList(state.artists, onClick = handleOpenArtist)
+                    SearchResultTab.ALBUMS -> PlaylistResultsList(
+                        items = state.albums,
+                        isAlbum = true,
+                        onClick = handleOpenAlbum,
+                        onLoadMore = { viewModel.loadMore(SearchResultTab.ALBUMS) },
+                        isLoadingMore = state.isLoadingMoreAlbums,
+                    )
+                    SearchResultTab.PLAYLISTS -> PlaylistResultsList(
+                        items = state.playlists,
+                        isAlbum = false,
+                        onClick = handleOpenAlbum,
+                        onLoadMore = { viewModel.loadMore(SearchResultTab.PLAYLISTS) },
+                        isLoadingMore = state.isLoadingMorePlaylists,
+                    )
+                    SearchResultTab.ARTISTS -> ArtistResultsList(
+                        items = state.artists,
+                        onClick = handleOpenArtist,
+                        onLoadMore = { viewModel.loadMore(SearchResultTab.ARTISTS) },
+                        isLoadingMore = state.isLoadingMoreArtists,
+                    )
                 }
             }
         }
@@ -225,6 +244,8 @@ private fun ResultsList(
     results: List<PlayableItem.YoutubeTrack>,
     isRefreshing: Boolean,
     onPlayTrack: (PlayableItem.YoutubeTrack) -> Unit,
+    onLoadMore: () -> Unit,
+    isLoadingMore: Boolean,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         if (isRefreshing) {
@@ -246,6 +267,8 @@ private fun ResultsList(
                 items = results,
                 onPlayQueue = { _, index -> onPlayTrack(results[index] as PlayableItem.YoutubeTrack) },
                 modifier = Modifier.fillMaxSize(),
+                onLoadMore = onLoadMore,
+                isLoadingMore = isLoadingMore,
             )
         }
     }
@@ -256,12 +279,24 @@ private fun PlaylistResultsList(
     items: List<YoutubePlaylistResult>,
     isAlbum: Boolean,
     onClick: (YoutubePlaylistResult) -> Unit,
+    onLoadMore: () -> Unit,
+    isLoadingMore: Boolean,
 ) {
     if (items.isEmpty()) {
         EmptyTabState(if (isAlbum) "No albums found" else "No playlists found")
         return
     }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    androidx.compose.runtime.LaunchedEffect(listState, items.size) {
+        androidx.compose.runtime.snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
+            .collect { lastVisibleIndex ->
+                if (lastVisibleIndex != null && !isLoadingMore && lastVisibleIndex >= items.lastIndex - LOAD_MORE_THRESHOLD) {
+                    onLoadMore()
+                }
+            }
+    }
     LazyColumn(
+        state = listState,
         verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
     ) {
@@ -298,16 +333,38 @@ private fun PlaylistResultsList(
                 }
             }
         }
+        if (isLoadingMore) {
+            item(key = "__load_more_footer__") {
+                Box(modifier = Modifier.fillMaxWidth().padding(GlassTokens.spaceMd), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = WhiplashColors.accent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun ArtistResultsList(items: List<YoutubeArtistResult>, onClick: (YoutubeArtistResult) -> Unit) {
+private fun ArtistResultsList(
+    items: List<YoutubeArtistResult>,
+    onClick: (YoutubeArtistResult) -> Unit,
+    onLoadMore: () -> Unit,
+    isLoadingMore: Boolean,
+) {
     if (items.isEmpty()) {
         EmptyTabState("No artists found")
         return
     }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    androidx.compose.runtime.LaunchedEffect(listState, items.size) {
+        androidx.compose.runtime.snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
+            .collect { lastVisibleIndex ->
+                if (lastVisibleIndex != null && !isLoadingMore && lastVisibleIndex >= items.lastIndex - LOAD_MORE_THRESHOLD) {
+                    onLoadMore()
+                }
+            }
+    }
     LazyColumn(
+        state = listState,
         verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
     ) {
@@ -337,6 +394,13 @@ private fun ArtistResultsList(items: List<YoutubeArtistResult>, onClick: (Youtub
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                }
+            }
+        }
+        if (isLoadingMore) {
+            item(key = "__load_more_footer__") {
+                Box(modifier = Modifier.fillMaxWidth().padding(GlassTokens.spaceMd), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = WhiplashColors.accent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                 }
             }
         }
@@ -616,3 +680,12 @@ private fun ErrorState(message: String, onRetry: () -> Unit) {
         }
     }
 }
+
+/**
+ * How many items from the end of a results list to start loading the
+ * next page — see the matching constant/comment in PlayableItemsList.kt
+ * (the Songs tab's own list) for the full rationale; kept as a separate
+ * constant here since Albums/Playlists/Artists use their own local
+ * LazyColumns directly in this file rather than PlayableItemsList.
+ */
+private const val LOAD_MORE_THRESHOLD = 5

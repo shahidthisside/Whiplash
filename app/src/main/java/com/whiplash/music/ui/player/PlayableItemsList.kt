@@ -2,18 +2,27 @@ package com.whiplash.music.ui.player
 
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -47,7 +56,14 @@ fun PlayableItemsList(
     contentPadding: androidx.compose.foundation.layout.PaddingValues =
         androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
     header: (@Composable () -> Unit)? = null,
+    // Optional real infinite-scroll hook (section: search pagination) —
+    // both default to null/false so every existing caller (Local
+    // Library, Home, Favorites) behaves exactly as before with zero
+    // changes; only Search's Songs tab currently passes these.
+    onLoadMore: (() -> Unit)? = null,
+    isLoadingMore: Boolean = false,
 ) {
+
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val haptic = LocalHapticFeedback.current
@@ -57,9 +73,40 @@ fun PlayableItemsList(
     var actionsSheetItem by remember { mutableStateOf<PlayableItem?>(null) }
     var addToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+
+    // Real scroll-triggered "load more" detection — the standard, correct
+    // Compose pattern (snapshotFlow over LazyListState.layoutInfo, not a
+    // polling hack or a fake fixed-delay timer): fires onLoadMore() once
+    // the last *visible* item index comes within a small threshold of the
+    // last *loaded* item index, so the next page has a chance to arrive
+    // slightly before the user actually scrolls past the end — this is
+    // what makes it feel smooth/seamless rather than showing a visible
+    // "hit the wall, wait, then more appears" stutter. Guarded by
+    // onLoadMore != null so callers that don't opt into pagination (every
+    // existing caller) never even install this effect.
+    if (onLoadMore != null) {
+        LaunchedEffect(listState, items.size) {
+            snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
+                .collect { lastVisibleIndex ->
+                    if (lastVisibleIndex == null) return@collect
+                    // Account for the optional header occupying index 0
+                    // and the loading-footer item at the very end — both
+                    // are real LazyColumn items but not part of [items],
+                    // so the threshold check below is against [items]'
+                    // own last index, offset by whether a header exists.
+                    val headerOffset = if (header != null) 1 else 0
+                    val lastItemIndex = headerOffset + items.lastIndex
+                    if (!isLoadingMore && lastVisibleIndex >= lastItemIndex - LOAD_MORE_THRESHOLD) {
+                        onLoadMore()
+                    }
+                }
+        }
+    }
 
     LazyColumn(
         modifier = modifier,
+        state = listState,
         verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
         contentPadding = contentPadding,
     ) {
@@ -94,6 +141,20 @@ fun PlayableItemsList(
                     }
                 },
             )
+        }
+        if (isLoadingMore) {
+            item(key = "__load_more_footer__") {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(GlassTokens.spaceMd),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
+                        color = WhiplashColors.accent,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
         }
     }
 
@@ -177,6 +238,18 @@ fun PlayableItemsList(
         )
     }
 }
+
+/**
+ * How many items from the end of the list to start loading the next page
+ * — high enough that the next page has a realistic chance of arriving
+ * before the user actually scrolls to the current last item (avoiding a
+ * visible "wait at the bottom" stall), low enough that it doesn't fire
+ * a network request for a page the user may never scroll far enough to
+ * see. 5 items is roughly one screen's worth of the typical list-item
+ * height on this app's layout, matching the lookahead distance common
+ * mainstream apps (YouTube Music, Spotify) visibly use.
+ */
+private const val LOAD_MORE_THRESHOLD = 5
 
 /**
  * Shares a real, working YouTube watch URL for [track] via Android's
