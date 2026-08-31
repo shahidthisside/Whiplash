@@ -24,7 +24,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -95,6 +97,36 @@ class PlaybackController(
 
     private val _state = MutableStateFlow(PlaybackState())
     val state: StateFlow<PlaybackState> = _state
+
+    init {
+        // Real, reported bug: turning Autoplay off, then back on again while
+        // a track is already playing and sitting at the end of the queue,
+        // did nothing — the queue never extended, so the track still just
+        // played to the end and stopped. maybeExtendQueueWithRecommendations
+        // was previously only ever invoked from inside playIndex() (when a
+        // track *starts*) or clearQueueExceptCurrent() — never in reaction to
+        // the setting itself changing — so flipping Autoplay back on while
+        // already sitting on the last queue item had nothing to trigger it
+        // until the user manually skipped away and back, which forced a
+        // fresh playIndex() call. Observing the setting directly here and
+        // reacting to an off->on transition closes that gap: if the
+        // currently playing track happens to already be the last queue item
+        // at that moment, the queue is extended immediately, matching what
+        // would have happened had Autoplay simply been on the whole time.
+        // drop(1) skips the flow's initial replay so this only reacts to an
+        // actual user toggle, not the first read of a Flow.
+        scope.launch {
+            settingsRepository.autoplayEnabled
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { enabled ->
+                    if (!enabled) return@collect
+                    val current = _state.value.currentItem as? PlayableItem.YoutubeTrack ?: return@collect
+                    if (nextIndex() != null) return@collect // not at the end of the queue; nothing to extend
+                    maybeExtendQueueWithRecommendations(current)
+                }
+        }
+    }
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
