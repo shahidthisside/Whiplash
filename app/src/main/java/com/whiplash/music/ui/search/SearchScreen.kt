@@ -606,24 +606,37 @@ private fun NoResultsState() {
     }
 }
 
+/**
+ * Plain, centered error state — no card, no border, matching the same
+ * plain-centered-Column pattern as Library's PermissionRequestState
+ * (LocalLibraryScreen.kt) rather than the earlier bordered GlassCard,
+ * which read as a boxed-in, left-feeling block instead of a clean,
+ * centered message.
+ */
 @Composable
 private fun ErrorState(message: String, onRetry: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        GlassCard {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "Search failed",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
-                GlassButton(text = "Retry", onClick = onRetry)
-            }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(GlassTokens.spaceLg),
+        ) {
+            Text(
+                text = "Search failed",
+                style = MaterialTheme.typography.titleMedium,
+                color = WhiplashColors.textPrimary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = WhiplashColors.textSecondary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
+            GlassButton(text = "Retry", onClick = onRetry)
         }
     }
 }
