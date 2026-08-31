@@ -39,6 +39,18 @@ fun PlaylistDetailScreen(
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: PlaylistDetailViewModel = viewModel(
+        // Real, reported bug: this screen's viewModel() call site never
+        // changes when the open playlist changes — only the `playlist`
+        // parameter's value does — so without an explicit key, Compose
+        // reused the SAME PlaylistDetailViewModel instance (and therefore
+        // its already-collecting `tracks` StateFlow, still bound to
+        // whichever playlist.id it was FIRST constructed with) across
+        // completely different playlists. That showed up as one playlist's
+        // songs appearing inside another right after switching, until the
+        // app was force-stopped and the ViewModel was finally torn down.
+        // Keying explicitly by playlist.id forces a fresh ViewModel (and a
+        // fresh tracks query) per distinct playlist.
+        key = "playlist_detail_${playlist.id}",
         factory = PlaylistDetailViewModelFactory(app.libraryRepository, playlist.id),
     )
     val tracks by viewModel.tracks.collectAsState()
