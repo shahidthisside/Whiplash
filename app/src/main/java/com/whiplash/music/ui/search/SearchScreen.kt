@@ -537,7 +537,10 @@ private fun IdleState(
  * for a query are loading, shaped like the real result rows (artwork +
  * two text lines) rather than a bare spinner — gives an immediate sense
  * of "content is arriving" instead of a blank loading state, and avoids
- * the perceived-latency jump from spinner to full content.
+ * the perceived-latency jump from spinner to full content. Uses the
+ * shared [com.whiplash.music.ui.theme.ShimmerSkeletonRow] (also used by
+ * Home's Quick Picks loading state) so every list-row skeleton in the
+ * app looks and pulses identically.
  */
 @Composable
 private fun LoadingState() {
@@ -545,66 +548,8 @@ private fun LoadingState() {
         modifier = Modifier.fillMaxSize().padding(top = GlassTokens.spaceSm),
         verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
     ) {
-        repeat(6) { SkeletonRow() }
+        repeat(6) { com.whiplash.music.ui.theme.ShimmerSkeletonRow() }
     }
-}
-
-@Composable
-private fun SkeletonRow() {
-    val shimmerAlpha by rememberShimmerAlpha()
-    androidx.compose.foundation.layout.Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.small))
-                .background(WhiplashColors.surfaceElevated.copy(alpha = shimmerAlpha)),
-        )
-        Column(modifier = Modifier.padding(start = GlassTokens.spaceSm).weight(1f)) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.6f)
-                    .height(16.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(WhiplashColors.surfaceElevated.copy(alpha = shimmerAlpha)),
-            )
-            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceXs))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.35f)
-                    .height(12.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(WhiplashColors.surfaceElevated.copy(alpha = shimmerAlpha)),
-            )
-        }
-    }
-}
-
-/**
- * A gently pulsing alpha (section 44: motion quality, kept subtle) for
- * skeleton placeholders. Section 55: this is a purely decorative,
- * nonessential animation, so when the system's reduced-motion preference
- * is on, it freezes at a static mid-value instead of continuously
- * pulsing — the skeleton shape itself (still a real loading indicator)
- * remains, only the shimmer motion is removed.
- */
-@Composable
-private fun rememberShimmerAlpha(): androidx.compose.runtime.State<Float> {
-    if (com.whiplash.music.ui.common.isReducedMotionEnabled()) {
-        return androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(0.5f) }
-    }
-    val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "shimmer")
-    return infiniteTransition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.7f,
-        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = androidx.compose.animation.core.tween(GlassTokens.animSlow * 2),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
-        ),
-        label = "shimmerAlpha",
-    )
 }
 
 

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -43,6 +44,22 @@ class HomeViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /**
+     * True once Speed dial's underlying Room flow has emitted its first
+     * real snapshot (whether that snapshot is empty or has items) — the
+     * genuine "have we heard back from the database yet" signal, distinct
+     * from [speedDial] simply being an empty list. [speedDial] itself
+     * starts as `emptyList()` before Room's Flow has emitted anything
+     * (see its `stateIn` initial value below), so checking
+     * `speedDial.isEmpty()` alone cannot tell "definitely no history yet"
+     * apart from "haven't heard back yet" — exactly the ambiguity that
+     * made Home's Speed dial section render nothing at all (rather than a
+     * loading skeleton) for the brief window on a cold app start before
+     * this first real emission arrives.
+     */
+    private val _isSpeedDialLoaded = MutableStateFlow(false)
+    val isSpeedDialLoaded: StateFlow<Boolean> = _isSpeedDialLoaded
+
+    /**
      * YouTube-Music-style "Speed dial" (a 3x3 grid of artwork, section 31).
      * Pinned tracks (explicitly pinned via the 3-dot menu, section 51) are
      * shown first and stay until unpinned — real persisted state, not a
@@ -55,7 +72,8 @@ class HomeViewModel(
     ) { pinned, recent ->
         val pinnedIds = pinned.map { it.source to it.id }.toSet()
         (pinned + recent.filter { (it.source to it.id) !in pinnedIds }).take(9)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.onEach { _isSpeedDialLoaded.value = true }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _quickPicks = MutableStateFlow<List<PlayableItem.YoutubeTrack>>(emptyList())
     val quickPicks: StateFlow<List<PlayableItem.YoutubeTrack>> = _quickPicks

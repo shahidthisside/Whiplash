@@ -114,5 +114,22 @@ class WhiplashApplication : Application() {
                 com.whiplash.music.ui.theme.WhiplashColors.applyVariant(variant)
             }
         }
+
+        // Warm Home's Speed dial artwork and Quick Picks (both data and
+        // artwork) in the background as early as possible in app startup
+        // — see AppStartupPreloader doc for why this matters: without it,
+        // opening the app after a while shows a real loading spinner and
+        // black artwork boxes on Home rather than everything already
+        // being ready by the time the user gets there. Runs on a plain
+        // IO-dispatcher scope (not viewModelScope, since there's no
+        // ViewModel yet at this point in the app's life) and is entirely
+        // best-effort — HomeViewModel's own loading logic is completely
+        // unaffected and still runs normally if this hasn't finished (or
+        // failed) by the time Home actually opens.
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching {
+                AppStartupPreloader(this@WhiplashApplication, libraryRepository, youtubeSearchRepository).preload()
+            }
+        }
     }
 }

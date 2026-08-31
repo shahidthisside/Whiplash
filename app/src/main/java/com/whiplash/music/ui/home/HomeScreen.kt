@@ -63,6 +63,9 @@ import com.whiplash.music.ui.theme.WhiplashRadius
  */
 private enum class SheetOrigin { SPEED_DIAL, QUICK_PICKS }
 
+/** Number of skeleton rows shown while Quick Picks' first real results are loading — roughly matches how many rows fit before scrolling. */
+private const val QUICK_PICKS_SKELETON_ROW_COUNT = 5
+
 @androidx.compose.material3.ExperimentalMaterial3Api
 @ExperimentalFoundationApi
 @Composable
@@ -76,6 +79,7 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
         factory = SongActionsViewModelFactory(app.libraryRepository),
     )
     val speedDial by viewModel.speedDial.collectAsState()
+    val isSpeedDialLoaded by viewModel.isSpeedDialLoaded.collectAsState()
     val quickPicks by viewModel.quickPicks.collectAsState()
     val isLoadingQuickPicks by viewModel.isLoadingQuickPicks.collectAsState()
     val haptic = LocalHapticFeedback.current
@@ -85,7 +89,13 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showClearSpeedDialConfirm by remember { mutableStateOf(false) }
 
-    if (speedDial.isEmpty() && quickPicks.isEmpty() && !isLoadingQuickPicks) {
+    // The truly-empty state ("no history, no Quick Picks, nothing loading")
+    // must wait for isSpeedDialLoaded — otherwise this renders on every
+    // single cold start for the one frame before Room's Speed dial flow
+    // has emitted anything yet, replacing what should be a loading
+    // skeleton with a flash of "Play something to see it here." that
+    // then immediately gets replaced by real content once data arrives.
+    if (isSpeedDialLoaded && speedDial.isEmpty() && quickPicks.isEmpty() && !isLoadingQuickPicks) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
                 text = "Play something to see it here.",
@@ -101,7 +111,19 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
     ) {
-        if (speedDial.isNotEmpty()) {
+        // Show a real skeleton — not a blank gap, not the earlier
+        // "Play something to see it here." flash — for the brief window
+        // between the screen first composing and Speed dial's Room flow
+        // emitting its first real snapshot, since that snapshot could
+        // turn out to have items (needing the section to have already
+        // been "expecting" content) or turn out empty (in which case the
+        // skeleton simply disappears once isSpeedDialLoaded flips true).
+        if (!isSpeedDialLoaded) {
+            item {
+                SectionHeader(title = "Speed dial")
+            }
+            item { SpeedDialSkeletonGrid() }
+        } else if (speedDial.isNotEmpty()) {
             item {
                 SectionHeader(title = "Speed dial", onHistory = onOpenHistory, onClear = { showClearSpeedDialConfirm = true })
             }
@@ -127,10 +149,8 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
                 )
             }
             if (isLoadingQuickPicks && quickPicks.isEmpty()) {
-                item {
-                    Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = WhiplashColors.accent)
-                    }
+                items(QUICK_PICKS_SKELETON_ROW_COUNT) {
+                    com.whiplash.music.ui.theme.ShimmerSkeletonRow()
                 }
             }
             items(quickPicks, key = { "quickpick:${it.id}" }) { track ->
@@ -279,6 +299,40 @@ private fun SpeedDialGrid(
                 // still aligns to the same 3-column grid instead of stretching the lone tile wide.
                 repeat(3 - row.size) {
                     androidx.compose.foundation.layout.Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A full 3x3 skeleton grid shaped exactly like [SpeedDialGrid]'s real
+ * tiles (square artwork placeholder + a title-line placeholder beneath
+ * each one) — shown for the brief window between Home first composing
+ * and Speed dial's Room flow emitting its first real snapshot, rather
+ * than leaving the section blank or missing entirely during that window.
+ */
+@Composable
+private fun SpeedDialSkeletonGrid() {
+    Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+        repeat(3) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+            ) {
+                repeat(3) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        com.whiplash.music.ui.theme.ShimmerBox(
+                            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                            shape = RoundedCornerShape(WhiplashRadius.medium),
+                        )
+                        com.whiplash.music.ui.theme.ShimmerBox(
+                            modifier = Modifier
+                                .padding(top = GlassTokens.spaceXs)
+                                .fillMaxWidth(0.7f)
+                                .height(14.dp),
+                        )
+                    }
                 }
             }
         }
