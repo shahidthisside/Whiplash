@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 fun GlassTextInputDialog(
     title: String,
     initialValue: String = "",
+    placeholder: String? = null,
     confirmLabel: String = "Save",
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -37,6 +38,11 @@ fun GlassTextInputDialog(
                 value = text,
                 onValueChange = { text = it },
                 singleLine = true,
+                placeholder = if (placeholder != null) {
+                    { Text(text = placeholder, color = WhiplashColors.textTertiary) }
+                } else {
+                    null
+                },
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = WhiplashColors.textPrimary,

@@ -125,6 +125,10 @@ class YoutubeSearchRepository(
      */
     suspend fun getSuggestions(query: String): List<String> = searchProvider.getSuggestions(query)
 
+    /** Imports a YouTube/YouTube Music playlist by URL (see [YoutubeSearchProvider.importPlaylist]) — not cached, a one-shot action rather than a repeatable search. */
+    suspend fun importPlaylist(url: String): com.whiplash.music.playback.provider.newpipe.ImportedPlaylist =
+        searchProvider.importPlaylist(url)
+
     private fun normalize(query: String): String = query.trim().lowercase()
 
     private fun serialize(results: List<PlayableItem.YoutubeTrack>): String {

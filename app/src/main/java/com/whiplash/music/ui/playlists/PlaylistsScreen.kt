@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -16,7 +17,9 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -54,11 +57,13 @@ import com.whiplash.music.ui.theme.WhiplashRadius
 fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
-    val viewModel: PlaylistsViewModel = viewModel(factory = PlaylistsViewModelFactory(app.libraryRepository))
+    val viewModel: PlaylistsViewModel = viewModel(factory = PlaylistsViewModelFactory(app.libraryRepository, app.youtubeSearchRepository))
     val playlists by viewModel.playlists.collectAsState()
+    val isImporting by viewModel.isImporting.collectAsState()
     val haptic = LocalHapticFeedback.current
 
     var showCreateDialog by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
     var playlistPendingDelete by remember { mutableStateOf<Playlist?>(null) }
     var playlistPendingRename by remember { mutableStateOf<Playlist?>(null) }
 
@@ -69,8 +74,28 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(text = "Playlists", style = MaterialTheme.typography.titleMedium, color = WhiplashColors.textPrimary)
-            PlainIconButton(contentDescription = "New playlist", onClick = { showCreateDialog = true }, size = 40.dp) {
-                Icon(Icons.Filled.Add, contentDescription = null, tint = WhiplashColors.textPrimary)
+            Row {
+                // Import from a YouTube/YouTube Music playlist link —
+                // disabled (rather than hidden) while an import is
+                // already running so a second tap can't stack another
+                // import on top of the one in progress, matching the
+                // same enabled=!isRefreshing pattern Home's Quick Picks
+                // refresh button already uses.
+                PlainIconButton(
+                    contentDescription = "Import playlist from YouTube",
+                    onClick = { showImportDialog = true },
+                    size = 40.dp,
+                    enabled = !isImporting,
+                ) {
+                    if (isImporting) {
+                        CircularProgressIndicator(color = WhiplashColors.accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                    } else {
+                        Icon(Icons.Filled.Link, contentDescription = null, tint = WhiplashColors.textPrimary)
+                    }
+                }
+                PlainIconButton(contentDescription = "New playlist", onClick = { showCreateDialog = true }, size = 40.dp) {
+                    Icon(Icons.Filled.Add, contentDescription = null, tint = WhiplashColors.textPrimary)
+                }
             }
         }
 
@@ -127,6 +152,19 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                 showCreateDialog = false
             },
             onDismiss = { showCreateDialog = false },
+        )
+    }
+
+    if (showImportDialog) {
+        GlassTextInputDialog(
+            title = "Import playlist from YouTube",
+            placeholder = "Paste a YouTube or YouTube Music playlist link",
+            confirmLabel = "Import",
+            onConfirm = { url ->
+                viewModel.importPlaylist(url)
+                showImportDialog = false
+            },
+            onDismiss = { showImportDialog = false },
         )
     }
 
