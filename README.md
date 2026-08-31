@@ -21,7 +21,7 @@
 ### Library & Discovery
 - Unified local + YouTube search (Songs, Albums, Artists, Playlists — each loads and fails independently)
 - Album and Artist detail pages with real metadata, track listings, and playback actions
-- A full History screen (up to 200 recently played tracks), Favorites, Playlists (create/rename/delete), and a Speed Dial / Quick Picks home surface
+- A full History screen (up to 200 recently played tracks), Favorites, Playlists (create/rename/delete, plus importing a whole playlist by pasting a YouTube or YouTube Music playlist link), and a Speed Dial / Quick Picks home surface
 - Synchronized lyrics via [LRCLIB](https://lrclib.net) (a free, open lyrics database) with an honest "unavailable" state — lyrics are never fabricated
 
 ### Design & UX

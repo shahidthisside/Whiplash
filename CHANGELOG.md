@@ -7,13 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.3.0] - 2026-08-30
 
 ### Added
+- Import a playlist by pasting a YouTube or YouTube Music playlist link — a new Link icon next to Playlists' existing "+" button resolves the URL via NewPipeExtractor and creates a real local playlist with all its tracks, which then behaves exactly like a manually-built one (rename/delete/play/reorder all work the same way).
 - Full History screen (up to 200 recently played tracks), reachable from a new icon next to Speed dial's Clear button on Home.
 - Autoplay on/off shortcut directly in the Queue sheet, kept in sync with the existing Settings toggle.
 - Four full-player seek bar visual styles — Classic, Wavy, Waveform, Minimal — with live mini-previews in Settings.
 - Local backup and restore: saves playlists, favorites, history, pinned songs, and settings to a file you choose, and can restore from it later.
 - "Rename playlist" option in the playlist long-press/3-dot menu (the underlying rename logic already existed but had no UI).
+- Home screen artwork and data now preload in the background, with real loading skeletons shown on a cold start instead of a blank or half-populated screen.
 
 ### Fixed
+- Turning Autoplay off, then back on again while the same track was already playing and sitting at the end of the queue, did nothing — the queue never extended until the user manually skipped away and back. Autoplay now reacts immediately to being re-enabled mid-track.
+- The Search results list could freeze when scrolling quickly during pagination (fast-fling stress-tested afterward with zero repeat failures).
+- Search's "Search failed" / no-internet-connection state was wrapped in a bordered card instead of the plain, centered layout used elsewhere in the app (e.g. Library's permission prompt).
 - Tracks played via the gapless-prefetch or already-cached-on-disk fast paths never got saved to the local library, so they could silently disappear from Speed dial, Favorites, and Playlists despite playing correctly.
 - Clearing the queue (with Autoplay enabled) permanently stopped autoplay for the rest of that track instead of properly continuing.
 - A stalled or hung network/extraction attempt could leave the mini-player stuck "buffering" indefinitely with no error ever shown; playback resolution is now time-bounded and always surfaces a real error.
