@@ -24,5 +24,14 @@ Cargo.lock
 # Machine-specific gradle overrides (JDK path, etc.)
 gradle.properties.local
 
+# Release signing credentials — never commit a real signing key or its
+# passwords. Each machine that cuts a signed release keeps its own local
+# keystore + keystore.properties; losing/rotating it just means future
+# updates need a fresh key (acceptable for a personal, non-Play-Store
+# project), but a leaked one could sign APKs claiming to be this app.
+/keystore.properties
+/keystore/*.jks
+/keystore/*.keystore
+
 # Room schema history is intentionally committed (used for migration validation)
 !app/schemas/
