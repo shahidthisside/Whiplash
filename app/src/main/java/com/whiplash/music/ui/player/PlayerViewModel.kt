@@ -52,6 +52,40 @@ class PlayerViewModel(
         viewModelScope.launch { settingsRepository.setAutoplayEnabled(enabled) }
     }
 
+    /**
+     * Playback speed shortcut in the full player (mirrors Settings'
+     * own selector exactly, same as [autoplayEnabled] above): both read/
+     * write the same [SettingsRepository.playbackSpeed], so either surface
+     * always reflects the other's current value immediately.
+     */
+    val playbackSpeed: StateFlow<Float> = settingsRepository.playbackSpeed
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 1.0f)
+
+    fun setPlaybackSpeed(speed: Float) {
+        controller.setPlaybackSpeed(speed)
+    }
+
+    /** Playlists to offer in the full player's "Add to playlist" sheet. */
+    val playlists: StateFlow<List<com.whiplash.music.domain.model.Playlist>> = libraryRepository.observePlaylists()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun addCurrentToPlaylist(playlistId: Long, playlistName: String) {
+        val item = state.value.currentItem ?: return
+        viewModelScope.launch {
+            libraryRepository.addToPlaylist(playlistId, item)
+            com.whiplash.music.ui.common.ToastController.show("Added to $playlistName")
+        }
+    }
+
+    fun createPlaylistAndAddCurrent(name: String) {
+        val item = state.value.currentItem ?: return
+        viewModelScope.launch {
+            val id = libraryRepository.createPlaylist(name)
+            libraryRepository.addToPlaylist(id, item)
+            com.whiplash.music.ui.common.ToastController.show("Added to $name")
+        }
+    }
+
     fun togglePlayPause() = controller.togglePlayPause()
 
     fun seekTo(positionMs: Long) = controller.seekTo(positionMs)

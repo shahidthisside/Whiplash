@@ -420,6 +420,8 @@ private fun WhiplashApp() {
                 ) {
                     val isFavorite by playerViewModel.isCurrentFavorite.collectAsState()
                     val autoplayEnabled by playerViewModel.autoplayEnabled.collectAsState()
+                    val playbackSpeed by playerViewModel.playbackSpeed.collectAsState()
+                    val playlistsForPlayer by playerViewModel.playlists.collectAsState()
                     FullPlayerScreen(
                         state = playbackState,
                         onTogglePlayPause = playerViewModel::togglePlayPause,
@@ -439,6 +441,11 @@ private fun WhiplashApp() {
                         onToggleAutoplay = playerViewModel::setAutoplayEnabled,
                         onSetSleepTimer = playerViewModel::setSleepTimer,
                         lyrics = lyrics,
+                        playbackSpeed = playbackSpeed,
+                        onSetPlaybackSpeed = playerViewModel::setPlaybackSpeed,
+                        playlists = playlistsForPlayer,
+                        onAddToPlaylist = playerViewModel::addCurrentToPlaylist,
+                        onCreatePlaylistAndAdd = playerViewModel::createPlaylistAndAddCurrent,
                     )
                 }
             }

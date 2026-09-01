@@ -36,8 +36,8 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Lyrics
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -96,11 +96,20 @@ fun FullPlayerScreen(
     onSetSleepTimer: (SleepTimerMode?) -> Unit = {},
     lyrics: com.whiplash.music.domain.model.LyricsResult? = null,
     onLyricsSheetOpened: () -> Unit = {},
+    playbackSpeed: Float = 1.0f,
+    onSetPlaybackSpeed: (Float) -> Unit = {},
+    playlists: List<com.whiplash.music.domain.model.Playlist> = emptyList(),
+    onAddToPlaylist: (playlistId: Long, playlistName: String) -> Unit = { _, _ -> },
+    onCreatePlaylistAndAdd: (name: String) -> Unit = {},
 ) {
     val item = state.currentItem
     var isQueueSheetOpen by remember { mutableStateOf(false) }
     var isSleepTimerSheetOpen by remember { mutableStateOf(false) }
     var isLyricsSheetOpen by remember { mutableStateOf(false) }
+    var isSpeedSheetOpen by remember { mutableStateOf(false) }
+    var isAddToPlaylistSheetOpen by remember { mutableStateOf(false) }
+    var isCreatePlaylistDialogOpen by remember { mutableStateOf(false) }
+    var isOverflowSheetOpen by remember { mutableStateOf(false) }
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
 
     // Section 57: subtle haptic feedback for meaningful interactions
@@ -157,16 +166,6 @@ fun FullPlayerScreen(
                     Icon(Icons.Filled.Lyrics, contentDescription = null, tint = WhiplashColors.textPrimary)
                 }
                 GlassIconButton(
-                    contentDescription = if (state.sleepTimer != null) "Sleep timer active" else "Sleep timer",
-                    onClick = { isSleepTimerSheetOpen = true },
-                ) {
-                    Icon(
-                        Icons.Filled.Bedtime,
-                        contentDescription = null,
-                        tint = if (state.sleepTimer != null) WhiplashColors.accent else WhiplashColors.textPrimary,
-                    )
-                }
-                GlassIconButton(
                     contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
                     onClick = hapticToggleFavorite,
                 ) {
@@ -191,6 +190,12 @@ fun FullPlayerScreen(
                 }
                 GlassIconButton(contentDescription = "Queue", onClick = { isQueueSheetOpen = true }) {
                     Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null, tint = WhiplashColors.textPrimary)
+                }
+                GlassIconButton(
+                    contentDescription = "More",
+                    onClick = { isOverflowSheetOpen = true },
+                ) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textPrimary)
                 }
             }
         }
@@ -345,6 +350,27 @@ fun FullPlayerScreen(
         }
     }
 
+    if (isOverflowSheetOpen) {
+        GlassSheet(onDismissRequest = { isOverflowSheetOpen = false }) {
+            PlayerOverflowContent(
+                sleepTimerActive = state.sleepTimer != null,
+                playbackSpeed = playbackSpeed,
+                onOpenSleepTimer = {
+                    isOverflowSheetOpen = false
+                    isSleepTimerSheetOpen = true
+                },
+                onOpenPlaybackSpeed = {
+                    isOverflowSheetOpen = false
+                    isSpeedSheetOpen = true
+                },
+                onOpenAddToPlaylist = {
+                    isOverflowSheetOpen = false
+                    if (item != null) isAddToPlaylistSheetOpen = true
+                },
+            )
+        }
+    }
+
     if (isLyricsSheetOpen) {
         GlassSheet(onDismissRequest = { isLyricsSheetOpen = false }) {
             LyricsContent(
@@ -355,7 +381,48 @@ fun FullPlayerScreen(
             )
         }
     }
+
+    if (isSpeedSheetOpen) {
+        GlassSheet(onDismissRequest = { isSpeedSheetOpen = false }) {
+            PlaybackSpeedContent(
+                selected = playbackSpeed,
+                onSelect = { speed ->
+                    onSetPlaybackSpeed(speed)
+                    isSpeedSheetOpen = false
+                },
+            )
+        }
+    }
+
+    if (isAddToPlaylistSheetOpen) {
+        GlassSheet(onDismissRequest = { isAddToPlaylistSheetOpen = false }) {
+            AddToPlaylistContent(
+                playlists = playlists,
+                onSelectPlaylist = { playlist ->
+                    onAddToPlaylist(playlist.id, playlist.name)
+                    isAddToPlaylistSheetOpen = false
+                },
+                onCreateNew = {
+                    isAddToPlaylistSheetOpen = false
+                    isCreatePlaylistDialogOpen = true
+                },
+            )
+        }
+    }
+
+    if (isCreatePlaylistDialogOpen) {
+        com.whiplash.music.ui.theme.GlassTextInputDialog(
+            title = "New playlist",
+            confirmLabel = "Create",
+            onConfirm = { name ->
+                onCreatePlaylistAndAdd(name)
+                isCreatePlaylistDialogOpen = false
+            },
+            onDismiss = { isCreatePlaylistDialogOpen = false },
+        )
+    }
 }
+
 
 /**
  * Custom seek bar — deliberately NOT built on Material3's `Slider`.
