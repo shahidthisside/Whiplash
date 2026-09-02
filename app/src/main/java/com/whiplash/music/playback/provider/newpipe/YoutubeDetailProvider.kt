@@ -179,7 +179,7 @@ class YoutubeDetailProvider(
             title = name.orEmpty(),
             artist = uploaderName.orEmpty(),
             album = null,
-            artworkUri = thumbnails.maxByOrNull { it.height }?.url,
+            artworkUri = thumbnails.smallestAtLeast()?.url,
             durationMs = duration.takeIf { it >= 0 }?.times(1000) ?: 0L,
         )
     }
