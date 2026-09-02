@@ -1187,6 +1187,24 @@ class PlaybackController(
  * any extra network cost.
  */
 internal fun normalizeSongTitle(title: String): String {
+    // Bracketed/parenthesized "upload type" tags - e.g. "(Official Video)",
+    // "(Lyrics)", "[CHOREOGRAPHY]". Broadened from only-matching-if-a-
+    // specific-keyword-is-inside (which missed "[CHOREOGRAPHY]" - a real,
+    // on-device-confirmed case with no keyword match inside its own
+    // brackets) to strip ANY short bracketed/parenthesized tag, since a
+    // real song title practically never uses brackets for its own name.
+    val bracketTagPattern = Regex("""[\[(][^\])]{1,40}[\])]""")
+    // Trailing "upload type" phrases that describe the VIDEO, not the song,
+    // and are often NOT bracketed at all - e.g. "... Special Performance
+    // Video", "... Official MV", "... Dance Practice", "... Live
+    // Performance". Real, on-device-confirmed gap: two uploads of BTS'
+    // "Butter" - one titled "...Special Performance Video" (choreography),
+    // the other "...Official MV" - didn't normalize to the same string
+    // without this, since neither phrase was inside brackets.
+    val trailingVideoTypePattern = Regex(
+        """\b(special performance video|dance practice|live performance|performance video|choreography|dance video|behind the scenes|teaser|trailer)\b""",
+        RegexOption.IGNORE_CASE,
+    )
     val noisePattern = Regex(
         """[\[(].*?(official|lyric|lyrics|audio|video|visualiser|visualizer|mv|hd|hq|4k|remaster(?:ed)?|explicit|clean|radio edit)[^\])]*[\])]""",
         RegexOption.IGNORE_CASE,
@@ -1194,6 +1212,8 @@ internal fun normalizeSongTitle(title: String): String {
     return title
         .lowercase()
         .replace(noisePattern, " ")
+        .replace(bracketTagPattern, " ")
+        .replace(trailingVideoTypePattern, " ")
         .replace(Regex("""feat\.?|ft\.?"""), " ")
         .replace(Regex("""[^a-z0-9]+"""), " ")
         .trim()
@@ -1265,9 +1285,25 @@ private const val DURATION_MATCH_TOLERANCE_MS = 60_000L
 internal enum class SongLengthClass { SINGLE, MASHUP, LONG_FORM }
 
 private val LONG_FORM_KEYWORDS = Regex(
-    """\b(full album|audio jukebox|jukebox|greatest hits|best of|all songs|full movie|non\s*stop|nonstop|top\s*\d+|\d+\s*songs|playlist|compilation)\b""",
+    """\b(full album|audio jukebox|jukebox|greatest hits|best of|all\s+(\w+\s+)?songs|full movie|non\s*stop|nonstop|top\s*\d+|\d+\s*songs|playlist|compilation|motivational music|background music|study music|workout music|gym music|mix\s*20\d\d|movie\s+songs|hit\s+songs)\b""",
     RegexOption.IGNORE_CASE,
 )
+
+/**
+ * Real, on-device-confirmed false positive this AVOIDS: a naive "3+ pipe-
+ * separated segments" heuristic was tried here to catch generic
+ * compilation-style titles ("Gym Motivational Music | Motivational Video |
+ * Strong | Bollywood | English | Boost Up") that don't contain any of
+ * LONG_FORM_KEYWORDS' explicit phrases. That heuristic was REMOVED after
+ * testing showed it broke a real, common Bollywood title convention —
+ * crediting cast/singer/lyricist with pipe separators in a genuine SINGLE
+ * song's own title ("JAWAN: Chaleya (Hindi) | Shah Rukh Khan | Nayanthara
+ * | Atlee | Anirudh | Arijit S, Shilpa R | Kumaar" is one real song, not a
+ * compilation). Perfect coverage of every possible compilation-title
+ * phrasing isn't achievable via keywords alone; avoiding a false positive
+ * on a real, common single-song title convention matters more than
+ * catching every generic-background-music-style compilation upload.
+ */
 
 private val MASHUP_KEYWORDS = Regex(
     """\b(mashup|medley|megamix|mega\s*mix)\b|\s+(x|vs\.?)\s+""",
