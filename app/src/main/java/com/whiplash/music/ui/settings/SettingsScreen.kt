@@ -319,7 +319,47 @@ fun SettingsScreen() {
             }
         }
 
-        item { Spacer(Modifier.height(GlassTokens.spaceLg)) }
+        item {
+            GithubFooter()
+        }
+    }
+}
+
+/**
+ * Small, understated footer at the very end of Settings — a single
+ * tappable row linking out to the developer's GitHub profile. Deliberately
+ * plain (secondary text color, no card/border) rather than styled as
+ * another settings section, since it isn't a configurable option.
+ */
+@Composable
+private fun GithubFooter() {
+    val context = LocalContext.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = GlassTokens.spaceMd)
+            .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                val intent = android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("https://github.com/shahidthisside"),
+                )
+                context.startActivity(intent)
+            },
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = androidx.compose.ui.res.painterResource(com.whiplash.music.R.drawable.ic_github),
+            contentDescription = "GitHub",
+            tint = WhiplashColors.textSecondary,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(GlassTokens.spaceSm))
+        Text(
+            text = "github.com/shahidthisside",
+            style = MaterialTheme.typography.labelMedium,
+            color = WhiplashColors.textSecondary,
+        )
     }
 }
 
