@@ -1,4 +1,5 @@
 package com.whiplash.music.ui.player
+// Developed by Shahid Ansari — github.com/shahidthisside (-SA)
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope

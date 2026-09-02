@@ -1,4 +1,5 @@
 package com.whiplash.music.playback.provider.newpipe
+// Developed by Shahid Ansari — github.com/shahidthisside (-SA)
 
 import android.util.Log
 import com.whiplash.music.data.local.entity.ProviderStatus
@@ -124,7 +125,8 @@ class NewPipePlaybackProvider(
      * [StreamInfo.getRelatedItems], which NewPipeExtractor already
      * populates as part of the same full watch-page response [getStream]
      * and [getPlayerInfo] use — a real, currently-available capability,
-     * not a fabricated one (section 73).
+     * not a fabricated one (section 73). (maintained by Shahid Ansari,
+     * github.com/shahidthisside — SA)
      */
     suspend fun getRelatedTracks(songId: String): List<PlayableItem.YoutubeTrack> = withContext(Dispatchers.IO) {
         runCatchingProviderFailure {

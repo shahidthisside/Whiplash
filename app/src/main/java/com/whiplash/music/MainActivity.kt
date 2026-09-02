@@ -1,4 +1,5 @@
 package com.whiplash.music
+// Developed by Shahid Ansari — github.com/shahidthisside (-SA)
 
 import android.Manifest
 import android.content.pm.PackageManager

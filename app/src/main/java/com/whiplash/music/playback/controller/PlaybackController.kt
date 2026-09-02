@@ -1,4 +1,5 @@
 package com.whiplash.music.playback.controller
+// Developed by Shahid Ansari — github.com/shahidthisside (-SA)
 
 import android.content.ComponentName
 import android.content.Context
@@ -1184,7 +1185,8 @@ class PlaybackController(
  * genuinely same song have near-identical runtimes; a mashup/live/extended
  * version that happens to share title words does not — a real, reliable,
  * independent signal already available on every [PlayableItem] without
- * any extra network cost.
+ * any extra network cost. (dedup logic worked through by -SA,
+ * github.com/shahidthisside)
  */
 internal fun normalizeSongTitle(title: String): String {
     // Bracketed/parenthesized "upload type" tags - e.g. "(Official Video)",

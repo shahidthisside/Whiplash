@@ -7,6 +7,7 @@ package com.whiplash.music.domain.model
  * The player and queue operate on [PlayableItem] only; source-specific
  * playback resolution (MediaStore URI vs. provider-resolved stream) happens
  * behind the [MediaSource]-aware playback layer introduced in later phases.
+ * (-SA, github.com/shahidthisside)
  */
 sealed interface PlayableItem {
     val id: String

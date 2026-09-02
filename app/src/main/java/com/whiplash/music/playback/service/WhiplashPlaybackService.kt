@@ -1,4 +1,5 @@
 package com.whiplash.music.playback.service
+// Developed by Shahid Ansari — github.com/shahidthisside (-SA)
 
 import android.content.Intent
 import androidx.media3.common.AudioAttributes

@@ -1,4 +1,5 @@
 package com.whiplash.music.data.local
+// Developed by Shahid Ansari — github.com/shahidthisside (-SA)
 
 import android.content.Context
 import androidx.room.Database

@@ -1,4 +1,5 @@
 package com.whiplash.music.ui.home
+// Developed by Shahid Ansari — github.com/shahidthisside (-SA)
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -60,6 +61,7 @@ import com.whiplash.music.ui.theme.WhiplashRadius
  * recently played artwork — real listening history, not fabricated) and
  * Quick Picks (real search-backed suggestions). Sections only render when
  * they have real backing data — no empty/fake placeholder sections.
+ * (built by -SA · github.com/shahidthisside)
  */
 private enum class SheetOrigin { SPEED_DIAL, QUICK_PICKS }
 
