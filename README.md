@@ -22,6 +22,7 @@
 - Unified local + YouTube search (Songs, Albums, Artists, Playlists — each loads and fails independently)
 - Album and Artist detail pages with real metadata, track listings, and playback actions
 - A full History screen (up to 200 recently played tracks), Favorites, Playlists (create/rename/delete, plus importing a whole playlist by pasting a YouTube or YouTube Music playlist link), and a Speed Dial / Quick Picks home surface
+- Favorites and Playlists both offer one-tap Shuffle and Play-all actions
 - Synchronized lyrics via [LRCLIB](https://lrclib.net) (a free, open lyrics database) with an honest "unavailable" state — lyrics are never fabricated
 
 ### Design & UX
@@ -77,7 +78,7 @@ UI (Compose)  →  ViewModel  →  PlaybackController  →  MediaController  →
 
 ## Download
 
-A prebuilt debug APK is available on the [Releases page](https://github.com/shahidthisside/Whiplash/releases/latest) as `Whiplash.apk`. It is a standard debug build (not signed for release), intended for personal/educational use — see [Building from Source](#building-from-source) below if you'd rather build it yourself.
+A prebuilt signed release APK is available on the [Releases page](https://github.com/shahidthisside/Whiplash/releases/latest) as `Whiplash.apk`, intended for personal/educational use — see [Building from Source](#building-from-source) below if you'd rather build it yourself.
 
 ---
 

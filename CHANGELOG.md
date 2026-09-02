@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Local backup and restore: saves playlists, favorites, history, pinned songs, and settings to a file you choose, and can restore from it later.
 - "Rename playlist" option in the playlist long-press/3-dot menu (the underlying rename logic already existed but had no UI).
 - Home screen artwork and data now preload in the background, with real loading skeletons shown on a cold start instead of a blank or half-populated screen.
+- A small GitHub link footer at the end of Settings, linking out to the developer's profile.
+- Favorites now has the same Shuffle + Play-all action row as Playlist detail, in the same place and aligned the same way.
 
 ### Fixed
 - Turning Autoplay off, then back on again while the same track was already playing and sitting at the end of the queue, did nothing — the queue never extended until the user manually skipped away and back. Autoplay now reacts immediately to being re-enabled mid-track.
@@ -26,6 +28,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The "Last backup" status text in Settings ran on the same line as the description above it instead of starting on its own line.
 - Playlist rows used a heavier bordered card style inconsistent with the rest of the app; several icon buttons (Playlists' "+", the Queue sheet's controls, Speed dial's clear button) had unnecessarily heavy circular backgrounds — all flattened to match the app's established style, including a follow-up alignment fix between the Playlists header button and each row's own menu button.
 - Search's selected result tab (Songs/Albums/Artists/Playlists) no longer resets to Songs after opening and returning from an album or artist detail page.
+- Autoplay's related-track deduplication missed several real cases found through targeted on-device testing: generic compilation-style titles ("Gym Motivational Music | ... | Bollywood | English") were incorrectly treated as a single song rather than a long-form compilation; "All Best Songs"-style compilation titles weren't recognized by the existing keyword check; and near-duplicate uploads of the same song with different bracketed video-type tags (e.g. a "[Choreography]" performance video vs. the official music video of the same track) weren't being caught as duplicates.
+
 
 ## [0.2.0] - 2026-08-29
 
