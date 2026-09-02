@@ -20,7 +20,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +41,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -78,8 +83,11 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
         factory = HomeViewModelFactory(app.libraryRepository, app.youtubeSearchRepository),
     )
     val songActionsViewModel: SongActionsViewModel = viewModel(
-        factory = SongActionsViewModelFactory(app.libraryRepository),
+        factory = SongActionsViewModelFactory(app.libraryRepository, app.downloadManager),
     )
+    val downloadedIds by app.libraryRepository.observeDownloadedIds().collectAsState(initial = emptySet())
+    val downloadProgress by app.downloadManager.progress.collectAsState()
+    var cancelDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
     val speedDial by viewModel.speedDial.collectAsState()
     val isSpeedDialLoaded by viewModel.isSpeedDialLoaded.collectAsState()
     val quickPicks by viewModel.quickPicks.collectAsState()
@@ -166,6 +174,83 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
                         actionsSheetItem = track
                     },
                     leading = { GlassArtworkThumbnail(artworkUri = track.artworkUri) },
+                    trailing = {
+                        // Same animated progress-ring/checkmark/failed
+                        // badge PlayableItemsList shows elsewhere (Search,
+                        // Local Library, Downloads tab) — a real, reported
+                        // gap: Quick Picks rows only ever checked the
+                        // completed-downloads set, never the in-flight
+                        // progress map, so a track downloaded from Quick
+                        // Picks itself showed no progress indicator and no
+                        // checkmark until the next full recomposition
+                        // (e.g. navigating away and back). Also adds the
+                        // missing 3-dot "more options" button — Quick
+                        // Picks rows previously only opened the actions
+                        // sheet via long-press, with no visible affordance
+                        // for it at all, unlike every other track list in
+                        // the app.
+                        val inFlightProgress = downloadProgress[track.id]
+                        val downloaded = track.id in downloadedIds
+                        androidx.compose.animation.AnimatedContent(
+                            targetState = when {
+                                inFlightProgress?.failed == true -> "failed"
+                                inFlightProgress != null -> "downloading"
+                                downloaded -> "downloaded"
+                                else -> "none"
+                            },
+                            label = "quickPicksDownloadStatusBadge",
+                        ) { state ->
+                            when (state) {
+                                "downloading" -> Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .padding(end = GlassTokens.spaceXs)
+                                        .clickable(
+                                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                            indication = null,
+                                            role = androidx.compose.ui.semantics.Role.Button,
+                                            onClick = { cancelDownloadTarget = track },
+                                        )
+                                        .semantics { contentDescription = "Cancel download of ${track.title}" },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    androidx.compose.material3.CircularProgressIndicator(
+                                        progress = { inFlightProgress?.fraction ?: 0f },
+                                        color = com.whiplash.music.ui.theme.WhiplashColors.accent,
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                                "failed" -> androidx.compose.material3.Icon(
+                                    Icons.Filled.ErrorOutline,
+                                    contentDescription = "Download failed for ${track.title}",
+                                    tint = com.whiplash.music.ui.theme.WhiplashColors.error,
+                                    modifier = Modifier.size(18.dp).padding(end = GlassTokens.spaceXs),
+                                )
+                                "downloaded" -> androidx.compose.material3.Icon(
+                                    Icons.Filled.DownloadDone,
+                                    contentDescription = "Downloaded",
+                                    tint = com.whiplash.music.ui.theme.WhiplashColors.accent,
+                                    modifier = Modifier.size(18.dp).padding(end = GlassTokens.spaceXs),
+                                )
+                                else -> androidx.compose.foundation.layout.Spacer(Modifier.size(0.dp))
+                            }
+                        }
+                        com.whiplash.music.ui.theme.PlainIconButton(
+                            contentDescription = "More options for ${track.title}",
+                            onClick = {
+                                actionsSheetOrigin = SheetOrigin.QUICK_PICKS
+                                actionsSheetItem = track
+                            },
+                            size = 40.dp,
+                        ) {
+                            androidx.compose.material3.Icon(
+                                Icons.Filled.MoreVert,
+                                contentDescription = null,
+                                tint = com.whiplash.music.ui.theme.WhiplashColors.textSecondary,
+                            )
+                        }
+                    },
                 )
             }
         }
@@ -222,6 +307,19 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
                         actionsSheetItem = null
                     }
                 } else null,
+                isDownloaded = sheetItem is PlayableItem.DownloadedTrack || sheetItem.id in downloadedIds,
+                onDownload = if (sheetItem is PlayableItem.YoutubeTrack && sheetItem.id !in downloadedIds) {
+                    {
+                        app.downloadManager.startDownload(sheetItem)
+                        actionsSheetItem = null
+                    }
+                } else null,
+                onRemoveDownload = if (sheetItem is PlayableItem.DownloadedTrack) {
+                    {
+                        songActionsViewModel.removeDownload(sheetItem)
+                        actionsSheetItem = null
+                    }
+                } else null,
             )
         }
     }
@@ -264,6 +362,21 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
                 showClearSpeedDialConfirm = false
             },
             onDismiss = { showClearSpeedDialConfirm = false },
+        )
+    }
+
+    val cancelTarget = cancelDownloadTarget
+    if (cancelTarget != null) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Cancel download?",
+            message = "\"${cancelTarget.title}\" is still downloading. Canceling will delete the partial download.",
+            confirmLabel = "Cancel download",
+            dismissLabel = "Keep downloading",
+            onConfirm = {
+                app.downloadManager.cancelDownload(cancelTarget.id)
+                cancelDownloadTarget = null
+            },
+            onDismiss = { cancelDownloadTarget = null },
         )
     }
 }

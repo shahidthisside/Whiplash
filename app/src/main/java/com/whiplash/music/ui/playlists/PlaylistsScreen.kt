@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
@@ -66,6 +67,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
     var showImportDialog by remember { mutableStateOf(false) }
     var playlistPendingDelete by remember { mutableStateOf<Playlist?>(null) }
     var playlistPendingRename by remember { mutableStateOf<Playlist?>(null) }
+    var playlistPendingDownload by remember { mutableStateOf<Playlist?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -184,6 +186,26 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                         .padding(vertical = GlassTokens.spaceSm)
                         .clickable(
                             onClick = {
+                                playlistPendingDownload = toDelete
+                                playlistPendingDelete = null
+                            },
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Download, contentDescription = null, tint = WhiplashColors.textPrimary)
+                    Text(
+                        text = "Download playlist",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = WhiplashColors.textPrimary,
+                        modifier = Modifier.padding(start = GlassTokens.spaceMd),
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = GlassTokens.spaceSm)
+                        .clickable(
+                            onClick = {
                                 playlistPendingRename = toDelete
                                 playlistPendingDelete = null
                             },
@@ -234,5 +256,34 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
             },
             onDismiss = { playlistPendingRename = null },
         )
+    }
+
+    val toDownload = playlistPendingDownload
+    if (toDownload != null) {
+        // Only YoutubeTrack entries can actually be downloaded — a
+        // LocalTrack is already on-device and a DownloadedTrack already
+        // in this playlist is already downloaded (same reasoning as
+        // PlaylistDetailScreen's own "Download playlist" button).
+        val tracks by app.libraryRepository.observePlaylistTracks(toDownload.id).collectAsState(initial = null)
+        when (val current = tracks) {
+            null -> Unit // still loading; avoid showing a confirm dialog with a wrong/empty count
+            else -> {
+                val downloadable = current.filterIsInstance<com.whiplash.music.domain.model.PlayableItem.YoutubeTrack>()
+                com.whiplash.music.ui.theme.GlassConfirmDialog(
+                    title = "Download playlist?",
+                    message = if (downloadable.isEmpty()) {
+                        "None of the songs in \"${toDownload.name}\" can be downloaded (already local or already downloaded)."
+                    } else {
+                        "All ${downloadable.size} songs in \"${toDownload.name}\" will be downloaded for offline playback."
+                    },
+                    confirmLabel = "Download",
+                    onConfirm = {
+                        app.downloadManager.downloadAll(downloadable)
+                        playlistPendingDownload = null
+                    },
+                    onDismiss = { playlistPendingDownload = null },
+                )
+            }
+        }
     }
 }

@@ -18,6 +18,7 @@ fun GlassConfirmDialog(
     title: String,
     message: String,
     confirmLabel: String = "Delete",
+    dismissLabel: String = "Cancel",
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -33,7 +34,7 @@ fun GlassConfirmDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text(text = "Cancel", color = WhiplashColors.textSecondary)
+                Text(text = dismissLabel, color = WhiplashColors.textSecondary)
             }
         },
     )

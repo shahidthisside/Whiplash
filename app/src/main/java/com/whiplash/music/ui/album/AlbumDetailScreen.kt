@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
@@ -21,6 +22,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -129,6 +133,10 @@ private fun AlbumDetailHeader(
     detail: com.whiplash.music.domain.model.YoutubePlaylistDetail,
     onPlayQueue: (List<PlayableItem>, Int) -> Unit,
 ) {
+    val context = LocalContext.current
+    val app = context.applicationContext as WhiplashApplication
+    var showDownloadConfirm by remember { mutableStateOf(false) }
+
     Column {
         Box(
             modifier = Modifier
@@ -143,7 +151,6 @@ private fun AlbumDetailHeader(
                     .background(WhiplashColors.surfaceElevated),
             ) {
                 if (detail.artworkUrl != null) {
-                    val context = LocalContext.current
                     AsyncImage(
                         model = ImageRequest.Builder(context).data(detail.artworkUrl).crossfade(true).build(),
                         contentDescription = null,
@@ -172,11 +179,28 @@ private fun AlbumDetailHeader(
         androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
 
         if (detail.tracks.isNotEmpty()) {
-            Row(horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 GlassButton(text = "Play", onClick = { onPlayQueue(detail.tracks, 0) })
                 GlassButton(text = "Shuffle", onClick = { onPlayQueue(detail.tracks.shuffled(), 0) })
+                GlassButton(text = "Download", onClick = { showDownloadConfirm = true })
             }
             androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
         }
+    }
+
+    if (showDownloadConfirm) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Download album?",
+            message = "All ${detail.tracks.size} songs in \"${detail.title}\" will be downloaded for offline playback.",
+            confirmLabel = "Download",
+            onConfirm = {
+                app.downloadManager.downloadAll(detail.tracks)
+                showDownloadConfirm = false
+            },
+            onDismiss = { showDownloadConfirm = false },
+        )
     }
 }

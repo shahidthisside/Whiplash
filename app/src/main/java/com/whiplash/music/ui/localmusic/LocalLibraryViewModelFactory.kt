@@ -22,7 +22,8 @@ class LocalLibraryViewModelFactory(private val context: Context) : ViewModelProv
             localAlbumDao = database.localAlbumDao(),
             localArtistDao = database.localArtistDao(),
         )
+        val app = appContext as? com.whiplash.music.WhiplashApplication
         @Suppress("UNCHECKED_CAST")
-        return LocalLibraryViewModel(repository, appContext) as T
+        return LocalLibraryViewModel(repository, appContext, app?.libraryRepository, app?.downloadManager) as T
     }
 }

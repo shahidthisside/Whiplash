@@ -7,6 +7,9 @@ import android.os.Looper
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.whiplash.music.data.download.DownloadManager
+import com.whiplash.music.data.download.DownloadProgress
+import com.whiplash.music.data.repository.LibraryRepository
 import com.whiplash.music.data.repository.LocalLibraryRepository
 import com.whiplash.music.domain.model.LocalAlbum
 import com.whiplash.music.domain.model.LocalArtist
@@ -39,6 +42,8 @@ import kotlinx.coroutines.launch
 class LocalLibraryViewModel(
     private val repository: LocalLibraryRepository,
     context: Context,
+    private val libraryRepository: LibraryRepository? = null,
+    private val downloadManager: DownloadManager? = null,
 ) : ViewModel() {
 
     private val _isScanning = MutableStateFlow(false)
@@ -55,6 +60,41 @@ class LocalLibraryViewModel(
 
     val artists: StateFlow<List<LocalArtist>> =
         repository.observeArtists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Downloaded tracks (Library > Downloads, YouTube-Music-style offline downloads). */
+    val downloads: StateFlow<List<PlayableItem.DownloadedTrack>> =
+        libraryRepository?.observeDownloads()?.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            ?: MutableStateFlow(emptyList())
+
+    /** In-flight download progress, keyed by track id — drives the small progress indicator on a downloading row. */
+    val downloadProgress: StateFlow<Map<String, DownloadProgress>> =
+        downloadManager?.progress ?: MutableStateFlow(emptyMap())
+
+    /** Full track metadata for every in-flight download, keyed by id — lets a downloading row show real title/artist/artwork instead of a placeholder. */
+    val inFlightTracks: StateFlow<Map<String, PlayableItem.YoutubeTrack>> =
+        downloadManager?.inFlightTracks ?: MutableStateFlow(emptyMap())
+
+    fun startDownload(track: PlayableItem.YoutubeTrack) {
+        downloadManager?.startDownload(track)
+    }
+
+    /** Cancels an in-flight download (tap-the-progress-ring "Cancel download" confirmation) — instantly deletes any partial file. */
+    fun cancelDownload(trackId: String) {
+        downloadManager?.cancelDownload(trackId)
+    }
+
+    fun removeDownload(track: PlayableItem.DownloadedTrack) {
+        viewModelScope.launch {
+            downloadManager?.removeDownload(track.id)
+        }
+    }
+
+    /** "Clear all downloads" (Downloads tab) — cancels in-flight downloads and deletes every completed one from disk. */
+    fun clearAllDownloads() {
+        viewModelScope.launch {
+            downloadManager?.clearAllDownloads()
+        }
+    }
 
     val songCount: StateFlow<Int> =
         repository.observeSongCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)

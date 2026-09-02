@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +42,12 @@ fun PlayerOverflowContent(
     onOpenSleepTimer: () -> Unit,
     onOpenPlaybackSpeed: () -> Unit,
     onOpenAddToPlaylist: () -> Unit,
+    // Offline download (Library > Downloads, YouTube-Music-style) for
+    // whatever is currently playing — null when there's nothing
+    // meaningful to download (a LocalTrack, or no current item at all).
+    isDownloaded: Boolean = false,
+    onDownload: (() -> Unit)? = null,
+    onRemoveDownload: (() -> Unit)? = null,
 ) {
     OverflowRow(
         icon = {
@@ -68,6 +76,26 @@ fun PlayerOverflowContent(
         label = "Add to playlist",
         onClick = onOpenAddToPlaylist,
     )
+    if (onDownload != null) {
+        OverflowRow(
+            icon = {
+                Icon(
+                    imageVector = if (isDownloaded) Icons.Filled.DownloadDone else Icons.Filled.Download,
+                    contentDescription = null,
+                    tint = if (isDownloaded) WhiplashColors.accent else WhiplashColors.textPrimary,
+                )
+            },
+            label = if (isDownloaded) "Downloaded" else "Download",
+            onClick = onDownload,
+        )
+    }
+    if (onRemoveDownload != null) {
+        OverflowRow(
+            icon = { Icon(Icons.Filled.DownloadDone, contentDescription = null, tint = WhiplashColors.error) },
+            label = "Remove download",
+            onClick = onRemoveDownload,
+        )
+    }
 }
 
 @Composable

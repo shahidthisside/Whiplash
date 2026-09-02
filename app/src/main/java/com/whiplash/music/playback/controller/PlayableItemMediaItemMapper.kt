@@ -1,9 +1,11 @@
 package com.whiplash.music.playback.controller
 
+import android.net.Uri
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import com.whiplash.music.domain.model.PlayableItem
+import java.io.File
 
 /**
  * Resolves a [PlayableItem] to a Media3 [MediaItem].
@@ -30,11 +32,20 @@ import com.whiplash.music.domain.model.PlayableItem
 object PlayableItemMediaItemMapper {
 
     fun toMediaItem(item: PlayableItem, resolvedStreamUrl: String? = null): MediaItem {
+        // DownloadedTrack's artworkUri is a plain local file path (see
+        // DownloadManager), not a URI string — Uri.parse (what the
+        // String.toUri() extension does) would produce a schemeless URI
+        // that Coil/MediaMetadata can't load. Every other source's
+        // artworkUri is already a proper content://, https://, etc URI.
+        val artworkUri = when (item) {
+            is PlayableItem.DownloadedTrack -> item.artworkUri?.let { Uri.fromFile(File(it)) }
+            else -> item.artworkUri?.toUri()
+        }
         val metadata = MediaMetadata.Builder()
             .setTitle(item.title)
             .setArtist(item.artist)
             .setAlbumTitle(item.album)
-            .setArtworkUri(item.artworkUri?.toUri())
+            .setArtworkUri(artworkUri)
             .build()
 
         val builder = MediaItem.Builder()
@@ -43,6 +54,7 @@ object PlayableItemMediaItemMapper {
 
         when (item) {
             is PlayableItem.LocalTrack -> builder.setUri(item.mediaStoreUri.toUri())
+            is PlayableItem.DownloadedTrack -> builder.setUri(Uri.fromFile(File(item.fileUri)))
             is PlayableItem.YoutubeTrack -> {
                 // Left unset if no stream has been resolved yet; the caller
                 // is responsible for resolving one before calling this with

@@ -37,6 +37,41 @@ class WhiplashApplication : Application() {
             .build()
     }
 
+    /**
+     * A completely separate [OkHttpClient] instance (own connection pool +
+     * dispatcher) for [com.whiplash.music.data.download.DownloadManager].
+     *
+     * Real, reported bug root cause: [okHttpClient] above is shared by
+     * [OkHttpNewPipeDownloader] (NewPipeExtractor's metadata + stream-URL
+     * resolution — small, fast requests that playback depends on for
+     * *every* track) and, before this fix, by the download manager's own
+     * large audio-byte GET requests (megabytes, held open for tens of
+     * seconds to minutes on a slow connection). OkHttp's default
+     * [okhttp3.Dispatcher] caps concurrent requests per host
+     * (maxRequestsPerHost=5) and reuses a bounded connection pool — a
+     * long-lived download to googlevideo.com could starve a *different*
+     * song's stream-resolution or metadata call queued behind it on the
+     * same shared client, which is exactly the reported symptom ("after
+     * this none of the songs in app is playing, just loading loading").
+     * A dedicated client for downloads means a slow/large download can
+     * never block or starve anything playback needs, regardless of how
+     * long it takes or how many are running.
+     *
+     * Also uses a longer read timeout (large files legitimately have
+     * longer gaps between reads on a slow/throttled connection than a
+     * small metadata request ever would) and no call timeout, since a
+     * multi-minute download is expected and should not be treated as
+     * "stuck" purely by wall-clock duration the way a metadata call
+     * should be.
+     */
+    private val downloadOkHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+    }
+
     val settingsRepository: SettingsRepository by lazy { SettingsRepository(this) }
 
     val audioCacheManager: com.whiplash.music.playback.cache.AudioCacheManager by lazy {
@@ -55,6 +90,7 @@ class WhiplashApplication : Application() {
             songDao = database.songDao(),
             localSongDao = database.localSongDao(),
             pinnedDao = database.pinnedDao(),
+            downloadDao = database.downloadDao(),
         )
     }
 
@@ -94,10 +130,22 @@ class WhiplashApplication : Application() {
         PlaybackController(this, playbackManager, settingsRepository, libraryRepository, newPipePlaybackProvider, audioCacheManager)
     }
 
+    val downloadManager: com.whiplash.music.data.download.DownloadManager by lazy {
+        com.whiplash.music.data.download.DownloadManager(this, playbackManager, database.downloadDao(), downloadOkHttpClient)
+    }
+
     override fun onCreate() {
         super.onCreate()
         NewPipe.init(OkHttpNewPipeDownloader(okHttpClient))
         playbackController.connect()
+
+        // Clean up any download left in an inconsistent state by a
+        // process death mid-download (section: offline downloads) —
+        // otherwise a half-written file with no matching COMPLETED row
+        // would silently linger in app-private storage forever.
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching { downloadManager.cleanUpIncompleteDownloads() }
+        }
 
         // Apply the persisted Appearance theme (section 59) as early as
         // possible — at the true application entry point, not lazily via

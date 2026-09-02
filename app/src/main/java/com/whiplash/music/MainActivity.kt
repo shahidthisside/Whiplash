@@ -18,6 +18,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -174,6 +175,7 @@ private fun MiniPlayerHost(
 @Composable
 private fun WhiplashApp() {
     val context = LocalContext.current
+    val mainScope = androidx.compose.runtime.rememberCoroutineScope()
     val app = context.applicationContext as WhiplashApplication
     val playerViewModel: PlayerViewModel = viewModel(
         factory = PlayerViewModelFactory(app.playbackController, app.libraryRepository, app.settingsRepository),
@@ -423,6 +425,8 @@ private fun WhiplashApp() {
                     val autoplayEnabled by playerViewModel.autoplayEnabled.collectAsState()
                     val playbackSpeed by playerViewModel.playbackSpeed.collectAsState()
                     val playlistsForPlayer by playerViewModel.playlists.collectAsState()
+                    val downloadedIds by app.libraryRepository.observeDownloadedIds().collectAsState(initial = emptySet())
+                    val currentItemForDownload = playbackState.currentItem
                     FullPlayerScreen(
                         state = playbackState,
                         onTogglePlayPause = playerViewModel::togglePlayPause,
@@ -447,6 +451,18 @@ private fun WhiplashApp() {
                         playlists = playlistsForPlayer,
                         onAddToPlaylist = playerViewModel::addCurrentToPlaylist,
                         onCreatePlaylistAndAdd = playerViewModel::createPlaylistAndAddCurrent,
+                        isCurrentDownloaded = currentItemForDownload is com.whiplash.music.domain.model.PlayableItem.DownloadedTrack ||
+                            (currentItemForDownload != null && currentItemForDownload.id in downloadedIds),
+                        onDownloadCurrent = (currentItemForDownload as? com.whiplash.music.domain.model.PlayableItem.YoutubeTrack)?.let { track ->
+                            { app.downloadManager.startDownload(track) }
+                        },
+                        onRemoveDownloadCurrent = if (currentItemForDownload != null) {
+                            {
+                                val id = currentItemForDownload.id
+                                com.whiplash.music.ui.common.ToastController.show("Download removed")
+                                mainScope.launch { app.downloadManager.removeDownload(id) }
+                            }
+                        } else null,
                     )
                 }
             }

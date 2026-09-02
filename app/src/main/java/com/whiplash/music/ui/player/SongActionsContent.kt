@@ -10,6 +10,8 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.PushPin
@@ -41,8 +43,8 @@ fun SongActionsContent(
     isFavorite: Boolean,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
-    onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit = {},
+    onToggleFavorite: (() -> Unit)? = null,
     onStartRadio: (() -> Unit)? = null,
     onShare: (() -> Unit)? = null,
     isPinned: Boolean = false,
@@ -50,6 +52,14 @@ fun SongActionsContent(
     onRemoveFromSpeedDial: (() -> Unit)? = null,
     onRemoveFromQuickPicks: (() -> Unit)? = null,
     onRemoveFromHistory: (() -> Unit)? = null,
+    // Offline downloads (section: Library > Downloads, YouTube-Music-style):
+    // isDownloaded reflects real persisted state (see LibraryRepository.observeDownloadedIds),
+    // onDownload/onRemoveDownload are null wherever downloading doesn't make
+    // sense (LocalTrack — already on-device; DownloadedTrack shown from the
+    // Downloads tab itself gets onRemoveDownload only).
+    isDownloaded: Boolean = false,
+    onDownload: (() -> Unit)? = null,
+    onRemoveDownload: (() -> Unit)? = null,
 ) {
     val haptic = LocalHapticFeedback.current
     Column {
@@ -98,20 +108,42 @@ fun SongActionsContent(
             label = "Add to playlist",
             onClick = onAddToPlaylist,
         )
-        SongActionRow(
-            icon = {
-                Icon(
-                    imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                    contentDescription = null,
-                    tint = if (isFavorite) WhiplashColors.accent else WhiplashColors.textPrimary,
-                )
-            },
-            label = if (isFavorite) "Remove from favorites" else "Add to favorites",
-            onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onToggleFavorite()
-            },
-        )
+        if (onDownload != null) {
+            SongActionRow(
+                icon = {
+                    Icon(
+                        imageVector = if (isDownloaded) Icons.Filled.DownloadDone else Icons.Filled.Download,
+                        contentDescription = null,
+                        tint = if (isDownloaded) WhiplashColors.accent else WhiplashColors.textPrimary,
+                    )
+                },
+                label = if (isDownloaded) "Downloaded" else "Download",
+                onClick = onDownload,
+            )
+        }
+        if (onRemoveDownload != null) {
+            SongActionRow(
+                icon = { Icon(Icons.Filled.RemoveCircleOutline, contentDescription = null, tint = WhiplashColors.error) },
+                label = "Remove download",
+                onClick = onRemoveDownload,
+            )
+        }
+        if (onToggleFavorite != null) {
+            SongActionRow(
+                icon = {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                        contentDescription = null,
+                        tint = if (isFavorite) WhiplashColors.accent else WhiplashColors.textPrimary,
+                    )
+                },
+                label = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onToggleFavorite()
+                },
+            )
+        }
         if (onShare != null) {
             SongActionRow(
                 icon = { Icon(Icons.Filled.Share, contentDescription = null, tint = WhiplashColors.textPrimary) },

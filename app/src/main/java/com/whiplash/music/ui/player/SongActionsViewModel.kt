@@ -2,6 +2,7 @@ package com.whiplash.music.ui.player
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.whiplash.music.data.download.DownloadManager
 import com.whiplash.music.data.repository.LibraryRepository
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.ui.common.ToastController
@@ -19,7 +20,10 @@ import kotlinx.coroutines.launch
  * effect, so without this a user has no way to tell an action actually
  * registered.
  */
-class SongActionsViewModel(private val libraryRepository: LibraryRepository) : ViewModel() {
+class SongActionsViewModel(
+    private val libraryRepository: LibraryRepository,
+    private val downloadManager: DownloadManager? = null,
+) : ViewModel() {
 
     fun toggleFavorite(item: PlayableItem, isCurrentlyFavorite: Boolean) {
         viewModelScope.launch {
@@ -66,6 +70,14 @@ class SongActionsViewModel(private val libraryRepository: LibraryRepository) : V
         viewModelScope.launch {
             libraryRepository.removeFromHistory(item)
             ToastController.show("Removed from history")
+        }
+    }
+
+    /** Deletes a downloaded track's audio/artwork files and its Room row (Library > Downloads). */
+    fun removeDownload(item: PlayableItem.DownloadedTrack) {
+        viewModelScope.launch {
+            downloadManager?.removeDownload(item.id)
+            ToastController.show("Download removed")
         }
     }
 }

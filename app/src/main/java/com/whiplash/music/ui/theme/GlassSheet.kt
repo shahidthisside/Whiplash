@@ -31,7 +31,19 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun GlassSheet(
     onDismissRequest: () -> Unit,
-    sheetState: SheetState = rememberModalBottomSheetState(),
+    // skipPartiallyExpanded = true: real, reported bug — the sheet used
+    // to always open in a half-height "partially expanded" state first
+    // (Material3's own default), so a sheet with enough rows to exceed
+    // that half-height (e.g. the 10-row song actions sheet for an
+    // undownloaded YoutubeTrack from Quick Picks) required a manual drag
+    // or scroll gesture just to see the rest — "have to scroll... full
+    // sheet should be visible without scrolling." Skipping straight to
+    // the fully-expanded state means every row is visible immediately on
+    // open with no gesture required; a sheet whose content is shorter
+    // than the full screen still only takes up as much height as it
+    // needs; this doesn't force every sheet to visually cover the whole
+    // screen.
+    sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     content: @Composable () -> Unit,
 ) {
     ModalBottomSheet(
@@ -53,6 +65,18 @@ fun GlassSheet(
             }
         },
     ) {
+        // NOTE: deliberately NOT Modifier.verticalScroll() here. A real,
+        // reported crash: QueueContent (one of this composable's callers)
+        // renders its own internal LazyColumn — nesting a LazyColumn
+        // inside a verticalScroll(Column) is explicitly disallowed by
+        // Compose ("Vertically scrollable component was measured with an
+        // infinity maximum height constraints") and crashes immediately
+        // on measure. skipPartiallyExpanded=true above already solves the
+        // original "have to scroll to see all options" report for plain-
+        // Column sheets (the song actions sheet) by making the sheet open
+        // at full height immediately; LazyColumn-based sheet content
+        // (Queue) already scrolls correctly on its own and never needed
+        // this Column to do it too.
         Column(
             modifier = Modifier
                 .fillMaxWidth()

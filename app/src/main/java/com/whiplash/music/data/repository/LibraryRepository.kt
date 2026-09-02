@@ -1,5 +1,6 @@
 package com.whiplash.music.data.repository
 
+import com.whiplash.music.data.local.dao.DownloadDao
 import com.whiplash.music.data.local.dao.FavoriteDao
 import com.whiplash.music.data.local.dao.HistoryDao
 import com.whiplash.music.data.local.dao.LocalSongDao
@@ -20,11 +21,13 @@ import com.whiplash.music.data.local.entity.MediaSource as EntityMediaSource
 private fun MediaSource.toEntity(): EntityMediaSource = when (this) {
     MediaSource.YOUTUBE -> EntityMediaSource.YOUTUBE
     MediaSource.LOCAL -> EntityMediaSource.LOCAL
+    MediaSource.DOWNLOAD -> EntityMediaSource.DOWNLOAD
 }
 
 private fun EntityMediaSource.toDomain(): MediaSource = when (this) {
     EntityMediaSource.YOUTUBE -> MediaSource.YOUTUBE
     EntityMediaSource.LOCAL -> MediaSource.LOCAL
+    EntityMediaSource.DOWNLOAD -> MediaSource.DOWNLOAD
 }
 
 /**
@@ -47,6 +50,7 @@ class LibraryRepository(
     private val songDao: SongDao,
     private val localSongDao: LocalSongDao,
     private val pinnedDao: PinnedDao,
+    private val downloadDao: DownloadDao,
 ) {
 
     /** Caches metadata for a YouTube track so it can be resolved later by id alone. */
@@ -173,16 +177,48 @@ class LibraryRepository(
     suspend fun removeFromPlaylistAt(playlistId: Long, position: Int) =
         playlistDao.removeTrackAt(playlistId, position)
 
+    // --- Offline downloads (Library > Downloads, YouTube-Music-style) ---
+
+    /** Completed downloads, most recent first — backs the Downloads tab. */
+    fun observeDownloads(): Flow<List<PlayableItem.DownloadedTrack>> =
+        downloadDao.observeCompleted().map { entities ->
+            entities.map {
+                PlayableItem.DownloadedTrack(
+                    id = it.id,
+                    title = it.title,
+                    artist = it.artist,
+                    album = it.album,
+                    artworkUri = it.artworkPath,
+                    durationMs = it.durationMs,
+                    fileUri = it.filePath,
+                )
+            }
+        }
+
+    /** Set of ids of every completed download — used to render the small checkmark badge on any matching track anywhere it appears. */
+    fun observeDownloadedIds(): Flow<Set<String>> = downloadDao.observeCompletedIds().map { it.toSet() }
+
+    suspend fun removeDownload(id: String, filePath: String) {
+        runCatching { java.io.File(filePath).delete() }
+        downloadDao.delete(id)
+    }
+
     /** Resolves a list of (trackId, source) pairs into displayable [PlayableItem]s, silently dropping any that no longer resolve. */
     private fun Flow<List<Pair<String, MediaSource>>>.flatMapResolve(): Flow<List<PlayableItem>> = map { refs ->
         if (refs.isEmpty()) return@map emptyList()
 
         val youtubeIds = refs.filter { it.second == MediaSource.YOUTUBE }.map { it.first }
         val localIds = refs.filter { it.second == MediaSource.LOCAL }.mapNotNull { it.first.toLongOrNull() }
+        val downloadIds = refs.filter { it.second == MediaSource.DOWNLOAD }.map { it.first }
 
         val songs = if (youtubeIds.isNotEmpty()) songDao.getByIds(youtubeIds).associateBy { it.id } else emptyMap()
         val localSongs = if (localIds.isNotEmpty()) {
             localIds.mapNotNull { localSongDao.getById(it) }.associateBy { it.mediaStoreId.toString() }
+        } else {
+            emptyMap()
+        }
+        val downloads = if (downloadIds.isNotEmpty()) {
+            downloadIds.mapNotNull { downloadDao.getById(it) }.associateBy { it.id }
         } else {
             emptyMap()
         }
@@ -208,6 +244,17 @@ class LibraryRepository(
                         artworkUri = null,
                         durationMs = it.durationMs,
                         mediaStoreUri = it.uri,
+                    )
+                }
+                MediaSource.DOWNLOAD -> downloads[id]?.let {
+                    PlayableItem.DownloadedTrack(
+                        id = it.id,
+                        title = it.title,
+                        artist = it.artist,
+                        album = it.album,
+                        artworkUri = it.artworkPath,
+                        durationMs = it.durationMs,
+                        fileUri = it.filePath,
                     )
                 }
             }

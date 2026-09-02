@@ -1,6 +1,7 @@
 package com.whiplash.music.data.local
 
 import androidx.room.TypeConverter
+import com.whiplash.music.data.local.entity.DownloadStatus
 import com.whiplash.music.data.local.entity.MediaSource
 import com.whiplash.music.data.local.entity.ProviderStatus
 
@@ -18,4 +19,10 @@ class Converters {
 
     @TypeConverter
     fun stringToProviderStatus(value: String): ProviderStatus = ProviderStatus.valueOf(value)
+
+    @TypeConverter
+    fun downloadStatusToString(value: DownloadStatus): String = value.name
+
+    @TypeConverter
+    fun stringToDownloadStatus(value: String): DownloadStatus = DownloadStatus.valueOf(value)
 }

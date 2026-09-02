@@ -392,6 +392,7 @@ class PlaybackController(
 
         when (item) {
             is PlayableItem.LocalTrack -> startMediaItem(item, resolvedStreamUrl = null)
+            is PlayableItem.DownloadedTrack -> startMediaItem(item, resolvedStreamUrl = null)
             is PlayableItem.YoutubeTrack -> {
                 val cached = prefetched?.takeIf { it.forItemId == item.id }
                 val mediaId = PlayableItemMediaItemMapper.mediaIdOf(item)

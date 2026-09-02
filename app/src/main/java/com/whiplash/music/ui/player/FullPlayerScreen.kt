@@ -101,6 +101,11 @@ fun FullPlayerScreen(
     playlists: List<com.whiplash.music.domain.model.Playlist> = emptyList(),
     onAddToPlaylist: (playlistId: Long, playlistName: String) -> Unit = { _, _ -> },
     onCreatePlaylistAndAdd: (name: String) -> Unit = {},
+    // Offline download (Library > Downloads, YouTube-Music-style) for
+    // whatever is currently playing.
+    isCurrentDownloaded: Boolean = false,
+    onDownloadCurrent: (() -> Unit)? = null,
+    onRemoveDownloadCurrent: (() -> Unit)? = null,
 ) {
     val item = state.currentItem
     var isQueueSheetOpen by remember { mutableStateOf(false) }
@@ -367,6 +372,19 @@ fun FullPlayerScreen(
                     isOverflowSheetOpen = false
                     if (item != null) isAddToPlaylistSheetOpen = true
                 },
+                isDownloaded = isCurrentDownloaded,
+                onDownload = if (onDownloadCurrent != null && item is PlayableItem.YoutubeTrack && !isCurrentDownloaded) {
+                    {
+                        onDownloadCurrent()
+                        isOverflowSheetOpen = false
+                    }
+                } else null,
+                onRemoveDownload = if (onRemoveDownloadCurrent != null && isCurrentDownloaded) {
+                    {
+                        onRemoveDownloadCurrent()
+                        isOverflowSheetOpen = false
+                    }
+                } else null,
             )
         }
     }

@@ -1,6 +1,9 @@
 package com.whiplash.music.ui.player
 
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,6 +13,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -26,6 +31,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.whiplash.music.WhiplashApplication
@@ -72,12 +81,25 @@ fun PlayableItemsList(
     val app = context.applicationContext as WhiplashApplication
     val haptic = LocalHapticFeedback.current
     val songActionsViewModel: SongActionsViewModel = viewModel(
-        factory = SongActionsViewModelFactory(app.libraryRepository),
+        factory = SongActionsViewModelFactory(app.libraryRepository, app.downloadManager),
     )
     var actionsSheetItem by remember { mutableStateOf<PlayableItem?>(null) }
     var addToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+
+    // Single shared subscription for the small offline-downloaded
+    // checkmark badge (YouTube-Music-style) — hoisted here rather than
+    // one Flow collection per row, which would otherwise scale with list
+    // length for no benefit (every row needs the exact same set).
+    val downloadedIds by app.libraryRepository.observeDownloadedIds().collectAsState(initial = emptySet())
+
+    // In-flight download progress (section: Downloads tab redesign) —
+    // drives the animated progress-ring badge for any YoutubeTrack row
+    // currently downloading, in any list (Search, Home, Downloads tab
+    // itself, etc), not just the Downloads tab.
+    val downloadProgress by app.downloadManager.progress.collectAsState()
+    var cancelDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
 
     // Real scroll-triggered "load more" detection — the standard, correct
     // Compose pattern (snapshotFlow over LazyListState.layoutInfo, not a
@@ -163,6 +185,68 @@ fun PlayableItemsList(
                 },
                 leading = { GlassArtworkThumbnail(artworkUri = item.artworkUri) },
                 trailing = {
+                    // Offline-download status badge (YouTube-Music-style):
+                    // while downloading, an animated determinate progress
+                    // ring in place of the checkmark — tapping it opens a
+                    // Cancel/Keep-downloading confirmation (see
+                    // cancelDownloadTarget below) rather than immediately
+                    // canceling on a single accidental tap. On completion,
+                    // AnimatedContent crossfades the ring into the
+                    // checkmark rather than an abrupt swap.
+                    val inFlightProgress = if (item is PlayableItem.YoutubeTrack) downloadProgress[item.id] else null
+                    val downloaded = item is PlayableItem.DownloadedTrack ||
+                        (item is PlayableItem.YoutubeTrack && item.id in downloadedIds)
+                    androidx.compose.animation.AnimatedContent(
+                        targetState = when {
+                            inFlightProgress?.failed == true -> "failed"
+                            inFlightProgress != null -> "downloading"
+                            downloaded -> "downloaded"
+                            else -> "none"
+                        },
+                        label = "downloadStatusBadge",
+                    ) { state ->
+                        when (state) {
+                            "downloading" -> Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .padding(end = GlassTokens.spaceXs)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        role = Role.Button,
+                                        onClick = { cancelDownloadTarget = item },
+                                    )
+                                    .semantics { contentDescription = "Cancel download of ${item.title}" },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(
+                                    progress = { inFlightProgress?.fraction ?: 0f },
+                                    color = WhiplashColors.accent,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            // A download that failed after its automatic
+                            // retry (see DownloadManager.runDownload) —
+                            // shown distinctly rather than silently
+                            // vanishing, which was the real reported bug
+                            // ("getting invisible from downloading
+                            // options, there shows no downloads").
+                            "failed" -> Icon(
+                                Icons.Filled.ErrorOutline,
+                                contentDescription = "Download failed for ${item.title}",
+                                tint = WhiplashColors.error,
+                                modifier = Modifier.size(18.dp).padding(end = GlassTokens.spaceXs),
+                            )
+                            "downloaded" -> Icon(
+                                Icons.Filled.DownloadDone,
+                                contentDescription = "Downloaded",
+                                tint = WhiplashColors.accent,
+                                modifier = Modifier.size(18.dp).padding(end = GlassTokens.spaceXs),
+                            )
+                            else -> androidx.compose.foundation.layout.Spacer(Modifier.size(0.dp))
+                        }
+                    }
                     PlainIconButton(
                         contentDescription = "More options for ${item.title}",
                         onClick = { actionsSheetItem = item },
@@ -193,6 +277,11 @@ fun PlayableItemsList(
     if (sheetItem != null) {
         val isFavorite by app.libraryRepository.observeIsFavorite(sheetItem).collectAsState(initial = false)
         val isPinned by app.libraryRepository.observeIsPinned(sheetItem).collectAsState(initial = false)
+        // The Downloads tab's action sheet is intentionally a smaller set
+        // (Play next / Add to queue / Save to playlist / Remove download /
+        // Share) — Favorite/Pin/Start radio don't apply to a track being
+        // managed as a saved-offline-file rather than browsed online.
+        val isDownloadedTrack = sheetItem is PlayableItem.DownloadedTrack
         GlassSheet(onDismissRequest = { actionsSheetItem = null }) {
             SongActionsContent(
                 item = sheetItem,
@@ -205,10 +294,12 @@ fun PlayableItemsList(
                     app.playbackController.addToQueue(sheetItem)
                     actionsSheetItem = null
                 },
-                onToggleFavorite = {
-                    songActionsViewModel.toggleFavorite(sheetItem, isCurrentlyFavorite = isFavorite)
-                    actionsSheetItem = null
-                },
+                onToggleFavorite = if (!isDownloadedTrack) {
+                    {
+                        songActionsViewModel.toggleFavorite(sheetItem, isCurrentlyFavorite = isFavorite)
+                        actionsSheetItem = null
+                    }
+                } else null,
                 onAddToPlaylist = {
                     addToPlaylistItem = sheetItem
                     actionsSheetItem = null
@@ -225,20 +316,35 @@ fun PlayableItemsList(
                         actionsSheetItem = null
                     }
                 } else null,
-                onShare = if (sheetItem is PlayableItem.YoutubeTrack) {
+                onShare = if (sheetItem is PlayableItem.YoutubeTrack || sheetItem is PlayableItem.DownloadedTrack) {
                     {
                         shareYoutubeTrack(context, sheetItem)
                         actionsSheetItem = null
                     }
                 } else null,
                 isPinned = isPinned,
-                onTogglePinned = {
-                    songActionsViewModel.togglePinned(sheetItem, isCurrentlyPinned = isPinned)
-                    actionsSheetItem = null
-                },
+                onTogglePinned = if (!isDownloadedTrack) {
+                    {
+                        songActionsViewModel.togglePinned(sheetItem, isCurrentlyPinned = isPinned)
+                        actionsSheetItem = null
+                    }
+                } else null,
                 onRemoveFromHistory = if (onRemoveFromHistory != null) {
                     {
                         onRemoveFromHistory(sheetItem)
+                        actionsSheetItem = null
+                    }
+                } else null,
+                isDownloaded = sheetItem is PlayableItem.DownloadedTrack || sheetItem.id in downloadedIds,
+                onDownload = if (sheetItem is PlayableItem.YoutubeTrack && sheetItem.id !in downloadedIds) {
+                    {
+                        app.downloadManager.startDownload(sheetItem)
+                        actionsSheetItem = null
+                    }
+                } else null,
+                onRemoveDownload = if (sheetItem is PlayableItem.DownloadedTrack) {
+                    {
+                        songActionsViewModel.removeDownload(sheetItem)
                         actionsSheetItem = null
                     }
                 } else null,
@@ -274,6 +380,25 @@ fun PlayableItemsList(
             onDismiss = { showCreatePlaylistDialog = false },
         )
     }
+
+    val cancelTarget = cancelDownloadTarget
+    if (cancelTarget != null) {
+        // Tapping the in-progress ring opens this rather than canceling
+        // immediately — "Keep downloading" just dismisses (the download
+        // was never actually touched), "Cancel download" calls the real
+        // cancel path which deletes the partial file instantly.
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Cancel download?",
+            message = "\"${cancelTarget.title}\" is still downloading. Canceling will delete the partial download.",
+            confirmLabel = "Cancel download",
+            dismissLabel = "Keep downloading",
+            onConfirm = {
+                app.downloadManager.cancelDownload(cancelTarget.id)
+                cancelDownloadTarget = null
+            },
+            onDismiss = { cancelDownloadTarget = null },
+        )
+    }
 }
 
 /**
@@ -290,11 +415,13 @@ private const val LOAD_MORE_THRESHOLD = 5
 
 /**
  * Shares a real, working YouTube watch URL for [track] via Android's
- * native share sheet — only offered for YouTube tracks (section 73: don't
- * add a fake action) since a [PlayableItem.LocalTrack] has no meaningful
- * external link to share.
+ * native share sheet — offered for [PlayableItem.YoutubeTrack] and
+ * [PlayableItem.DownloadedTrack] (a downloaded track's [PlayableItem.id]
+ * is the same YouTube video id it was downloaded from) since both have a
+ * meaningful external link to share (section 73: don't add a fake
+ * action) — a [PlayableItem.LocalTrack] does not, and is excluded.
  */
-fun shareYoutubeTrack(context: android.content.Context, track: PlayableItem.YoutubeTrack) {
+fun shareYoutubeTrack(context: android.content.Context, track: PlayableItem) {
     val url = "https://youtube.com/watch?v=${track.id}"
     val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
         type = "text/plain"

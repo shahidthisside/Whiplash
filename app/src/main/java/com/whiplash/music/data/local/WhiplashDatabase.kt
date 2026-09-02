@@ -7,6 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.whiplash.music.data.local.dao.AlbumDao
 import com.whiplash.music.data.local.dao.ArtistDao
+import com.whiplash.music.data.local.dao.DownloadDao
 import com.whiplash.music.data.local.dao.FavoriteDao
 import com.whiplash.music.data.local.dao.HistoryDao
 import com.whiplash.music.data.local.dao.LocalAlbumDao
@@ -20,6 +21,7 @@ import com.whiplash.music.data.local.dao.SearchHistoryDao
 import com.whiplash.music.data.local.dao.SongDao
 import com.whiplash.music.data.local.entity.AlbumEntity
 import com.whiplash.music.data.local.entity.ArtistEntity
+import com.whiplash.music.data.local.entity.DownloadEntity
 import com.whiplash.music.data.local.entity.FavoriteEntity
 import com.whiplash.music.data.local.entity.HistoryEntity
 import com.whiplash.music.data.local.entity.LocalAlbumEntity
@@ -56,8 +58,9 @@ import com.whiplash.music.data.local.entity.SongEntity
         LocalArtistEntity::class,
         ProviderHealthEntity::class,
         PinnedEntity::class,
+        DownloadEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -76,6 +79,7 @@ abstract class WhiplashDatabase : RoomDatabase() {
     abstract fun localArtistDao(): LocalArtistDao
     abstract fun providerHealthDao(): ProviderHealthDao
     abstract fun pinnedDao(): PinnedDao
+    abstract fun downloadDao(): DownloadDao
 
     companion object {
         private const val DATABASE_NAME = "whiplash.db"

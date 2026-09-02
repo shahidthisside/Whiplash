@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Icon
@@ -16,6 +17,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -54,6 +58,7 @@ fun PlaylistDetailScreen(
         factory = PlaylistDetailViewModelFactory(app.libraryRepository, playlist.id),
     )
     val tracks by viewModel.tracks.collectAsState()
+    var showDownloadConfirm by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
         Row(
@@ -77,6 +82,9 @@ fun PlaylistDetailScreen(
                     PlainIconButton(contentDescription = "Play all", onClick = { onPlayQueue(tracks, 0) }) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = WhiplashColors.textPrimary)
                     }
+                    PlainIconButton(contentDescription = "Download playlist", onClick = { showDownloadConfirm = true }) {
+                        Icon(Icons.Filled.Download, contentDescription = null, tint = WhiplashColors.textPrimary)
+                    }
                 }
             }
         }
@@ -91,5 +99,28 @@ fun PlaylistDetailScreen(
         } else {
             PlayableItemsList(items = tracks, onPlayQueue = onPlayQueue, modifier = Modifier.fillMaxSize())
         }
+    }
+
+    if (showDownloadConfirm) {
+        // Only YoutubeTrack entries can actually be downloaded (a
+        // LocalTrack is already on-device; a DownloadedTrack already-added
+        // to a playlist is already downloaded) — the confirmation message
+        // is phrased around the real number that will actually download,
+        // not the playlist's total track count, so it's never misleading.
+        val downloadable = tracks.filterIsInstance<PlayableItem.YoutubeTrack>()
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Download playlist?",
+            message = if (downloadable.isEmpty()) {
+                "None of the songs in \"${playlist.name}\" can be downloaded (already local or already downloaded)."
+            } else {
+                "All ${downloadable.size} songs in \"${playlist.name}\" will be downloaded for offline playback."
+            },
+            confirmLabel = "Download",
+            onConfirm = {
+                app.downloadManager.downloadAll(downloadable)
+                showDownloadConfirm = false
+            },
+            onDismiss = { showDownloadConfirm = false },
+        )
     }
 }
