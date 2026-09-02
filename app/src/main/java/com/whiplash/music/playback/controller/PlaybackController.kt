@@ -448,6 +448,22 @@ class PlaybackController(
                     startMediaItem(displayItem, resolvedStreamUrl = "cache://$mediaId")
                     maybeExtendQueueWithRecommendations(item)
                 } else {
+                    // Real, on-device-confirmed problem: maybeExtendQueueWithRecommendations
+                    // used to only be called AFTER playbackManager.resolveStream()
+                    // succeeded — but these two operations are fully
+                    // independent (one fetches the audio stream URL, the
+                    // other fetches related-track recommendations), so
+                    // waiting for one before starting the other needlessly
+                    // serialized them. Measured on-device: stream resolve
+                    // ~2.6s, then getRelatedTracks ~2.1s, then category
+                    // checks ~4-5s — all stacked sequentially added up to
+                    // ~9-10 seconds before the queue actually grew, on the
+                    // very first track played from a fresh queue (Quick
+                    // Picks/Search/History/Speed dial). Starting both at
+                    // once lets the recommendation fetch's network time
+                    // overlap with the stream resolve's, instead of adding
+                    // on top of it.
+                    maybeExtendQueueWithRecommendations(item)
                     scope.launch {
                         val quality = settingsRepository.audioQuality.first()
                         libraryRepository.cacheSong(item)
@@ -487,7 +503,11 @@ class PlaybackController(
                                 val upgraded = upgradeArtworkIfCurrent(item, result.value.resolvedArtworkUrl)
                                 _state.update { it.copy(isResolvingStream = false, currentItem = upgraded ?: it.currentItem) }
                                 startMediaItem(upgraded ?: item, resolvedStreamUrl = result.value.streamUrl)
-                                maybeExtendQueueWithRecommendations(item)
+                                // maybeExtendQueueWithRecommendations(item) now
+                                // called upfront, in parallel with this resolve
+                                // (see the comment where this scope.launch
+                                // starts) — removed the duplicate call that used
+                                // to be here.
                                 // Persist the upgraded (higher-res) artwork
                                 // over the earlier cacheSong() call's
                                 // search-time thumbnail, so History/
@@ -676,18 +696,10 @@ class PlaybackController(
                 // mashup only gets other mashups, and a full album/jukebox
                 // only gets other long-form uploads.
                 val seedLengthClass = classifySongLength(justStarted.title)
-                // Real, on-device-confirmed problem: firing all up to
-                // MAX_AUTOPLAY_ADDITIONS * 2 (20) getPlayerInfo() calls
-                // simultaneously — each a full watch-page-equivalent network
-                // resolve — creates a genuine CPU/network contention burst
-                // that can make ExoPlayer's position-reporting briefly glitch
-                // during early playback (confirmed via direct, real position
-                // logging: a backward jump in c.currentPosition occurred a
-                // few seconds into playback, coinciding with this exact
-                // burst). Capping concurrency (not skipping any candidates —
-                // every one is still checked, just not all at once) reduces
-                // that contention without weakening the recommendation
-                // feature itself.
+                // Bounds how many getPlayerInfo() category-checks are in
+                // flight at once (see CATEGORY_CHECK_CONCURRENCY's doc
+                // comment for the real speed-vs-contention history here) —
+                // still checks every candidate, just not all simultaneously.
                 val categoryCheckLimiter = Semaphore(CATEGORY_CHECK_CONCURRENCY)
                 val filtered = candidates.take(MAX_AUTOPLAY_ADDITIONS * 2).map { candidate ->
                     async {
@@ -1092,14 +1104,29 @@ class PlaybackController(
 
         /**
          * Caps how many getPlayerInfo() category-checks run at once during
-         * autoplay's queue extension (see the real, on-device-confirmed
-         * position-glitch this fixes, documented at the call site). Every
-         * candidate is still checked — this only bounds how many resolves
-         * are in flight simultaneously, trading a slightly longer total
-         * extension time for far less CPU/network contention during early
-         * playback.
+         * autoplay's queue extension. Every candidate is still checked —
+         * this only bounds how many resolves are in flight simultaneously.
+         *
+         * Real, reported problem this value addresses: the first autoplay
+         * extension of a session (Quick Picks/Search/History/Speed dial —
+         * i.e. whenever playback starts from a single track with no
+         * pre-existing queue) took roughly 10 seconds before the queue
+         * actually grew, because up to MAX_AUTOPLAY_ADDITIONS * 2 (20)
+         * candidates were being checked in small batches of 4 at a time —
+         * 5 sequential batches, each a real network round-trip.
+         *
+         * This was originally set low (4) on the assumption it was also
+         * fixing a separate, real on-device-confirmed seek-bar position
+         * glitch — but later, more careful isolation testing in the same
+         * session (autoplay fully disabled, fresh uncached tracks) proved
+         * that glitch happens independently of this concurrency value
+         * entirely; it's now handled directly by the one-suppression guard
+         * in refreshPositionAndDuration instead. With that separately
+         * covered, there's no remaining reason to keep this artificially
+         * low — raised to let candidates resolve in far fewer batches
+         * without changing what's checked or how results are filtered.
          */
-        const val CATEGORY_CHECK_CONCURRENCY = 4
+        const val CATEGORY_CHECK_CONCURRENCY = 10
 
         /** How far before track-end to start resolving the next stream (section 18: gapless). */
         const val PREFETCH_LEAD_MS = 8_000L
