@@ -1,8 +1,16 @@
 package com.whiplash.music.ui.library
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -16,6 +24,7 @@ import com.whiplash.music.WhiplashApplication
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.ui.player.PlayableItemsList
 import com.whiplash.music.ui.theme.GlassTokens
+import com.whiplash.music.ui.theme.PlainIconButton
 import com.whiplash.music.ui.theme.WhiplashColors
 
 /**
@@ -43,9 +52,26 @@ fun FavoritesScreen(onPlayQueue: (queue: List<PlayableItem>, startIndex: Int) ->
         return
     }
 
-    PlayableItemsList(
-        items = favorites,
-        onPlayQueue = onPlayQueue,
-        modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd),
-    )
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = GlassTokens.spaceSm, bottom = GlassTokens.spaceSm, end = GlassTokens.spaceMd),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+                PlainIconButton(contentDescription = "Shuffle play", onClick = { onPlayQueue(favorites.shuffled(), 0) }) {
+                    Icon(Icons.Filled.Shuffle, contentDescription = null, tint = WhiplashColors.textPrimary)
+                }
+                PlainIconButton(contentDescription = "Play all", onClick = { onPlayQueue(favorites, 0) }) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = WhiplashColors.textPrimary)
+                }
+            }
+        }
+
+        PlayableItemsList(
+            items = favorites,
+            onPlayQueue = onPlayQueue,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
 }
