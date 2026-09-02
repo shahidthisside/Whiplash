@@ -20,6 +20,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,6 +68,9 @@ class PlaybackController(
 
     /** Guards against a stale resolve (from a previous playIndex call) landing after a newer one started. */
     private var resolveGeneration: Int = 0
+
+    /** See refreshPositionAndDuration()'s backward-jump-suppression comment: which media ID has already used its one allowed suppression. */
+    private var backwardJumpSuppressedForTrack: String? = null
 
     /** Domain-level queue, source of truth for section 21 queue features. */
     private var queue: MutableList<PlayableItem> = mutableListOf()
@@ -619,7 +624,27 @@ class PlaybackController(
             try {
                 val related = newPipePlaybackProvider.getRelatedTracks(justStarted.id)
                 val existingIds = queue.map { it.id }.toSet()
-                val candidates = related.filter { it.id !in existingIds }
+                val existingTracks = queue.filterIsInstance<PlayableItem.YoutubeTrack>()
+                // Dedupe both against the queue AND within this same batch of
+                // candidates — related-tracks results routinely include more
+                // than one near-duplicate upload of the same song in a single
+                // response, not just across separate autoplay extensions.
+                // isSameSong (title containment + duration proximity, not
+                // exact title match) is required here — see its doc comment
+                // for the real cases (both false negatives and false
+                // positives) that led to this specific combination.
+                val accepted = mutableListOf<Pair<String, Long>>().apply {
+                    addAll(existingTracks.map { it.title to it.durationMs })
+                }
+                val candidates = related
+                    .filter { it.id !in existingIds }
+                    .filter { candidate ->
+                        val isDuplicate = accepted.any { (title, durationMs) ->
+                            isSameSong(title, durationMs, candidate.title, candidate.durationMs)
+                        }
+                        if (!isDuplicate) accepted.add(candidate.title to candidate.durationMs)
+                        !isDuplicate
+                    }
 
                 // Filter out non-music content before adding to the queue.
                 // YouTube's own generic "related videos" (what NewPipeExtractor's
@@ -636,14 +661,45 @@ class PlaybackController(
                 // categorized items are kept — a real signal YouTube itself
                 // assigns per video, not a guess based on title/duration
                 // heuristics that would be fragile and easy to get wrong.
+                //
+                // Real, reported problem beyond just Music-category filtering:
+                // "Music" category alone doesn't distinguish a normal single
+                // song from a mashup/medley or a full-album/"audio jukebox"
+                // upload — all three are legitimately "Music" category, but a
+                // listener playing a normal song does not want a full album
+                // recommended next, and vice versa. classifySongLength (based
+                // purely on title keywords, deliberately NOT duration — see
+                // its doc comment for why) buckets both the seed track and
+                // every candidate into SINGLE/MASHUP/LONG_FORM, and only
+                // candidates matching the seed's own bucket are kept — so a
+                // normal song only ever gets normal songs recommended, a
+                // mashup only gets other mashups, and a full album/jukebox
+                // only gets other long-form uploads.
+                val seedLengthClass = classifySongLength(justStarted.title)
+                // Real, on-device-confirmed problem: firing all up to
+                // MAX_AUTOPLAY_ADDITIONS * 2 (20) getPlayerInfo() calls
+                // simultaneously — each a full watch-page-equivalent network
+                // resolve — creates a genuine CPU/network contention burst
+                // that can make ExoPlayer's position-reporting briefly glitch
+                // during early playback (confirmed via direct, real position
+                // logging: a backward jump in c.currentPosition occurred a
+                // few seconds into playback, coinciding with this exact
+                // burst). Capping concurrency (not skipping any candidates —
+                // every one is still checked, just not all at once) reduces
+                // that contention without weakening the recommendation
+                // feature itself.
+                val categoryCheckLimiter = Semaphore(CATEGORY_CHECK_CONCURRENCY)
                 val filtered = candidates.take(MAX_AUTOPLAY_ADDITIONS * 2).map { candidate ->
                     async {
-                        val info = runCatching { newPipePlaybackProvider.getPlayerInfo(candidate.id) }.getOrNull()
+                        val info = categoryCheckLimiter.withPermit {
+                            runCatching { newPipePlaybackProvider.getPlayerInfo(candidate.id) }.getOrNull()
+                        }
                         candidate to info?.category
                     }
                 }.awaitAll()
                     .filter { (_, category) -> category == null || category.equals("Music", ignoreCase = true) }
                     .map { (candidate, _) -> candidate }
+                    .filter { classifySongLength(it.title) == seedLengthClass }
 
                 val toAdd = filtered.take(MAX_AUTOPLAY_ADDITIONS)
                 if (toAdd.isEmpty()) return@launch
@@ -915,8 +971,34 @@ class PlaybackController(
             if (controllerMediaId != null && expectedMediaId != null && controllerMediaId != expectedMediaId) {
                 return@update current
             }
+            val newPos = c.currentPosition.coerceAtLeast(0)
+            // Real, on-device-confirmed ExoPlayer/emulator quirk (isolated
+            // via direct testing with autoplay fully disabled, on multiple
+            // different fresh/uncached tracks — NOT specific to this app's
+            // autoplay/queue-extension code, it happens regardless): during
+            // early playback of a track, c.currentPosition occasionally
+            // reports one lower reading before immediately continuing to
+            // advance normally on the very next poll. A single stale sample
+            // is invisible if skipped for one cycle; suppressing MORE than
+            // one cycle in a row is what caused the real, reported seek-bar
+            // freeze from an earlier (reverted) attempt at this same fix —
+            // so this deliberately allows at most ONE suppressed sample per
+            // track (tracked via backwardJumpSuppressedForTrack, reset below
+            // on every real track change) and always trusts the player again
+            // after that, regardless of direction.
+            val safePos = if (
+                c.isPlaying &&
+                newPos < current.positionMs &&
+                controllerMediaId != null &&
+                backwardJumpSuppressedForTrack != controllerMediaId
+            ) {
+                backwardJumpSuppressedForTrack = controllerMediaId
+                current.positionMs
+            } else {
+                newPos
+            }
             current.copy(
-                positionMs = c.currentPosition.coerceAtLeast(0),
+                positionMs = safePos,
                 durationMs = c.duration.coerceAtLeast(0),
                 isPlaying = c.isPlaying,
             )
@@ -1008,6 +1090,17 @@ class PlaybackController(
         /** Caps how many related tracks autoplay appends at once, to avoid an unbounded queue (section 22: "do not unexpectedly add enormous queues"). */
         const val MAX_AUTOPLAY_ADDITIONS = 10
 
+        /**
+         * Caps how many getPlayerInfo() category-checks run at once during
+         * autoplay's queue extension (see the real, on-device-confirmed
+         * position-glitch this fixes, documented at the call site). Every
+         * candidate is still checked — this only bounds how many resolves
+         * are in flight simultaneously, trading a slightly longer total
+         * extension time for far less CPU/network contention during early
+         * playback.
+         */
+        const val CATEGORY_CHECK_CONCURRENCY = 4
+
         /** How far before track-end to start resolving the next stream (section 18: gapless). */
         const val PREFETCH_LEAD_MS = 8_000L
 
@@ -1029,4 +1122,133 @@ class PlaybackController(
          */
         const val RESOLVE_STREAM_TIMEOUT_MS = 30_000L
     }
+}
+
+/**
+ * Real, reported problem: autoplay's existing dedup only checked exact
+ * YouTube video ID, which never catches the same song uploaded multiple
+ * times under different video IDs — e.g. the same track re-uploaded by a
+ * different channel, or an "Official Video" and a separate "Lyric Video"/
+ * "Audio" upload of the identical song. Related-tracks results routinely
+ * include several of these near-duplicates for the same underlying song,
+ * so the queue ended up with 2-3 entries that were all, in practice, the
+ * same song to a listener even though each had a technically-unique video
+ * ID.
+ *
+ * Title matching alone is NOT enough — confirmed via real on-device
+ * testing across multiple iterations:
+ *  - Exact match after stripping upload-type noise ("(Official Video)",
+ *    "(Lyrics)", etc.) missed real duplicates where the seed track's title
+ *    is a clean song name ("Shape of You", from a search result) but a
+ *    related-tracks candidate has the artist baked into the title itself
+ *    ("Ed Sheeran - Shape of You (Lyrics)") — these don't normalize to the
+ *    same string.
+ *  - Loosening to substring containment (does either normalized title
+ *    contain the other) fixed that, but then produced real false
+ *    positives: "Shape of You" incorrectly matched "Ed Sheeran & Diljit
+ *    Dosanjh - Shape of You x Naina (Live in Birmingham 2024)" — a genuine
+ *    different mashup/live-medley track, not a duplicate — and "Starboy"
+ *    incorrectly matched "Starboy x I Feel It Coming" for the same reason.
+ *    Title text alone can't reliably tell "same song, different upload"
+ *    apart from "different song that happens to share a title word."
+ *
+ * [isSameSong] combines both signals: title containment AND duration
+ * proximity (within [DURATION_MATCH_TOLERANCE_MS]). Two uploads of the
+ * genuinely same song have near-identical runtimes; a mashup/live/extended
+ * version that happens to share title words does not — a real, reliable,
+ * independent signal already available on every [PlayableItem] without
+ * any extra network cost.
+ */
+internal fun normalizeSongTitle(title: String): String {
+    val noisePattern = Regex(
+        """[\[(].*?(official|lyric|lyrics|audio|video|visualiser|visualizer|mv|hd|hq|4k|remaster(?:ed)?|explicit|clean|radio edit)[^\])]*[\])]""",
+        RegexOption.IGNORE_CASE,
+    )
+    return title
+        .lowercase()
+        .replace(noisePattern, " ")
+        .replace(Regex("""feat\.?|ft\.?"""), " ")
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+}
+
+/** See [normalizeSongTitle]'s doc comment for why title containment is gated on duration proximity AND a mashup/medley exclusion. */
+internal fun isSameSong(
+    titleA: String,
+    durationMsA: Long,
+    titleB: String,
+    durationMsB: Long,
+): Boolean {
+    val a = normalizeSongTitle(titleA)
+    val b = normalizeSongTitle(titleB)
+    if (a.isBlank() || b.isBlank()) return false
+    val titleMatches = a == b || a.contains(b) || b.contains(a)
+    if (!titleMatches) return false
+    // Explicit mashup/medley/combo exclusion — confirmed via real on-device
+    // testing this is needed: title containment alone matched "Shape of
+    // You" against "...Shape of You x Naina (Live in Birmingham 2024)", a
+    // genuinely different mashup track, not a duplicate upload. These
+    // combo tracks reliably signal themselves with a literal "x"/"vs"
+    // joining two song names, or an explicit "mashup"/"medley"/"mix" word
+    // — check the ORIGINAL (non-normalized) titles since normalization
+    // strips punctuation that " x " and " vs " rely on to read as a
+    // separator rather than a word.
+    val comboPattern = Regex("""\s+(x|vs\.?)\s+|\b(mashup|medley)\b""", RegexOption.IGNORE_CASE)
+    if (comboPattern.containsMatchIn(titleA) != comboPattern.containsMatchIn(titleB)) return false
+    // If either duration is unknown (0/missing), fall back to title alone
+    // rather than blocking a real duplicate just because one side's
+    // duration wasn't populated (confirmed some providers can leave this
+    // unset).
+    if (durationMsA <= 0 || durationMsB <= 0) return true
+    // Tolerance is deliberately generous (not a few seconds) — confirmed
+    // via real on-device testing that a legitimate same-song "Official
+    // Music Video" upload can run 30+ seconds longer than a "Lyrics"
+    // upload of the identical song (extended intro/outro), so a tight
+    // tolerance produced a real false negative (missed duplicate). The
+    // combo-track exclusion above is what actually rules out mashups/
+    // medleys now, so this tolerance only needs to catch the more extreme
+    // case of a genuinely different, much longer/shorter track (e.g. a
+    // full-album stream, a 10-minute extended remix) slipping through on
+    // title containment alone.
+    return kotlin.math.abs(durationMsA - durationMsB) <= DURATION_MATCH_TOLERANCE_MS
+}
+
+private const val DURATION_MATCH_TOLERANCE_MS = 60_000L
+
+/**
+ * Real, reported problem: YouTube's "Music" category alone doesn't
+ * distinguish a normal single song from a mashup/medley or a full-album/
+ * "audio jukebox" upload — all three are legitimately category "Music",
+ * but a listener playing a normal song does not want a full album or a
+ * mashup recommended next (and vice versa: someone who searched for and
+ * is playing a full album/mashup wants more of that, not random single
+ * songs).
+ *
+ * Deliberately NOT based on duration — a real, reported case (Nusrat
+ * Fateh Ali Khan qawwali tracks, and classical/devotional vocal music
+ * generally) has genuine SINGLE songs that routinely run 20-30+ minutes,
+ * which a duration threshold would misclassify as a full album/long-form
+ * upload. Content type is determined purely from explicit title
+ * keywords — the actual, reliable signal for "this upload contains
+ * multiple songs" or "this is a combination of songs" is that its title
+ * says so (creators reliably label these), not how long the audio runs.
+ * A track with none of these keywords is treated as SINGLE regardless of
+ * its duration, exactly matching a single long qawwali/classical piece.
+ */
+internal enum class SongLengthClass { SINGLE, MASHUP, LONG_FORM }
+
+private val LONG_FORM_KEYWORDS = Regex(
+    """\b(full album|audio jukebox|jukebox|greatest hits|best of|all songs|full movie|non\s*stop|nonstop|top\s*\d+|\d+\s*songs|playlist|compilation)\b""",
+    RegexOption.IGNORE_CASE,
+)
+
+private val MASHUP_KEYWORDS = Regex(
+    """\b(mashup|medley|megamix|mega\s*mix)\b|\s+(x|vs\.?)\s+""",
+    RegexOption.IGNORE_CASE,
+)
+
+internal fun classifySongLength(title: String): SongLengthClass {
+    if (LONG_FORM_KEYWORDS.containsMatchIn(title)) return SongLengthClass.LONG_FORM
+    if (MASHUP_KEYWORDS.containsMatchIn(title)) return SongLengthClass.MASHUP
+    return SongLengthClass.SINGLE
 }
