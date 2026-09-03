@@ -115,6 +115,7 @@ fun FullPlayerScreen(
     var isAddToPlaylistSheetOpen by remember { mutableStateOf(false) }
     var isCreatePlaylistDialogOpen by remember { mutableStateOf(false) }
     var isOverflowSheetOpen by remember { mutableStateOf(false) }
+    var isRemoveDownloadConfirmOpen by remember { mutableStateOf(false) }
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
 
     // Section 57: subtle haptic feedback for meaningful interactions
@@ -381,12 +382,31 @@ fun FullPlayerScreen(
                 } else null,
                 onRemoveDownload = if (onRemoveDownloadCurrent != null && isCurrentDownloaded) {
                     {
-                        onRemoveDownloadCurrent()
+                        // Same UAT-audit fix as the other song-actions
+                        // sheets (Search/Home/Local Library/Artist) — a
+                        // confirm dialog rather than deleting instantly,
+                        // matching every other download-destructive
+                        // action in the app.
+                        isRemoveDownloadConfirmOpen = true
                         isOverflowSheetOpen = false
                     }
                 } else null,
             )
         }
+    }
+
+    if (isRemoveDownloadConfirmOpen && item != null) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Remove download?",
+            message = "\"${item.title}\" will be deleted from this device. You can download it again later.",
+            confirmLabel = "Remove",
+            dismissLabel = "Cancel",
+            onConfirm = {
+                onRemoveDownloadCurrent?.invoke()
+                isRemoveDownloadConfirmOpen = false
+            },
+            onDismiss = { isRemoveDownloadConfirmOpen = false },
+        )
     }
 
     if (isLyricsSheetOpen) {

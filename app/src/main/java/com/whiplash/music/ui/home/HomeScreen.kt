@@ -94,6 +94,7 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
     val downloadedIds by app.libraryRepository.observeDownloadedIds().collectAsState(initial = emptySet())
     val downloadProgress by app.downloadManager.progress.collectAsState()
     var cancelDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
+    var removeDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
     val speedDial by viewModel.speedDial.collectAsState()
     val isSpeedDialLoaded by viewModel.isSpeedDialLoaded.collectAsState()
     val quickPicks by viewModel.quickPicks.collectAsState()
@@ -322,7 +323,11 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
                 } else null,
                 onRemoveDownload = if (sheetItem.id in downloadedIds || sheetItem is PlayableItem.DownloadedTrack) {
                     {
-                        songActionsViewModel.removeDownload(sheetItem.id)
+                        // Same UAT-audit fix as PlayableItemsList.kt —
+                        // route through a confirm dialog rather than
+                        // deleting instantly, matching every other
+                        // download-destructive action.
+                        removeDownloadTarget = sheetItem
                         actionsSheetItem = null
                     }
                 } else null,
@@ -383,6 +388,21 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
                 cancelDownloadTarget = null
             },
             onDismiss = { cancelDownloadTarget = null },
+        )
+    }
+
+    val removeTarget = removeDownloadTarget
+    if (removeTarget != null) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Remove download?",
+            message = "\"${removeTarget.title}\" will be deleted from this device. You can download it again later.",
+            confirmLabel = "Remove",
+            dismissLabel = "Cancel",
+            onConfirm = {
+                songActionsViewModel.removeDownload(removeTarget.id)
+                removeDownloadTarget = null
+            },
+            onDismiss = { removeDownloadTarget = null },
         )
     }
 }

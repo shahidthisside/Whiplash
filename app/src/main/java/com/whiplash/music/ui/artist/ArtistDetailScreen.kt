@@ -160,8 +160,10 @@ private fun ArtistDetailContent(
     val downloadedIds by app.libraryRepository.observeDownloadedIds().collectAsState(initial = emptySet())
     val downloadProgress by app.downloadManager.progress.collectAsState()
     var cancelDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
+    var removeDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
     var actionsSheetItem by remember { mutableStateOf<PlayableItem?>(null) }
     var addToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
+    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
@@ -358,6 +360,21 @@ private fun ArtistDetailContent(
         )
     }
 
+    val removeTarget = removeDownloadTarget
+    if (removeTarget != null) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Remove download?",
+            message = "\"${removeTarget.title}\" will be deleted from this device. You can download it again later.",
+            confirmLabel = "Remove",
+            dismissLabel = "Cancel",
+            onConfirm = {
+                songActionsViewModel.removeDownload(removeTarget.id)
+                removeDownloadTarget = null
+            },
+            onDismiss = { removeDownloadTarget = null },
+        )
+    }
+
     // Long-press/3-dot song-actions sheet — same actions PlayableItemsList
     // offers for a YoutubeTrack row (Search, Home, Local Library).
     val sheetItem = actionsSheetItem
@@ -398,7 +415,11 @@ private fun ArtistDetailContent(
                 } else null,
                 onRemoveDownload = if (sheetItem.id in downloadedIds) {
                     {
-                        songActionsViewModel.removeDownload(sheetItem.id)
+                        // Same UAT-audit fix as PlayableItemsList.kt —
+                        // route through a confirm dialog rather than
+                        // deleting instantly, matching every other
+                        // download-destructive action.
+                        removeDownloadTarget = sheetItem
                         actionsSheetItem = null
                     }
                 } else null,
@@ -417,13 +438,30 @@ private fun ArtistDetailContent(
                     addToPlaylistItem = null
                 },
                 onCreateNew = {
-                    // Matches PlayableItemsList's own inline "New playlist"
-                    // flow from within the Add-to-playlist sheet — kept
-                    // minimal here since Artist detail has no existing
-                    // create-playlist dialog state of its own to reuse.
-                    addToPlaylistItem = null
+                    // Real, reported bug (UAT audit finding): this used
+                    // to just close the sheet and discard the action —
+                    // tapping "New playlist" from an artist page's Add-
+                    // to-playlist sheet silently did nothing. Now wired
+                    // to the same GlassTextInputDialog + createPlaylistAndAdd
+                    // flow PlayableItemsList.kt's own AddToPlaylistContent
+                    // usage already uses correctly.
+                    showCreatePlaylistDialog = true
                 },
             )
         }
+    }
+
+    if (showCreatePlaylistDialog) {
+        com.whiplash.music.ui.theme.GlassTextInputDialog(
+            title = "New playlist",
+            confirmLabel = "Create",
+            onConfirm = { name ->
+                val item = playlistTargetItem
+                if (item != null) songActionsViewModel.createPlaylistAndAdd(name, item)
+                showCreatePlaylistDialog = false
+                addToPlaylistItem = null
+            },
+            onDismiss = { showCreatePlaylistDialog = false },
+        )
     }
 }

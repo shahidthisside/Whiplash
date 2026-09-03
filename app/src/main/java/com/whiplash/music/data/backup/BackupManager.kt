@@ -2,6 +2,7 @@ package com.whiplash.music.data.backup
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import com.whiplash.music.data.local.WhiplashDatabase
 import com.whiplash.music.data.local.entity.DownloadEntity
 import com.whiplash.music.data.local.entity.DownloadStatus
@@ -104,7 +105,7 @@ class BackupManager(
                 }
             } ?: return@withContext false
             true
-        }.getOrDefault(false)
+        }.onFailure { Log.w(TAG, "backup() failed", it) }.getOrDefault(false)
     }
 
     /**
@@ -319,7 +320,7 @@ class BackupManager(
                 }
             } ?: return@withContext false
             true
-        }.getOrDefault(false)
+        }.onFailure { Log.w(TAG, "backupSelective() failed", it) }.getOrDefault(false)
     }
 
     private fun WhiplashDatabase.query(sql: String, args: Array<Any?>?) =
@@ -485,7 +486,7 @@ class BackupManager(
             }
 
             true
-        }.getOrDefault(false)
+        }.onFailure { Log.w(TAG, "restoreSelective() failed", it) }.getOrDefault(false)
     }
 
     /** True if [source] is a selective (category-based JSON) backup rather than a legacy full-DB zip — lets the caller route to [restoreSelective] vs [restore] without the user needing to know the difference. */
@@ -506,7 +507,7 @@ class BackupManager(
                     found
                 }
             } ?: false
-        }.getOrDefault(false)
+        }.onFailure { Log.w(TAG, "isSelectiveBackup() failed to read zip", it) }.getOrDefault(false)
     }
 
     /**
@@ -551,12 +552,23 @@ class BackupManager(
                 }
             } ?: return@withContext false
             restoredAnything
-        }.getOrDefault(false)
+        }.onFailure { Log.w(TAG, "restore() failed", it) }.getOrDefault(false)
     }
 
     companion object {
         private const val DB_NAME = "whiplash.db"
         private const val SETTINGS_FILENAME = "whiplash_settings.preferences_pb"
+
+        // Real, reported diagnosability gap (UAT audit finding): every
+        // backup/restore function collapsed any exception to a plain
+        // `false` with no logging at all, so a corrupt zip, disk-full,
+        // or partial-write failure was completely indistinguishable
+        // from "there was nothing to back up/restore" — impossible to
+        // diagnose from a bug report. Log.w (not Log.e — these are all
+        // already-handled, non-fatal failures reported back to the
+        // caller as a normal false return, not a crash) on every one of
+        // this class's top-level runCatching blocks.
+        private const val TAG = "BackupManager"
 
         /** Distinguishes a selective (category JSON) backup zip from a legacy full-DB zip — see [isSelectiveBackup]. */
         private const val ZIP_MANIFEST_ENTRY = "whiplash_backup_manifest.json"

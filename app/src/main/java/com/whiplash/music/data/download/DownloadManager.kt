@@ -66,7 +66,22 @@ class DownloadManager(
 
     /** Job + the track it's downloading, so a cancel can locate the exact partial file to delete without re-deriving it. */
     private data class ActiveDownload(val job: Job, val track: PlayableItem.YoutubeTrack)
-    private val activeDownloads = mutableMapOf<String, ActiveDownload>()
+    // Real, reported race condition (UAT audit finding): this map is
+    // written from two different threads with no synchronization —
+    // startDownload()/cancelDownload() are called directly from Compose
+    // UI callbacks (Main thread), while job.invokeOnCompletion's cleanup
+    // lambda runs on whichever thread the coroutine actually completes
+    // on, which is an IO-dispatcher thread here (scope uses
+    // Dispatchers.IO). A plain mutableMapOf (backed by a regular
+    // HashMap) has no thread-safety guarantee under concurrent
+    // read/write from two threads — this could corrupt internal HashMap
+    // state, lose an update, or (rarely) infinite-loop during a resize.
+    // ConcurrentHashMap makes every individual operation
+    // (get/put/remove) atomic and safe across threads with no behavior
+    // change to any existing call site (all of them are simple, single-
+    // key get/put/remove — no external synchronization was ever relied
+    // on for multi-step invariants).
+    private val activeDownloads = java.util.concurrent.ConcurrentHashMap<String, ActiveDownload>()
 
     private val _progress = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
     val progress: StateFlow<Map<String, DownloadProgress>> = _progress
@@ -90,14 +105,26 @@ class DownloadManager(
     private fun audioFileFor(trackId: String) = File(downloadsDir, "$trackId.audio")
 
     /**
-     * Starts downloading [track] in the background. No-op if a download
-     * for this id is already in flight. Shows a single "Download
-     * started" toast (section: user feedback for silent actions) —
-     * suppressed when called from [downloadAll], which shows its own
-     * single batch toast instead of one per song.
+     * Starts downloading [track] in the background. No-op (aside from a
+     * toast) if a download for this id is already in flight — real,
+     * reported gap: pressing Download again on a track that's already
+     * downloading used to just silently do nothing, with zero feedback
+     * that the tap was even registered. Now shows "Already downloading"
+     * in that case, matching the same "never leave a tap silent" section
+     * this function's own "Download started" toast already follows.
+     * Both toasts are suppressed when called from [downloadAll] (showToast
+     * = false) — that call site intentionally shows its own single batch
+     * toast instead of one per song, and an already-in-flight track
+     * being silently skipped as part of a bulk album/playlist download is
+     * expected, not something that needs its own individual toast.
      */
     fun startDownload(track: PlayableItem.YoutubeTrack, showToast: Boolean = true) {
-        if (activeDownloads[track.id]?.job?.isActive == true) return
+        if (activeDownloads[track.id]?.job?.isActive == true) {
+            if (showToast) {
+                com.whiplash.music.ui.common.ToastController.show("Already downloading")
+            }
+            return
+        }
         _inFlightTracks.update { it + (track.id to track) }
         val job = scope.launch {
             runDownload(track)

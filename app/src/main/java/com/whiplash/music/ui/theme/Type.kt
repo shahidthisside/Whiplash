@@ -38,6 +38,26 @@ val WhiplashTypography = Typography(
         lineHeight = 28.sp,
         letterSpacing = 0.sp,
     ),
+    // Real, reported bug (UAT audit finding): headlineSmall/titleSmall
+    // were referenced by several screens (LyricsContent.kt, SettingsScreen.kt,
+    // AlbumDetailScreen.kt, ArtistDetailScreen.kt — e.g. an album/artist
+    // detail page's own title, Settings' every SettingRow label) but were
+    // never actually defined in this Typography scale. Material3 silently
+    // substitutes its own built-in default for any unset slot — a
+    // materially different size/weight/letter-spacing than this app's
+    // custom scale — so every one of those call sites was quietly
+    // falling off the design system's own type scale with no visible
+    // error. Added here at the natural size step between the existing
+    // headlineMedium/titleLarge and titleLarge/bodyLarge sizes,
+    // following the same fontWeight convention each tier already uses
+    // (headline* = SemiBold, title* = Medium).
+    headlineSmall = TextStyle(
+        fontFamily = WhiplashFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 20.sp,
+        lineHeight = 26.sp,
+        letterSpacing = 0.sp,
+    ),
     titleLarge = TextStyle(
         fontFamily = WhiplashFontFamily,
         fontWeight = FontWeight.Medium,
@@ -50,6 +70,13 @@ val WhiplashTypography = Typography(
         fontWeight = FontWeight.Medium,
         fontSize = 16.sp,
         lineHeight = 22.sp,
+        letterSpacing = 0.1.sp,
+    ),
+    titleSmall = TextStyle(
+        fontFamily = WhiplashFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
         letterSpacing = 0.1.sp,
     ),
     bodyLarge = TextStyle(

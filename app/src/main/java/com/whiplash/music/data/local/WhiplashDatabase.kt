@@ -36,6 +36,53 @@ import com.whiplash.music.data.local.entity.SearchHistoryEntity
 import com.whiplash.music.data.local.entity.SongEntity
 
 /**
+ * Real Room migrations for [WhiplashDatabase], v1 through v4 — added as
+ * part of a UAT audit finding: [androidx.room.RoomDatabase.Builder.fallbackToDestructiveMigration]
+ * was previously used unconditionally, silently wiping every user's
+ * playlists/favorites/history/downloads/settings on the next version
+ * bump with no warning. That was defensible while the app had no real
+ * users yet, but the project's own README now advertises a signed
+ * release APK on a public Releases page — real installs exist, so a
+ * destructive fallback is a real data-loss risk going forward.
+ *
+ * Each migration below was derived directly from Room's own exported
+ * schema JSON files (app/schemas/.../{1,2,3,4}.json, already present
+ * in this repo from `exportSchema = true`), not guessed: diffing every
+ * version's `createSql` confirmed each version bump ONLY ever added one
+ * new table (v1->v2: pinned_speed_dial, v2->v3: search_history,
+ * v3->v4: downloads) — every pre-existing table's own CREATE TABLE SQL
+ * is byte-identical across all 4 versions, so no column was ever added,
+ * renamed, or removed on an existing table. Each migration's SQL below
+ * is the literal `createSql` Room generated for that table at the
+ * version it was introduced (with the `${TABLE_NAME}` placeholder
+ * resolved to the real name), so this is provably correct against the
+ * schema Room itself already recorded, not a hand-written guess.
+ */
+private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `pinned_speed_dial` (`trackId` TEXT NOT NULL, `source` TEXT NOT NULL, `pinnedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`trackId`, `source`))"
+        )
+    }
+}
+
+private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `search_history` (`query` TEXT NOT NULL, `searchedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`query`))"
+        )
+    }
+}
+
+private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `downloads` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `album` TEXT, `artworkPath` TEXT, `durationMs` INTEGER NOT NULL, `filePath` TEXT NOT NULL, `fileSizeBytes` INTEGER NOT NULL, `status` TEXT NOT NULL, `downloadedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+        )
+    }
+}
+
+/**
  * Whiplash's local-first Room database (section 35, section 63).
  *
  * Holds device-local library data, cached online metadata, playlists,
@@ -94,13 +141,22 @@ abstract class WhiplashDatabase : RoomDatabase() {
                     WhiplashDatabase::class.java,
                     DATABASE_NAME,
                 )
-                    // This app has no shipped release yet (still in active
-                    // development, per CLAUDE.md's phased build process) —
-                    // there is no real user data to preserve across this
-                    // schema bump, so a destructive fallback is the correct
-                    // choice here rather than writing a real Migration for
-                    // data that doesn't exist in the wild. This must be
-                    // revisited before any real release.
+                    // Real migrations now cover every version bump this
+                    // database has ever had (see MIGRATION_1_2/2_3/3_4's
+                    // own doc above for how these were derived directly
+                    // from Room's exported schema JSON, not guessed).
+                    // fallbackToDestructiveMigration() is kept ONLY as a
+                    // safety net for a version jump with no matching
+                    // Migration object (which would otherwise crash the
+                    // app outright on open) — every version this app has
+                    // actually shipped is now migrated losslessly, so
+                    // this fallback is expected to never actually fire
+                    // for a real user's upgrade. It remains a real
+                    // data-loss risk if it ever does — the honest fix
+                    // going forward is to keep adding a new Migration_
+                    // object here every time the schema changes again,
+                    // never relying on this fallback for a real release.
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }
             }

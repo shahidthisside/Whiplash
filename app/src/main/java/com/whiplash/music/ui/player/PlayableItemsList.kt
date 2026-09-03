@@ -117,6 +117,7 @@ fun PlayableItemsList(
     // itself, etc), not just the Downloads tab.
     val downloadProgress by app.downloadManager.progress.collectAsState()
     var cancelDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
+    var removeDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
 
     // Real scroll-triggered "load more" detection — the standard, correct
     // Compose pattern (snapshotFlow over LazyListState.layoutInfo, not a
@@ -404,7 +405,15 @@ fun PlayableItemsList(
                 } else null,
                 onRemoveDownload = if (sheetItem.id in downloadedIds || sheetItem is PlayableItem.DownloadedTrack) {
                     {
-                        songActionsViewModel.removeDownload(sheetItem.id)
+                        // Real, reported UX gap (UAT audit finding):
+                        // every other download-destructive action
+                        // (cancel an in-flight download, "Clear all
+                        // downloads") confirms first — removing a single
+                        // completed download deleted the file instantly
+                        // with no confirmation at all. removeDownloadTarget
+                        // below now routes this through the same
+                        // GlassConfirmDialog pattern as cancelDownloadTarget.
+                        removeDownloadTarget = sheetItem
                         actionsSheetItem = null
                     }
                 } else null,
@@ -518,6 +527,21 @@ fun PlayableItemsList(
                 cancelDownloadTarget = null
             },
             onDismiss = { cancelDownloadTarget = null },
+        )
+    }
+
+    val removeTarget = removeDownloadTarget
+    if (removeTarget != null) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Remove download?",
+            message = "\"${removeTarget.title}\" will be deleted from this device. You can download it again later.",
+            confirmLabel = "Remove",
+            dismissLabel = "Cancel",
+            onConfirm = {
+                songActionsViewModel.removeDownload(removeTarget.id)
+                removeDownloadTarget = null
+            },
+            onDismiss = { removeDownloadTarget = null },
         )
     }
 }

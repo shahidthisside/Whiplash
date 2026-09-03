@@ -560,6 +560,27 @@ class PlaybackController(
         if (nextItem != null && prefetched?.forItemId != nextItem.id) {
             prefetchJob = scope.launch {
                 try {
+                    // Real, reported bug (UAT audit finding): the
+                    // "Gapless Playback" setting was stored/displayed but
+                    // never actually read anywhere — this stream prefetch
+                    // (the actual mechanism that makes gapless transitions
+                    // possible: resolving the next track's stream ahead
+                    // of time so playIndex() doesn't hit its usual brief
+                    // isResolvingStream window when it starts) ran
+                    // unconditionally regardless of the setting. Checking
+                    // it here means turning the toggle off genuinely
+                    // disables the gapless behavior it claims to control
+                    // — the next track then resolves normally (with its
+                    // usual brief loading window) exactly like this
+                    // function's own catch block already describes for a
+                    // failed prefetch. Deliberately does NOT gate the
+                    // artwork-prefetch blocks below (this same function,
+                    // and the previous-item block further down) — that's
+                    // a separate "avoid an artwork blink on skip" concern
+                    // unrelated to gapless audio, and turning gapless off
+                    // shouldn't bring back the artwork-blink bug as a
+                    // side effect.
+                    if (!settingsRepository.gaplessEnabled.first()) return@launch
                     val quality = settingsRepository.audioQuality.first()
                     // Same withTimeout guard as the main resolve path in
                     // playIndex() — without it, a hung upstream here would
