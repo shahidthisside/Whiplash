@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -16,6 +17,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -40,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -50,6 +55,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.whiplash.music.WhiplashApplication
 import com.whiplash.music.domain.model.PlayableItem
+import com.whiplash.music.domain.model.speedDialIdentity
 import com.whiplash.music.ui.player.SongActionsContent
 import com.whiplash.music.ui.player.SongActionsViewModel
 import com.whiplash.music.ui.player.SongActionsViewModelFactory
@@ -384,10 +390,26 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
 /**
  * 3x3 grid of square, rounded artwork tiles — matches YouTube Music's
  * "Speed dial" redesign of its former "Listen again" carousel (real
- * design reference researched before building this). Uses a fixed
- * 3-column grid sized to the available width rather than LazyVerticalGrid's
- * own scrolling (the grid never needs to scroll internally — it's capped
- * at 9 items and lives inside the outer LazyColumn).
+ * design reference researched before building this).
+ *
+ * Uses [LazyVerticalGrid] with `userScrollEnabled = false` rather than a
+ * plain Column/Row of Rows — not for scrolling (this never scrolls
+ * internally: it's capped at 9 items and lives inside the outer
+ * LazyColumn as a single item, exactly as before), but specifically to
+ * get [androidx.compose.foundation.lazy.grid.LazyGridItemScope.animateItem]'s
+ * built-in reorder animation on each tile, which only exists on lazy
+ * layouts. A real, reported UX gap: playing (or long-pressing on for
+ * pinning) a tile updates the underlying history/pinned data live, which
+ * reorders this exact list (most-recently-played moves toward the front
+ * of the non-pinned tiles, a newly-pinned track jumps to right after the
+ * other pinned ones) — with a plain Row/Column that reorder was an
+ * instant, jarring snap with no visual continuity at all connecting a
+ * tile's old position to its new one. animateItem() gives every tile a
+ * smooth slide to its new grid cell instead, keyed by
+ * [PlayableItem.speedDialIdentity] (the same normalized YOUTUBE/DOWNLOAD
+ * identity Speed dial's own dedup already uses) so Compose can actually
+ * tell "this is the same tile, just moved" rather than treating the
+ * reordered list as all-new content with no animatable identity.
  */
 @ExperimentalFoundationApi
 @Composable
@@ -396,25 +418,51 @@ private fun SpeedDialGrid(
     onPlayTrack: (PlayableItem) -> Unit,
     onLongPressTrack: (PlayableItem) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
-        items.chunked(3).forEach { row ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
-            ) {
-                row.forEach { track ->
-                    SpeedDialTile(
-                        track = track,
-                        onClick = { onPlayTrack(track) },
-                        onLongClick = { onLongPressTrack(track) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                // Pad the last row with empty spacers so a partial row (e.g. 7 items -> 3+3+1)
-                // still aligns to the same 3-column grid instead of stretching the lone tile wide.
-                repeat(3 - row.size) {
-                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.weight(1f))
-                }
+    val rows = (items.size + 2) / 3
+    val spacing = GlassTokens.spaceSm
+
+    // Real, reported bug: row height used to be a hardcoded 132.dp guess.
+    // Each tile's actual height is (square artwork, whose side length is
+    // 1/3 of the *available* width — itself different across phones with
+    // different screen widths/densities/font scales) + spaceXs + one
+    // line of labelMedium text. 132.dp only happened to be tall enough
+    // on some devices; on others the real content was taller than the
+    // grid's fixed-height container clipped it to, silently cutting off
+    // each tile's title text against whatever rendered directly below
+    // (Quick Picks' own header) with no visible error — exactly the kind
+    // of device-specific layout bug a single hardcoded dp value causes.
+    // BoxWithConstraints measures the real available width this grid
+    // will actually get on *this* device, and the artwork's height is
+    // exactly that (aspectRatio(1f)) divided evenly across 3 columns
+    // minus the two inter-column gaps — matching LazyVerticalGrid's own
+    // real column math exactly, not a separate approximation of it. The
+    // label's own height is read from the same TextStyle actually used
+    // to render it (labelMedium) via LocalDensity, rather than guessed.
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        val tileWidth = (maxWidth - spacing * 2) / 3
+        val labelHeight = with(density) {
+            val lineHeightSp = MaterialTheme.typography.labelMedium.lineHeight
+            if (lineHeightSp.isSp) lineHeightSp.toDp() else 16.dp
+        }
+        val rowHeight = tileWidth + GlassTokens.spaceXs + labelHeight
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(rowHeight * rows + spacing * (rows - 1).coerceAtLeast(0)),
+            horizontalArrangement = Arrangement.spacedBy(spacing),
+            verticalArrangement = Arrangement.spacedBy(spacing),
+            userScrollEnabled = false,
+        ) {
+            items(items, key = { it.speedDialIdentity().let { (id, source) -> "$source:$id" } }) { track ->
+                SpeedDialTile(
+                    track = track,
+                    onClick = { onPlayTrack(track) },
+                    onLongClick = { onLongPressTrack(track) },
+                    modifier = Modifier.animateItem(),
+                )
             }
         }
     }
