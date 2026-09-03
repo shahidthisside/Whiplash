@@ -101,6 +101,7 @@ fun PlayableItemsList(
     var actionsSheetItem by remember { mutableStateOf<PlayableItem?>(null) }
     var addToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
     var moveToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
+    var copyToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
@@ -347,6 +348,12 @@ fun PlayableItemsList(
                         actionsSheetItem = null
                     }
                 } else null,
+                onCopyToOtherPlaylist = if (playlistContext != null) {
+                    {
+                        copyToPlaylistItem = sheetItem
+                        actionsSheetItem = null
+                    }
+                } else null,
                 onStartRadio = if (sheetItem is PlayableItem.YoutubeTrack) {
                     {
                         // "Start radio" plays just this track — the existing
@@ -460,6 +467,35 @@ fun PlayableItemsList(
                         item = moveTargetItem,
                     )
                     moveToPlaylistItem = null
+                },
+                onCreateNew = {},
+            )
+        }
+    }
+
+    // "Copy to other playlist" target picker — same picker/exclusion
+    // rule as the move flow above (the playlist currently being viewed
+    // is filtered out: copying a song to the playlist it's already in
+    // is a no-op the picker shouldn't offer), but unlike move, the
+    // source playlist is left completely untouched — see
+    // SongActionsViewModel.copyToPlaylist's own doc for why this can
+    // never create a duplicate row no matter how many times it's used.
+    val copyTargetItem = copyToPlaylistItem
+    if (copyTargetItem != null && playlistContext != null) {
+        val allPlaylistsForCopy by app.libraryRepository.observePlaylists().collectAsState(initial = emptyList())
+        val otherPlaylistsForCopy = allPlaylistsForCopy.filter { it.id != playlistContext.playlistId }
+        GlassSheet(onDismissRequest = { copyToPlaylistItem = null }) {
+            com.whiplash.music.ui.player.AddToPlaylistContent(
+                playlists = otherPlaylistsForCopy,
+                title = "Copy to playlist",
+                showCreateNew = false,
+                onSelectPlaylist = { targetPlaylist ->
+                    songActionsViewModel.copyToPlaylist(
+                        toPlaylistId = targetPlaylist.id,
+                        toPlaylistName = targetPlaylist.name,
+                        item = copyTargetItem,
+                    )
+                    copyToPlaylistItem = null
                 },
                 onCreateNew = {},
             )

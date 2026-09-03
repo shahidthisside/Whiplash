@@ -48,6 +48,26 @@ class SongActionsViewModel(
     }
 
     /**
+     * Copies [item] into [toPlaylistId] without touching the playlist
+     * currently being viewed — [PlaylistDetailScreen]'s "Copy to
+     * playlist" action, sitting alongside "Move to other playlist" but
+     * leaving the source playlist untouched. Reuses [LibraryRepository.addToPlaylist]
+     * directly (unlike [moveToPlaylist], there's no source-side removal
+     * step here) — its own doc/[PlaylistDao.addTrack]'s doc already
+     * guarantee the "never duplicate" requirement: a song already
+     * present in the target playlist is reported back as `false` rather
+     * than inserted a second time, so this can never produce a duplicate
+     * row regardless of how many times it's invoked for the same
+     * song/target pair.
+     */
+    fun copyToPlaylist(toPlaylistId: Long, toPlaylistName: String, item: PlayableItem) {
+        viewModelScope.launch {
+            val added = libraryRepository.addToPlaylist(toPlaylistId, item)
+            ToastController.show(if (added) "Copied to $toPlaylistName" else "Already in $toPlaylistName")
+        }
+    }
+
+    /**
      * Removes [item] from the playlist currently being viewed —
      * [PlaylistDetailScreen]'s "Remove from playlist" action (shown in
      * place of "Add to playlist" for a song already known to be inside
@@ -63,15 +83,20 @@ class SongActionsViewModel(
     /**
      * Moves [item] from the playlist currently being viewed to
      * [toPlaylistId] — [PlaylistDetailScreen]'s "Move to other playlist"
-     * action. Removal from the source playlist always runs regardless of
-     * whether the target add was a genuinely new row or a no-op (the
-     * song was already there) — either way the postcondition ("item is
-     * now in the target playlist, and not in the source one") holds.
+     * action. Removal from the source playlist only happens when the
+     * song is genuinely new to the target (see
+     * [LibraryRepository.moveToPlaylist]'s own doc) — a real, reported
+     * bug had this unconditional, so moving a song already present in
+     * the target playlist correctly showed "Already in X" but still
+     * silently deleted it from the source, making the song disappear
+     * from the list the user was looking at for no actual gain anywhere.
+     * Now that case is a true no-op: the song stays exactly where it
+     * was, nothing else changes.
      */
     fun moveToPlaylist(fromPlaylistId: Long, toPlaylistId: Long, toPlaylistName: String, item: PlayableItem) {
         viewModelScope.launch {
             val added = libraryRepository.moveToPlaylist(fromPlaylistId, toPlaylistId, item)
-            ToastController.show(if (added) "Moved to $toPlaylistName" else "Already in $toPlaylistName — removed from here")
+            ToastController.show(if (added) "Moved to $toPlaylistName" else "Already in $toPlaylistName")
         }
     }
 

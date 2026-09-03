@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.DriveFileMove
+import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Download
@@ -63,6 +64,7 @@ fun SongActionsContent(
     // need "Add to playlist" — it needs to leave that specific playlist).
     onRemoveFromPlaylist: (() -> Unit)? = null,
     onMoveToOtherPlaylist: (() -> Unit)? = null,
+    onCopyToOtherPlaylist: (() -> Unit)? = null,
     // Offline downloads (section: Library > Downloads, YouTube-Music-style):
     // isDownloaded reflects real persisted state (see LibraryRepository.observeDownloadedIds),
     // onDownload/onRemoveDownload are null wherever downloading doesn't make
@@ -124,6 +126,13 @@ fun SongActionsContent(
                 icon = { Icon(Icons.Filled.DriveFileMove, contentDescription = null, tint = WhiplashColors.textPrimary) },
                 label = "Move to other playlist",
                 onClick = onMoveToOtherPlaylist,
+            )
+        }
+        if (onCopyToOtherPlaylist != null) {
+            SongActionRow(
+                icon = { Icon(Icons.Filled.FileCopy, contentDescription = null, tint = WhiplashColors.textPrimary) },
+                label = "Copy to other playlist",
+                onClick = onCopyToOtherPlaylist,
             )
         }
         if (onDownload != null) {

@@ -203,19 +203,30 @@ class LibraryRepository(
 
     /**
      * Moves [item] from [fromPlaylistId] to [toPlaylistId] — the
-     * "Move to other playlist" action. Implemented as a plain add-then-
-     * remove (not a single atomic transaction): a partial failure here
-     * (added to the target but the removal from the source didn't run)
-     * degrades to the song simply existing in both playlists rather than
-     * disappearing from both, which is the safer failure direction for a
-     * user-visible library mutation. Returns the same "was it actually a
-     * new add" result [addToPlaylist] returns (see [PlaylistDao.addTrack]'s
-     * doc) — false means it was already present in the target playlist,
-     * so this move degenerated to a plain removal from the source.
+     * "Move to other playlist" action. Removal from the source playlist
+     * only runs if the add to the target actually happened (a genuinely
+     * new row, not a duplicate) — see [PlaylistDao.addTrack]'s doc.
+     *
+     * This was previously unconditional (add-then-remove regardless of
+     * the add's outcome): a real, reported bug where moving a song into
+     * a playlist it was *already* in correctly showed "Already in X" but
+     * still silently deleted the song from the source playlist — the
+     * user's song vanished from where they were looking at it, with no
+     * playlist actually gaining anything, since it was already there.
+     * Now a "song already exists in target" outcome is a true no-op: the
+     * source is left completely untouched, matching the toast's own
+     * "nothing happened" message. Only a genuine move (added = true)
+     * removes the source-side row, so the song ends up in exactly one
+     * place either way — never in both playlists (the old add-then-
+     * remove could momentarily leave it in both, but only ever as an
+     * intermediate step toward a state where it now stays in both by design,
+     * not because of a partial-failure edge case) and never in neither.
      */
     suspend fun moveToPlaylist(fromPlaylistId: Long, toPlaylistId: Long, item: PlayableItem): Boolean {
         val added = addToPlaylist(toPlaylistId, item)
-        removeFromPlaylist(fromPlaylistId, item)
+        if (added) {
+            removeFromPlaylist(fromPlaylistId, item)
+        }
         return added
     }
 
