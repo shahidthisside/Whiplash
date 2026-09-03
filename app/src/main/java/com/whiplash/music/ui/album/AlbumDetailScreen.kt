@@ -1,5 +1,10 @@
 package com.whiplash.music.ui.album
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -86,27 +91,48 @@ fun AlbumDetailScreen(
             }
         }
 
-        when (val s = state) {
-            is AlbumDetailUiState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = WhiplashColors.accent)
-            }
-            is AlbumDetailUiState.Error -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "Couldn't load this album",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = WhiplashColors.textPrimary,
-                    )
-                    Text(
-                        text = s.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = WhiplashColors.textSecondary,
-                    )
-                    androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
-                    GlassButton(text = "Retry", onClick = viewModel::load)
+        // Loading -> Error/Loaded crossfade — a plain fade (this is a
+        // vertical, one-directional progression with no "back" concept),
+        // so the loading spinner doesn't just vanish/appear abruptly once
+        // the real network fetch resolves. Keyed on the state's own class
+        // via a small string tag rather than the whole state instance, so
+        // two different Loaded emissions (shouldn't normally happen for
+        // the same screen instance, but harmless either way) don't
+        // needlessly replay the crossfade.
+        AnimatedContent(
+            targetState = when (state) {
+                is AlbumDetailUiState.Loading -> "loading"
+                is AlbumDetailUiState.Error -> "error"
+                is AlbumDetailUiState.Loaded -> "loaded"
+            },
+            transitionSpec = {
+                fadeIn(animationSpec = tween(GlassTokens.animRegular))
+                    .togetherWith(fadeOut(animationSpec = tween(GlassTokens.animFast)))
+            },
+            label = "albumDetailState",
+        ) { _ ->
+            when (val s = state) {
+                is AlbumDetailUiState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = WhiplashColors.accent)
                 }
+                is AlbumDetailUiState.Error -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Couldn't load this album",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = WhiplashColors.textPrimary,
+                        )
+                        Text(
+                            text = s.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = WhiplashColors.textSecondary,
+                        )
+                        androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
+                        GlassButton(text = "Retry", onClick = viewModel::load)
+                    }
+                }
+                is AlbumDetailUiState.Loaded -> AlbumDetailContent(s.detail, onPlayQueue)
             }
-            is AlbumDetailUiState.Loaded -> AlbumDetailContent(s.detail, onPlayQueue)
         }
     }
 }

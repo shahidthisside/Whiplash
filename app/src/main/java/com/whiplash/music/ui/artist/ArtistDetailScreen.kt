@@ -1,5 +1,10 @@
 package com.whiplash.music.ui.artist
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -95,23 +100,40 @@ fun ArtistDetailScreen(
             }
         }
 
-        when (val s = state) {
-            is ArtistDetailUiState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = WhiplashColors.accent)
-            }
-            is ArtistDetailUiState.Error -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "Couldn't load this artist",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = WhiplashColors.textPrimary,
-                    )
-                    Text(text = s.message, style = MaterialTheme.typography.bodySmall, color = WhiplashColors.textSecondary)
-                    androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
-                    GlassButton(text = "Retry", onClick = viewModel::load)
+        // Loading -> Error/Loaded crossfade — same rationale as
+        // AlbumDetailScreen's own identical fix: a plain fade so the
+        // loading spinner doesn't just vanish/appear abruptly once the
+        // real network fetch resolves.
+        AnimatedContent(
+            targetState = when (state) {
+                is ArtistDetailUiState.Loading -> "loading"
+                is ArtistDetailUiState.Error -> "error"
+                is ArtistDetailUiState.Loaded -> "loaded"
+            },
+            transitionSpec = {
+                fadeIn(animationSpec = tween(GlassTokens.animRegular))
+                    .togetherWith(fadeOut(animationSpec = tween(GlassTokens.animFast)))
+            },
+            label = "artistDetailState",
+        ) { _ ->
+            when (val s = state) {
+                is ArtistDetailUiState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = WhiplashColors.accent)
                 }
+                is ArtistDetailUiState.Error -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Couldn't load this artist",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = WhiplashColors.textPrimary,
+                        )
+                        Text(text = s.message, style = MaterialTheme.typography.bodySmall, color = WhiplashColors.textSecondary)
+                        androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
+                        GlassButton(text = "Retry", onClick = viewModel::load)
+                    }
+                }
+                is ArtistDetailUiState.Loaded -> ArtistDetailContent(s.detail, onPlayQueue, onOpenAlbum)
             }
-            is ArtistDetailUiState.Loaded -> ArtistDetailContent(s.detail, onPlayQueue, onOpenAlbum)
         }
     }
 }

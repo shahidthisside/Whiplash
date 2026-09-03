@@ -12,9 +12,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -287,68 +293,149 @@ private fun WhiplashApp() {
                 )
 
                 Box(modifier = Modifier.weight(1f)) {
-                    when (selectedTab) {
-                        AppTab.HOME -> {
-                            if (!showHistory) {
-                                HomeScreen(
-                                    onPlayTrack = { track -> app.playbackController.playNow(track) },
-                                    onOpenHistory = { showHistory = true },
-                                )
-                            } else {
-                                com.whiplash.music.ui.home.HistoryScreen(
-                                    onBack = { showHistory = false },
-                                    onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
-                                )
-                            }
-                        }
-                        AppTab.SEARCH -> {
-                            val topDestination = searchDetailStack.lastOrNull()
-                            when (topDestination) {
-                                null -> SearchScreen(
-                                    onPlayTrack = { track -> app.playbackController.playNow(track) },
-                                    onOpenAlbum = { album ->
-                                        searchDetailStack = searchDetailStack + SearchDestination.Album(album.url)
+                    // Tab-level crossfade (Home/Search/Library/Favorites/
+                    // Playlists/Settings) — a plain fade rather than a
+                    // directional slide, since bottom-nav tabs have no
+                    // spatial "forward/back" relationship to each other
+                    // (unlike drilling into a detail screen within a tab,
+                    // handled by the nested AnimatedContents below). This
+                    // only wraps the *rendering* transition — selectedTab
+                    // itself, and everything each branch does, is exactly
+                    // what already existed; no navigation/state logic
+                    // changed here.
+                    AnimatedContent(
+                        targetState = selectedTab,
+                        transitionSpec = {
+                            fadeIn(animationSpec = tween(GlassTokens.animRegular))
+                                .togetherWith(fadeOut(animationSpec = tween(GlassTokens.animFast)))
+                        },
+                        label = "tabContent",
+                    ) { tab ->
+                        when (tab) {
+                            AppTab.HOME -> {
+                                // Home's own two states (Speed dial/Quick
+                                // Picks vs. the full History screen) get a
+                                // horizontal slide — "opening a detail
+                                // view" reads as forward motion, matching
+                                // the same directional language used for
+                                // Search/Playlists' own detail navigation
+                                // below, for a consistent feel across the
+                                // whole app rather than a plain fade here
+                                // and a slide there for conceptually the
+                                // same kind of navigation.
+                                AnimatedContent(
+                                    targetState = showHistory,
+                                    transitionSpec = {
+                                        val forward = targetState && !initialState
+                                        val enter = slideInHorizontally(animationSpec = tween(GlassTokens.animRegular)) { w -> if (forward) w / 3 else -w / 3 } +
+                                            fadeIn(animationSpec = tween(GlassTokens.animRegular))
+                                        val exit = slideOutHorizontally(animationSpec = tween(GlassTokens.animFast)) { w -> if (forward) -w / 3 else w / 3 } +
+                                            fadeOut(animationSpec = tween(GlassTokens.animFast))
+                                        enter.togetherWith(exit)
                                     },
-                                    onOpenArtist = { artist ->
-                                        searchDetailStack = searchDetailStack + SearchDestination.Artist(artist.channelUrl)
-                                    },
-                                    selectedTab = selectedSearchResultTab,
-                                    onSelectedTabChange = { selectedSearchResultTab = it },
-                                )
-                                is SearchDestination.Album -> AlbumDetailScreen(
-                                    url = topDestination.url,
-                                    onBack = { searchDetailStack = searchDetailStack.dropLast(1) },
-                                    onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
-                                )
-                                is SearchDestination.Artist -> ArtistDetailScreen(
-                                    channelUrl = topDestination.channelUrl,
-                                    onBack = { searchDetailStack = searchDetailStack.dropLast(1) },
-                                    onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
-                                    onOpenAlbum = { album ->
-                                        searchDetailStack = searchDetailStack + SearchDestination.Album(album.url)
-                                    },
-                                )
+                                    label = "homeHistoryContent",
+                                ) { isHistory ->
+                                    if (!isHistory) {
+                                        HomeScreen(
+                                            onPlayTrack = { track -> app.playbackController.playNow(track) },
+                                            onOpenHistory = { showHistory = true },
+                                        )
+                                    } else {
+                                        com.whiplash.music.ui.home.HistoryScreen(
+                                            onBack = { showHistory = false },
+                                            onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                                        )
+                                    }
+                                }
                             }
-                        }
-                        AppTab.LOCAL -> LocalLibraryScreen(
-                            onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
-                        )
-                        AppTab.FAVORITES -> FavoritesScreen(
-                            onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
-                        )
-                        AppTab.PLAYLISTS -> {
-                            val currentPlaylist = openPlaylist
-                            if (currentPlaylist == null) {
-                                PlaylistsScreen(onOpenPlaylist = { openPlaylist = it })
-                            } else {
-                                PlaylistDetailScreen(
-                                    playlist = currentPlaylist,
-                                    onBack = { openPlaylist = null },
-                                    onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
-                                )
+                            AppTab.SEARCH -> {
+                                val topDestination = searchDetailStack.lastOrNull()
+                                // Keyed on stack depth + which destination
+                                // is on top, so pushing a second-level
+                                // destination (artist -> album) animates
+                                // too, not just the null <-> first-level
+                                // transition. Direction (slide left when
+                                // pushing deeper, right when popping back)
+                                // follows the stack depth actually
+                                // growing/shrinking, not just "which
+                                // destination" — going from Album back to
+                                // null and from null to a *different*
+                                // Album should read as backward/forward
+                                // respectively regardless of the specific
+                                // destination values involved.
+                                AnimatedContent(
+                                    targetState = searchDetailStack.size,
+                                    transitionSpec = {
+                                        val forward = targetState >= initialState
+                                        val enter = slideInHorizontally(animationSpec = tween(GlassTokens.animRegular)) { w -> if (forward) w / 3 else -w / 3 } +
+                                            fadeIn(animationSpec = tween(GlassTokens.animRegular))
+                                        val exit = slideOutHorizontally(animationSpec = tween(GlassTokens.animFast)) { w -> if (forward) -w / 3 else w / 3 } +
+                                            fadeOut(animationSpec = tween(GlassTokens.animFast))
+                                        enter.togetherWith(exit)
+                                    },
+                                    label = "searchDetailContent",
+                                ) { _ ->
+                                    when (topDestination) {
+                                        null -> SearchScreen(
+                                            onPlayTrack = { track -> app.playbackController.playNow(track) },
+                                            onOpenAlbum = { album ->
+                                                searchDetailStack = searchDetailStack + SearchDestination.Album(album.url)
+                                            },
+                                            onOpenArtist = { artist ->
+                                                searchDetailStack = searchDetailStack + SearchDestination.Artist(artist.channelUrl)
+                                            },
+                                            selectedTab = selectedSearchResultTab,
+                                            onSelectedTabChange = { selectedSearchResultTab = it },
+                                        )
+                                        is SearchDestination.Album -> AlbumDetailScreen(
+                                            url = topDestination.url,
+                                            onBack = { searchDetailStack = searchDetailStack.dropLast(1) },
+                                            onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                                        )
+                                        is SearchDestination.Artist -> ArtistDetailScreen(
+                                            channelUrl = topDestination.channelUrl,
+                                            onBack = { searchDetailStack = searchDetailStack.dropLast(1) },
+                                            onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                                            onOpenAlbum = { album ->
+                                                searchDetailStack = searchDetailStack + SearchDestination.Album(album.url)
+                                            },
+                                        )
+                                    }
+                                }
                             }
+                            AppTab.LOCAL -> LocalLibraryScreen(
+                                onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                            )
+                            AppTab.FAVORITES -> FavoritesScreen(
+                                onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                            )
+                            AppTab.PLAYLISTS -> {
+                                val currentPlaylist = openPlaylist
+                                AnimatedContent(
+                                    targetState = currentPlaylist != null,
+                                    transitionSpec = {
+                                        val forward = targetState && !initialState
+                                        val enter = slideInHorizontally(animationSpec = tween(GlassTokens.animRegular)) { w -> if (forward) w / 3 else -w / 3 } +
+                                            fadeIn(animationSpec = tween(GlassTokens.animRegular))
+                                        val exit = slideOutHorizontally(animationSpec = tween(GlassTokens.animFast)) { w -> if (forward) -w / 3 else w / 3 } +
+                                            fadeOut(animationSpec = tween(GlassTokens.animFast))
+                                        enter.togetherWith(exit)
+                                    },
+                                    label = "playlistDetailContent",
+                                ) { _ ->
+                                    if (currentPlaylist == null) {
+                                        PlaylistsScreen(onOpenPlaylist = { openPlaylist = it })
+                                    } else {
+                                        PlaylistDetailScreen(
+                                            playlist = currentPlaylist,
+                                            onBack = { openPlaylist = null },
+                                            onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                                        )
+                                    }
+                                }
+                            }
+                            AppTab.SETTINGS -> SettingsScreen()
                         }
-                        AppTab.SETTINGS -> SettingsScreen()
                     }
 
                     // Mini-player pinned to the bottom of the content area,

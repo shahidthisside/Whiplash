@@ -1,6 +1,11 @@
 package com.whiplash.music.ui.search
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -192,34 +197,49 @@ fun SearchScreen(
                     },
                 )
                 androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
-                when (selectedTab) {
-                    SearchResultTab.SONGS -> ResultsList(
-                        results = state.results,
-                        isRefreshing = state.isSearching,
-                        onPlayTrack = handlePlayTrack,
-                        onLoadMore = { viewModel.loadMore(SearchResultTab.SONGS) },
-                        isLoadingMore = state.isLoadingMoreSongs,
-                    )
-                    SearchResultTab.ALBUMS -> PlaylistResultsList(
-                        items = state.albums,
-                        isAlbum = true,
-                        onClick = handleOpenAlbum,
-                        onLoadMore = { viewModel.loadMore(SearchResultTab.ALBUMS) },
-                        isLoadingMore = state.isLoadingMoreAlbums,
-                    )
-                    SearchResultTab.PLAYLISTS -> PlaylistResultsList(
-                        items = state.playlists,
-                        isAlbum = false,
-                        onClick = handleOpenAlbum,
-                        onLoadMore = { viewModel.loadMore(SearchResultTab.PLAYLISTS) },
-                        isLoadingMore = state.isLoadingMorePlaylists,
-                    )
-                    SearchResultTab.ARTISTS -> ArtistResultsList(
-                        items = state.artists,
-                        onClick = handleOpenArtist,
-                        onLoadMore = { viewModel.loadMore(SearchResultTab.ARTISTS) },
-                        isLoadingMore = state.isLoadingMoreArtists,
-                    )
+                // Songs/Albums/Playlists/Artists sub-tab crossfade — a
+                // plain fade (not a directional slide) since these
+                // sub-tabs, like the outer bottom-nav tabs, have no
+                // spatial forward/back relationship to each other. Only
+                // wraps the rendering transition; selectedTab and every
+                // branch's own logic below are unchanged.
+                AnimatedContent(
+                    targetState = selectedTab,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(GlassTokens.animRegular))
+                            .togetherWith(fadeOut(animationSpec = tween(GlassTokens.animFast)))
+                    },
+                    label = "searchResultTabContent",
+                ) { tab ->
+                    when (tab) {
+                        SearchResultTab.SONGS -> ResultsList(
+                            results = state.results,
+                            isRefreshing = state.isSearching,
+                            onPlayTrack = handlePlayTrack,
+                            onLoadMore = { viewModel.loadMore(SearchResultTab.SONGS) },
+                            isLoadingMore = state.isLoadingMoreSongs,
+                        )
+                        SearchResultTab.ALBUMS -> PlaylistResultsList(
+                            items = state.albums,
+                            isAlbum = true,
+                            onClick = handleOpenAlbum,
+                            onLoadMore = { viewModel.loadMore(SearchResultTab.ALBUMS) },
+                            isLoadingMore = state.isLoadingMoreAlbums,
+                        )
+                        SearchResultTab.PLAYLISTS -> PlaylistResultsList(
+                            items = state.playlists,
+                            isAlbum = false,
+                            onClick = handleOpenAlbum,
+                            onLoadMore = { viewModel.loadMore(SearchResultTab.PLAYLISTS) },
+                            isLoadingMore = state.isLoadingMorePlaylists,
+                        )
+                        SearchResultTab.ARTISTS -> ArtistResultsList(
+                            items = state.artists,
+                            onClick = handleOpenArtist,
+                            onLoadMore = { viewModel.loadMore(SearchResultTab.ARTISTS) },
+                            isLoadingMore = state.isLoadingMoreArtists,
+                        )
+                    }
                 }
             }
         }
