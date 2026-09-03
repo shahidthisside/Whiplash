@@ -9,13 +9,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - **Offline downloads** (Library > Downloads): download any YouTube track's audio for offline playback, with a dedicated Downloads tab (Play all / Shuffle / Clear all), an animated per-row progress/checkmark/failed badge everywhere a track appears (Search, Home, Library, full player), a one-tap Download action in every song-actions sheet and the full player's overflow menu, and bulk "Download album"/"Download playlist" entry points with a real batch progress state (Download → Downloading → Downloaded) on Album/Artist/Playlist detail pages. A separate Download Quality setting controls download bitrate independently from streaming Audio Quality.
 - Playback Speed and "Add to playlist" are now directly reachable from the full player's overflow menu, not just Settings/other song-actions sheets.
-- "Copy to other playlist" alongside the existing "Move to other playlist" in a playlist's own song-actions sheet — copies a song into another playlist without removing it from the one you're viewing.
+- "Copy to other playlist" alongside the existing "Move to other playlist" and "Remove from playlist" — a playlist's own song-actions sheet now offers all three when viewing a song already inside that playlist, in place of the generic "Add to playlist". "Move" removes the song from the playlist you're viewing after adding it elsewhere; "Copy" adds it elsewhere without removing it from the one you're viewing.
+- The Downloads tab is now first in Library and shown by default on entry — it's the only tab that never needs local-media permission, so it's usable immediately either way.
 - A Share icon on search-result album/playlist detail pages that shares the real, resolvable YouTube playlist/album link — deliberately not added to manually-built/home Playlists, which have no single external link to share.
 - Advanced Backup: Settings' "Local backup" now lets you choose exactly which categories to back up (Playlists, Favorites, History, Pinned, Downloads, Settings) via a chip picker, instead of only ever backing up everything. All categories are selected by default, so a single tap still backs up everything exactly as before. Restoring a selective backup merges it in immediately with no app restart; restoring an older full backup still works exactly as before.
 - Smooth, directional transitions across the whole app: bottom-nav tab switches crossfade, drilling into a detail screen (Search → Album/Artist, Home → History, Playlists → playlist detail) slides in the correct direction depending on whether you're going deeper or back, and Album/Artist detail's loading state now crossfades into the loaded content instead of snapping.
 - Redesigned app launcher icon (a single bold "W" mark, replacing the previous two-letter monogram).
 
 ### Fixed
+- **Release builds are now properly signed with a real, dedicated release key.** Previously the release build type had no signing configuration at all, so the actual public APK on earlier GitHub releases had been built and shipped as an unsigned/debug build instead — signed with the shared, publicly-known Android debug key rather than a real one, and without release-build packing. From this release onward, `assembleRelease` produces a properly signed, genuine release build.
 - A real crash: adding the same song to a playlist twice created duplicate rows, which crashed the track list the moment that playlist was opened. Duplicate inserts are now blocked, and an already-affected playlist is safe to view without needing a migration.
 - Opening a playlist right after creating or importing a different one could show the wrong playlist's tracks under the wrong name, requiring a force-stop to fix.
 - An already-downloaded song only showed a way to remove its download when viewed from the Downloads tab itself — every other screen (Search, Home, Favorites, Playlists) showed a dead-end "Downloaded" row with no removal option.
@@ -32,6 +34,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Tapping "New playlist" from an artist page's "Add to playlist" sheet silently did nothing; it now actually creates the playlist.
 - Pressing Download again on a song that's already downloading now shows "Already downloading" instead of silently doing nothing.
 - A few Settings and Album/Artist detail page titles were quietly falling back to a mismatched default text style because the app's own custom type scale was missing two sizes it referenced.
+
+### Also included (shipped earlier, never documented in a release until now)
+A rescan of the full commit history turned up real, substantial Search features that shipped before v0.3.0 but were missed from every release page since, including v0.3.0's own:
+- YouTube-Music-style "Recent searches" on the idle Search screen (persisted separately from the short-lived result cache), with per-item removal and a "Clear all" confirmation.
+- Live YouTube search suggestions while typing, filling what used to be a "No results found" flash during every keystroke's debounce window.
+- Real trending-artist search suggestions (replacing hardcoded ones) and typing-only autocomplete behavior matching YouTube Music/Spotify, instead of autocompleting on every keystroke.
+- Genuine cursor-based infinite scroll for Songs/Albums/Playlists/Artists search results (previously capped at the first ~20 results with no way to see more).
+- App-wide toast feedback for actions that previously completed with zero confirmation: favoriting, pinning, creating/renaming/deleting a playlist, adding a song to a playlist, play next/add to queue, clearing the queue, removing from the queue, clearing history, removing from Speed Dial/Quick Picks, clearing recent searches, and clearing the audio cache.
+- A per-item "Remove from history" action on the History screen (previously only removable by clearing the entire list).
+- Several visual consistency fixes (removed heavy card borders on the Search error state and the Library permission prompt; smoothed the toast dismiss animation; removed a redundant empty-state label on Search).
 
 
 ## [0.3.0] - 2026-08-30
