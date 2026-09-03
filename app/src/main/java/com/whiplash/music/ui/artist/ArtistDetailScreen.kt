@@ -55,7 +55,6 @@ import com.whiplash.music.ui.player.SongActionsViewModelFactory
 import com.whiplash.music.ui.player.shareYoutubeTrack
 import com.whiplash.music.ui.theme.GlassArtworkThumbnail
 import com.whiplash.music.ui.theme.GlassButton
-import com.whiplash.music.ui.theme.GlassIconButton
 import com.whiplash.music.ui.theme.GlassListItem
 import com.whiplash.music.ui.theme.GlassSheet
 import com.whiplash.music.ui.theme.GlassTokens
@@ -91,7 +90,7 @@ fun ArtistDetailScreen(
             modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceSm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            GlassIconButton(contentDescription = "Back", onClick = onBack) {
+            PlainIconButton(contentDescription = "Back", onClick = onBack) {
                 Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = WhiplashColors.textPrimary)
             }
         }

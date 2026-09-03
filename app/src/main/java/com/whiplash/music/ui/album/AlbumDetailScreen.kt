@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -34,8 +35,8 @@ import com.whiplash.music.WhiplashApplication
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.ui.player.PlayableItemsList
 import com.whiplash.music.ui.theme.GlassButton
-import com.whiplash.music.ui.theme.GlassIconButton
 import com.whiplash.music.ui.theme.GlassTokens
+import com.whiplash.music.ui.theme.PlainIconButton
 import com.whiplash.music.ui.theme.WhiplashColors
 import com.whiplash.music.ui.theme.WhiplashRadius
 
@@ -60,8 +61,28 @@ fun AlbumDetailScreen(
             modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceSm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            GlassIconButton(contentDescription = "Back", onClick = onBack) {
+            PlainIconButton(contentDescription = "Back", onClick = onBack) {
                 Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = WhiplashColors.textPrimary)
+            }
+            // Share moved here (top bar, right-aligned) rather than
+            // alongside Play/Shuffle/Download — the download button's
+            // widest state ("Cancel download") needs that whole row's
+            // width free to grow into without looking cramped, and the
+            // top bar already has an established "Back on the left,
+            // secondary actions on the right" pattern (matching
+            // PlaylistDetailScreen's own header row) that a standalone
+            // Share icon fits naturally into. Only shown once the real
+            // detail has actually loaded (needs detail.url) — Loading/
+            // Error states show just Back, same as before.
+            if (state is AlbumDetailUiState.Loaded) {
+                val loadedDetail = (state as AlbumDetailUiState.Loaded).detail
+                androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                PlainIconButton(
+                    contentDescription = "Share playlist",
+                    onClick = { shareYoutubePlaylist(context, loadedDetail) },
+                ) {
+                    Icon(Icons.Filled.Share, contentDescription = null, tint = WhiplashColors.textPrimary)
+                }
             }
         }
 
@@ -184,4 +205,17 @@ private fun AlbumDetailHeader(
             androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
         }
     }
+}
+
+/**
+ * Shares a real, working YouTube playlist/album URL via Android's native
+ * share sheet — mirrors [com.whiplash.music.ui.player.shareYoutubeTrack]'s
+ * exact pattern for a single track, just for a whole playlist/album.
+ */
+private fun shareYoutubePlaylist(context: android.content.Context, detail: com.whiplash.music.domain.model.YoutubePlaylistDetail) {
+    val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_TEXT, "${detail.title} — ${detail.url}")
+    }
+    context.startActivity(android.content.Intent.createChooser(sendIntent, "Share playlist"))
 }
