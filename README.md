@@ -1,6 +1,6 @@
 # Whiplash
 
-**Whiplash** is a premium, native Android music player focused on fast, resilient YouTube Music playback with full offline/local library support. Built entirely with Kotlin, Jetpack Compose, and Media3/ExoPlayer.
+**Whiplash** is a native Android music player focused on fast, resilient YouTube Music playback with full offline/local library support. Built entirely with Kotlin, Jetpack Compose, and Media3/ExoPlayer.
 
 > This project was built as a hands-on exploration of modern Android media architecture — a real, working Media3 session pipeline, a multi-provider YouTube extraction/fallback system, and a custom dark, frosted-surface design system — rather than a wrapper around an existing SDK.
 
