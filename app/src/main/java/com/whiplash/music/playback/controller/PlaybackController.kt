@@ -1288,9 +1288,80 @@ private const val DURATION_MATCH_TOLERANCE_MS = 60_000L
 internal enum class SongLengthClass { SINGLE, MASHUP, LONG_FORM }
 
 private val LONG_FORM_KEYWORDS = Regex(
-    """\b(full album|audio jukebox|jukebox|greatest hits|best of|all\s+(\w+\s+)?songs|full movie|non\s*stop|nonstop|top\s*\d+|\d+\s*songs|playlist|compilation|motivational music|background music|study music|workout music|gym music|mix\s*20\d\d|movie\s+songs|hit\s+songs)\b""",
+    """\b(full album|audio jukebox|jukebox|greatest hits|best of|all\s+(\w+\s+)?songs|full movie|non\s*stop|nonstop|top\s*\d+|\d+\s*songs|playlist|compilation|motivational music|background music|study music|workout music|gym music|mix\s*20\d\d|movie\s+songs|hit\s+songs|hits\s*20\d\d|lofi\s+mix|lo-?fi\s+mix|lofi\s+songs|lofi\s+playlist|sin\s+anuncios)\b|\bmix\s*$""",
     RegexOption.IGNORE_CASE,
 )
+
+// Real, on-device-confirmed bug this fixes: a genuine ~16-minute,
+// multi-artist compilation ("Die With A Smile - Lady Gaga, Bruno Mars
+// (Lyrics) ZAYN, Ed Sheeran,... MIX", confirmed on-device at 16:19 total
+// duration, several different artists explicitly credited together in
+// the title) was classified as SINGLE and recommended alongside normal
+// single songs after playing "Blinding Lights." Added `\bmix\s*$` — bare
+// "mix" as the trailing word of the title, with nothing after it — which
+// is a real, common compilation/multi-artist-mix upload convention. This
+// is deliberately narrower than a plain `\bmix\b` anywhere-in-title
+// match: a legitimate single track's own title very commonly says
+// "(Extended Mix)"/"(Radio Mix)"/"(Club Mix)"/"(Original Mix)" — always
+// with a qualifying word directly before "Mix" and wrapped in
+// parentheses that close AFTER "Mix" — so those titles end with ")", not
+// with the bare word "mix" itself, and are correctly NOT matched by this
+// anchored pattern (confirmed: "Faded (Original Mix)" does not match,
+
+// Two more real, on-device-confirmed bugs, found on a second independent
+// "Blinding Lights" autoplay run: "Spotify Pop Hits 2025 [emoji] Lady
+// Gaga, Bruno Mars, Ed Sheeran, Billie Eilish, Miley Cyrus, Tate McRae
+// #1" (uploaded by a channel literally named "Sunset Playlist and Sound
+// View", confirmed on-device at 123:45 — over two hours) and "Musica Pop
+// en Inglés 2026 [emoji] Melhores Musicas Internacionais 2026 [emoji]
+// Canciones Pop Sin Anuncios" (confirmed on-device at 74:57). Neither
+// contained any pre-existing keyword. Added `hits\s*20\d\d` (mirroring
+// the already-existing `mix\s*20\d\d` pattern's own precedent exactly —
+// "Hits" alone, unlike "greatest hits"/"hit songs", wasn't covered) and
+// `sin\s+anuncios` (a real, distinctive Spanish "ad-free" compilation-
+// playlist branding phrase). Deliberately did NOT generalize to "3+
+// different artist names listed together" as a standalone signal — that
+// exact heuristic was already tried and reverted for the pipe-separator
+// case documented below (real single songs legitimately credit multiple
+// artists in their own title), so it carries the same false-positive
+// risk here and isn't safe to reintroduce just because these two
+// examples happen to list several names.
+// only a title that is actually itself the literal last word "Mix" with
+// no closing parenthesis does).
+
+// Real, reported/on-device-confirmed gap found via manual autoplay
+// testing: a genuine ~15-minute lofi compilation ("MIDNIGHT VIBES ||
+// बैरण song #tredingsong #viralsongs", confirmed on-device at 15:35
+// total duration) was classified as SINGLE and recommended right
+// alongside normal single songs after playing "Barsaat." Its title
+// contains no explicit compilation keyword at all — no "jukebox",
+// "nonstop", "playlist", or even "lofi mix" (added above for the more
+// common explicit case, but this specific title doesn't say it) — just
+// a generic "VIBES" branding + hashtag-farming markers (#tredingsong
+// #viralsongs), which is NOT a safe keyword to add: "Midnight Vibes" is
+// also a real, legitimate single-song title in its own right (e.g. an
+// actual song by that exact name), so matching on "vibes" alone would
+// create new false positives on genuine single songs. Deliberately did
+// NOT add a duration threshold either — explicitly rejected per this
+// function's own design (see the qawwali/Nusrat Fateh Ali Khan doc
+// above): many genuine SINGLE songs legitimately run 15-30+ minutes, so
+// a duration cutoff would misclassify those as long-form too, exactly
+// the false positive this classifier exists to avoid. This specific
+// title pattern (generic mood branding + viral hashtags, no explicit
+// compilation keyword) is a known, currently-unaddressed gap — content-
+// type classification here is deliberately keyword-only, and no reliably
+// safe keyword exists for this exact case without over-matching real
+// single-song titles.
+//
+// Same category of gap, confirmed again on a third independent
+// "Blinding Lights" autoplay run: "Japanese City Pop 80s – Tokyo Friday
+// Midnight [emoji] | Bayside Highway & Neon Memories" (uploader
+// "Nightdrive Tokyo", confirmed on-device at 70:48). Purely aesthetic/
+// mood branding ("80s", "Tokyo Friday Midnight", "Bayside Highway &
+// Neon Memories") with no explicit compilation keyword — same accepted
+// tradeoff as MIDNIGHT VIBES above: a themed decade/city/mood name is
+// not a safe keyword to add on its own, since a genuine single song
+// could legitimately use similar aesthetic branding in its own title.
 
 /**
  * Real, on-device-confirmed false positive this AVOIDS: a naive "3+ pipe-
@@ -1308,8 +1379,20 @@ private val LONG_FORM_KEYWORDS = Regex(
  * catching every generic-background-music-style compilation upload.
  */
 
+// Real, reported/on-device-confirmed bug this fixes: a title using the
+// actual Unicode multiplication sign "×" (U+00D7) as its mashup
+// separator ("Jo Tum Mere Ho × Jhol × Samjho Na × Sahiba × Pal Pal ×
+// Bairan × Majboor × Finding Her |Lofi by Nishu") was NOT caught — the
+// regex previously only matched the plain ASCII letter "x", and
+// RegexOption.IGNORE_CASE only affects letter casing, not Unicode
+// look-alike characters, so this genuine 8-song mashup was classified as
+// SINGLE and recommended right alongside normal individual songs after
+// playing "Barsaat." "×" is a common, real-world separator creators use
+// for exactly this kind of mashup/medley title (visually similar to "x"
+// but a distinct code point), so it needs its own explicit alternative
+// in the pattern rather than relying on case-insensitivity to cover it.
 private val MASHUP_KEYWORDS = Regex(
-    """\b(mashup|medley|megamix|mega\s*mix)\b|\s+(x|vs\.?)\s+""",
+    """\b(mashup|medley|megamix|mega\s*mix)\b|\s+(x|vs\.?|×)\s+""",
     RegexOption.IGNORE_CASE,
 )
 
