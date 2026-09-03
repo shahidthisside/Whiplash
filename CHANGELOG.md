@@ -4,6 +4,28 @@ All notable changes to Whiplash are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-09-03
+
+### Added
+- "Copy to other playlist" alongside the existing "Move to other playlist" in a playlist's own song-actions sheet — copies a song into another playlist without removing it from the one you're viewing.
+- A Share icon on search-result album/playlist detail pages that shares the real, resolvable YouTube playlist/album link — deliberately not added to manually-built/home Playlists, which have no single external link to share.
+- Advanced Backup: Settings' "Local backup" now lets you choose exactly which categories to back up (Playlists, Favorites, History, Pinned, Downloads, Settings) via a chip picker, instead of only ever backing up everything. All categories are selected by default, so a single tap still backs up everything exactly as before. Restoring a selective backup merges it in immediately with no app restart; restoring an older full backup still works exactly as before.
+- Smooth, directional transitions across the whole app: bottom-nav tab switches crossfade, drilling into a detail screen (Search → Album/Artist, Home → History, Playlists → playlist detail) slides in the correct direction depending on whether you're going deeper or back, and Album/Artist detail's loading state now crossfades into the loaded content instead of snapping.
+
+### Fixed
+- Moving a song to a playlist that already contained it deleted the song from the *source* playlist too, even though nothing was actually gained in the target — a "no-op" case now genuinely leaves the source untouched.
+- Autoplay's recommendation filter now catches more mashup/compilation-style titles that were slipping through: mashups separated by the Unicode "×" character (not just the ASCII letter "x"), titles ending in a bare, unqualified "Mix", and compilation titles using "Hits <year>" or Spanish "Sin Anuncios" (ad-free) branding — found and verified via repeated real-world autoplay testing, not synthetic cases.
+- The Home screen's Speed Dial grid now animates a tile smoothly to its new position when a play or a pin reorders it, instead of the whole grid snapping instantly; its row height is also now measured from the real screen width instead of a fixed guess, fixing song titles getting visually clipped against the Quick Picks section on some screens.
+- The Back button on search-result Album and Artist detail screens no longer shows a visible border, matching the borderless style of every other icon button on those screens.
+- **Gapless Playback's toggle in Settings did nothing at all** — the setting was stored and displayed but never actually consulted by playback, so turning it off had zero effect. It now genuinely gates the next-track prefetch that makes gapless transitions possible.
+- **A real data-loss risk**: the local database previously fell back to destructively wiping all user data (playlists, favorites, history, downloads, settings) on any future schema change, since only a temporary fallback had ever been written. Real migrations now cover every version the app has ever shipped, verified against Room's own recorded schema history with a direct test proving existing data survives the upgrade.
+- A rare but real crash/corruption risk in the download manager: two different threads could write to the same in-flight-downloads tracking data at once with no synchronization.
+- Removing a single downloaded song deleted it instantly with no confirmation, unlike every other destructive download action (canceling an in-flight download, clearing all downloads) which already confirmed first.
+- Tapping "New playlist" from an artist page's "Add to playlist" sheet silently did nothing; it now actually creates the playlist.
+- Pressing Download again on a song that's already downloading now shows "Already downloading" instead of silently doing nothing.
+- A few Settings and Album/Artist detail page titles were quietly falling back to a mismatched default text style because the app's own custom type scale was missing two sizes it referenced.
+
+
 ## [0.3.0] - 2026-08-30
 
 ### Added

@@ -20,16 +20,19 @@
 
 ### Library & Discovery
 - Unified local + YouTube search (Songs, Albums, Artists, Playlists — each loads and fails independently)
-- Album and Artist detail pages with real metadata, track listings, and playback actions
+- Album and Artist detail pages with real metadata, track listings, playback actions, and a Share button on search-result albums/playlists (shares the real YouTube link)
 - A full History screen (up to 200 recently played tracks), Favorites, Playlists (create/rename/delete, plus importing a whole playlist by pasting a YouTube or YouTube Music playlist link), and a Speed Dial / Quick Picks home surface
 - Favorites and Playlists both offer one-tap Shuffle and Play-all actions
+- Copy or move a song between playlists directly from its own long-press menu
+- Advanced, per-category local backup and restore — choose exactly which of Playlists, Favorites, History, Pinned songs, Downloads, and Settings to back up (or restore all of them, the previous all-or-nothing default)
 - Synchronized lyrics via [LRCLIB](https://lrclib.net) (a free, open lyrics database) with an honest "unavailable" state — lyrics are never fabricated
 
 ### Design & UX
 - A custom dark, frosted-surface design system built on Jetpack Compose + Material 3 (translucent tinted surfaces, soft borders, layered elevation)
+- Smooth, directional transitions across navigation — tab switches crossfade, drilling into a detail screen slides in the direction you're actually moving
 - Six selectable color themes with instant, persisted switching
 - Four full-player seek bar visual styles (Classic, Wavy, Waveform, Minimal), picked live with mini-previews in Settings
-- Local backup and restore: saves playlists, favorites, history, pinned songs, and settings to a single file you choose via the system file picker, and can restore from it later
+- Local backup and restore: saves whichever categories you choose (or everything) to a single file via the system file picker, and can restore from it later
 - Haptic feedback and micro-interactions on stateful actions (play/pause, favorite, queue reorder, toggles)
 - Swipe gestures on the mini-player (next/previous), always paired with accessible on-screen buttons
 - Accessibility-conscious touch targets (48dp+) and reduced-motion support that respects the system's animator duration scale
