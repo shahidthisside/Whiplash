@@ -73,10 +73,16 @@ class SongActionsViewModel(
         }
     }
 
-    /** Deletes a downloaded track's audio/artwork files and its Room row (Library > Downloads). */
-    fun removeDownload(item: PlayableItem.DownloadedTrack) {
+    /**
+     * Deletes a downloaded track's audio/artwork files and its Room row
+     * (Library > Downloads). Takes a plain id rather than
+     * [PlayableItem.DownloadedTrack] so this can be triggered from *any*
+     * screen showing an already-downloaded song — Search, Home, Library,
+     * Favorites, Playlists — not just the Downloads tab itself.
+     */
+    fun removeDownload(id: String) {
         viewModelScope.launch {
-            downloadManager?.removeDownload(item.id)
+            downloadManager?.removeDownload(id)
             ToastController.show("Download removed")
         }
     }

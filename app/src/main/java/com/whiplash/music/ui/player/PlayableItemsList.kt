@@ -342,9 +342,9 @@ fun PlayableItemsList(
                         actionsSheetItem = null
                     }
                 } else null,
-                onRemoveDownload = if (sheetItem is PlayableItem.DownloadedTrack) {
+                onRemoveDownload = if (sheetItem.id in downloadedIds || sheetItem is PlayableItem.DownloadedTrack) {
                     {
-                        songActionsViewModel.removeDownload(sheetItem)
+                        songActionsViewModel.removeDownload(sheetItem.id)
                         actionsSheetItem = null
                     }
                 } else null,
