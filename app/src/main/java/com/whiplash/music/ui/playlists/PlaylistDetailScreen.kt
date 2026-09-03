@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Icon
@@ -17,9 +16,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -58,7 +54,6 @@ fun PlaylistDetailScreen(
         factory = PlaylistDetailViewModelFactory(app.libraryRepository, playlist.id),
     )
     val tracks by viewModel.tracks.collectAsState()
-    var showDownloadConfirm by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
         Row(
@@ -75,16 +70,14 @@ fun PlaylistDetailScreen(
                 modifier = Modifier.padding(start = GlassTokens.spaceSm).weight(1f),
             )
             if (tracks.isNotEmpty()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm), verticalAlignment = Alignment.CenterVertically) {
                     PlainIconButton(contentDescription = "Shuffle play", onClick = { onPlayQueue(tracks.shuffled(), 0) }) {
                         Icon(Icons.Filled.Shuffle, contentDescription = null, tint = WhiplashColors.textPrimary)
                     }
                     PlainIconButton(contentDescription = "Play all", onClick = { onPlayQueue(tracks, 0) }) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = WhiplashColors.textPrimary)
                     }
-                    PlainIconButton(contentDescription = "Download playlist", onClick = { showDownloadConfirm = true }) {
-                        Icon(Icons.Filled.Download, contentDescription = null, tint = WhiplashColors.textPrimary)
-                    }
+                    com.whiplash.music.ui.common.BatchDownloadIconButton(batchName = playlist.name, tracks = tracks)
                 }
             }
         }
@@ -97,30 +90,12 @@ fun PlaylistDetailScreen(
                 modifier = Modifier.padding(GlassTokens.spaceLg),
             )
         } else {
-            PlayableItemsList(items = tracks, onPlayQueue = onPlayQueue, modifier = Modifier.fillMaxSize())
+            PlayableItemsList(
+                items = tracks,
+                onPlayQueue = onPlayQueue,
+                modifier = Modifier.fillMaxSize(),
+                playlistContext = com.whiplash.music.ui.player.PlaylistContext(playlist.id, playlist.name),
+            )
         }
-    }
-
-    if (showDownloadConfirm) {
-        // Only YoutubeTrack entries can actually be downloaded (a
-        // LocalTrack is already on-device; a DownloadedTrack already-added
-        // to a playlist is already downloaded) — the confirmation message
-        // is phrased around the real number that will actually download,
-        // not the playlist's total track count, so it's never misleading.
-        val downloadable = tracks.filterIsInstance<PlayableItem.YoutubeTrack>()
-        com.whiplash.music.ui.theme.GlassConfirmDialog(
-            title = "Download playlist?",
-            message = if (downloadable.isEmpty()) {
-                "None of the songs in \"${playlist.name}\" can be downloaded (already local or already downloaded)."
-            } else {
-                "All ${downloadable.size} songs in \"${playlist.name}\" will be downloaded for offline playback."
-            },
-            confirmLabel = "Download",
-            onConfirm = {
-                app.downloadManager.downloadAll(downloadable)
-                showDownloadConfirm = false
-            },
-            onDismiss = { showDownloadConfirm = false },
-        )
     }
 }

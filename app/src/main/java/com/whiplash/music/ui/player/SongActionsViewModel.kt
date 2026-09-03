@@ -34,8 +34,8 @@ class SongActionsViewModel(
 
     fun addToPlaylist(item: PlayableItem, playlistId: Long, playlistName: String) {
         viewModelScope.launch {
-            libraryRepository.addToPlaylist(playlistId, item)
-            ToastController.show("Added to $playlistName")
+            val added = libraryRepository.addToPlaylist(playlistId, item)
+            ToastController.show(if (added) "Added to $playlistName" else "Already in $playlistName")
         }
     }
 
@@ -44,6 +44,34 @@ class SongActionsViewModel(
             val id = libraryRepository.createPlaylist(name)
             libraryRepository.addToPlaylist(id, item)
             ToastController.show("Added to $name")
+        }
+    }
+
+    /**
+     * Removes [item] from the playlist currently being viewed —
+     * [PlaylistDetailScreen]'s "Remove from playlist" action (shown in
+     * place of "Add to playlist" for a song already known to be inside
+     * the playlist the actions sheet was opened from).
+     */
+    fun removeFromPlaylist(playlistId: Long, playlistName: String, item: PlayableItem) {
+        viewModelScope.launch {
+            libraryRepository.removeFromPlaylist(playlistId, item)
+            ToastController.show("Removed from $playlistName")
+        }
+    }
+
+    /**
+     * Moves [item] from the playlist currently being viewed to
+     * [toPlaylistId] — [PlaylistDetailScreen]'s "Move to other playlist"
+     * action. Removal from the source playlist always runs regardless of
+     * whether the target add was a genuinely new row or a no-op (the
+     * song was already there) — either way the postcondition ("item is
+     * now in the target playlist, and not in the source one") holds.
+     */
+    fun moveToPlaylist(fromPlaylistId: Long, toPlaylistId: Long, toPlaylistName: String, item: PlayableItem) {
+        viewModelScope.launch {
+            val added = libraryRepository.moveToPlaylist(fromPlaylistId, toPlaylistId, item)
+            ToastController.show(if (added) "Moved to $toPlaylistName" else "Already in $toPlaylistName — removed from here")
         }
     }
 

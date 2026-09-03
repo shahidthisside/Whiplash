@@ -27,34 +27,45 @@ fun AddToPlaylistContent(
     playlists: List<Playlist>,
     onSelectPlaylist: (Playlist) -> Unit,
     onCreateNew: () -> Unit,
+    title: String = "Add to playlist",
+    // False only for the "Move to other playlist" picker (section:
+    // Playlist detail screen) — moving into a brand-new empty playlist
+    // is exactly equivalent to adding it there via the regular add flow
+    // and then removing it from the current playlist, so offering a
+    // second, differently-worded path to the same outcome here would
+    // just be a redundant, confusing entry point rather than a real
+    // additional capability.
+    showCreateNew: Boolean = true,
 ) {
     Column {
         Text(
-            text = "Add to playlist",
+            text = title,
             style = MaterialTheme.typography.titleMedium,
             color = WhiplashColors.textPrimary,
             modifier = Modifier.padding(bottom = GlassTokens.spaceSm),
         )
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onCreateNew)
-                .padding(vertical = GlassTokens.spaceSm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Filled.Add, contentDescription = null, tint = WhiplashColors.accent)
-            Text(
-                text = "New playlist",
-                style = MaterialTheme.typography.bodyLarge,
-                color = WhiplashColors.accent,
-                modifier = Modifier.padding(start = GlassTokens.spaceMd),
-            )
+        if (showCreateNew) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onCreateNew)
+                    .padding(vertical = GlassTokens.spaceSm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = null, tint = WhiplashColors.accent)
+                Text(
+                    text = "New playlist",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = WhiplashColors.accent,
+                    modifier = Modifier.padding(start = GlassTokens.spaceMd),
+                )
+            }
         }
 
         if (playlists.isEmpty()) {
             Text(
-                text = "No playlists yet.",
+                text = if (showCreateNew) "No playlists yet." else "No other playlists to move to.",
                 style = MaterialTheme.typography.bodySmall,
                 color = WhiplashColors.textSecondary,
                 modifier = Modifier.padding(vertical = GlassTokens.spaceSm),

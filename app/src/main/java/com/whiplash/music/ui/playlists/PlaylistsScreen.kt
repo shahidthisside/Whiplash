@@ -172,6 +172,18 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
 
     val toDelete = playlistPendingDelete
     if (toDelete != null) {
+        // Real, reported bug: "Download playlist" showed unconditionally
+        // here even for a playlist with zero tracks, offering an action
+        // that can never do anything (PlaylistDetailScreen's own
+        // download button already correctly hides itself when
+        // tracks.isEmpty() — this sheet is a second, separate entry
+        // point to the same action that didn't have the same guard).
+        // observePlaylistTracks is the same call this sheet's own
+        // download-confirm dialog below already makes for the same
+        // playlist — cheap, and only evaluated for the single playlist
+        // currently long-pressed, not for every row in the list.
+        val tracksForSheet by app.libraryRepository.observePlaylistTracks(toDelete.id).collectAsState(initial = null)
+        val hasTracks = tracksForSheet?.isNotEmpty() ?: true // null = still loading; assume non-empty so the row doesn't flash in/out
         GlassSheet(onDismissRequest = { playlistPendingDelete = null }) {
             Column {
                 Text(
@@ -180,25 +192,27 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                     color = WhiplashColors.textPrimary,
                     modifier = Modifier.padding(bottom = GlassTokens.spaceSm),
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = GlassTokens.spaceSm)
-                        .clickable(
-                            onClick = {
-                                playlistPendingDownload = toDelete
-                                playlistPendingDelete = null
-                            },
-                        ),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Filled.Download, contentDescription = null, tint = WhiplashColors.textPrimary)
-                    Text(
-                        text = "Download playlist",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = WhiplashColors.textPrimary,
-                        modifier = Modifier.padding(start = GlassTokens.spaceMd),
-                    )
+                if (hasTracks) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = GlassTokens.spaceSm)
+                            .clickable(
+                                onClick = {
+                                    playlistPendingDownload = toDelete
+                                    playlistPendingDelete = null
+                                },
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Download, contentDescription = null, tint = WhiplashColors.textPrimary)
+                        Text(
+                            text = "Download playlist",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = WhiplashColors.textPrimary,
+                            modifier = Modifier.padding(start = GlassTokens.spaceMd),
+                        )
+                    }
                 }
                 Row(
                     modifier = Modifier

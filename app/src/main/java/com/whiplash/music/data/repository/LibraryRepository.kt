@@ -164,18 +164,60 @@ class LibraryRepository(
 
     suspend fun deletePlaylist(id: Long) = playlistDao.delete(id)
 
+    /**
+     * Real, reported crash: rows already inserted before [PlaylistDao.addTrack]'s
+     * own duplicate check existed (or from any future code path that
+     * bypasses it) leave the same (trackId, source) pair at two different
+     * positions in the same playlist — every screen showing a playlist's
+     * tracks keys each row by "${item.source}:${item.id}"
+     * (PlayableItemsList.itemsIndexed), so a genuine duplicate crashes
+     * Compose outright (IllegalArgumentException: "Key ... was already
+     * used") rather than just rendering the same song twice. distinctBy
+     * here is a permanent safety net independent of the DB-level
+     * duplicate check — it makes this method itself correct regardless
+     * of whatever state already exists in the table, with no migration
+     * required to repair a playlist that became corrupted before the fix.
+     */
     fun observePlaylistTracks(playlistId: Long): Flow<List<PlayableItem>> =
         playlistDao.observeTracks(playlistId)
             .map { it.map { t -> t.trackId to t.source.toDomain() } }
             .flatMapResolve()
+            .map { it.distinctBy { item -> "${item.source}:${item.id}" } }
 
-    suspend fun addToPlaylist(playlistId: Long, item: PlayableItem) {
+    /** Returns true if [item] was actually added, false if it was already in [playlistId] (see [PlaylistDao.addTrack]'s own doc — a real, reported duplicate-track crash). */
+    suspend fun addToPlaylist(playlistId: Long, item: PlayableItem): Boolean {
         if (item is PlayableItem.YoutubeTrack) cacheSong(item)
-        playlistDao.addTrack(playlistId, item.id, item.source.toEntity(), System.currentTimeMillis())
+        return playlistDao.addTrack(playlistId, item.id, item.source.toEntity(), System.currentTimeMillis())
     }
 
     suspend fun removeFromPlaylistAt(playlistId: Long, position: Int) =
         playlistDao.removeTrackAt(playlistId, position)
+
+    /**
+     * Removes [item] from [playlistId] by id (see [PlaylistDao.removeTrack]
+     * for why this is id-based rather than position-based) — backs the
+     * Playlist detail screen's "Remove from playlist" action.
+     */
+    suspend fun removeFromPlaylist(playlistId: Long, item: PlayableItem) =
+        playlistDao.removeTrack(playlistId, item.id)
+
+    /**
+     * Moves [item] from [fromPlaylistId] to [toPlaylistId] — the
+     * "Move to other playlist" action. Implemented as a plain add-then-
+     * remove (not a single atomic transaction): a partial failure here
+     * (added to the target but the removal from the source didn't run)
+     * degrades to the song simply existing in both playlists rather than
+     * disappearing from both, which is the safer failure direction for a
+     * user-visible library mutation. Returns the same "was it actually a
+     * new add" result [addToPlaylist] returns (see [PlaylistDao.addTrack]'s
+     * doc) — false means it was already present in the target playlist,
+     * so this move degenerated to a plain removal from the source.
+     */
+    suspend fun moveToPlaylist(fromPlaylistId: Long, toPlaylistId: Long, item: PlayableItem): Boolean {
+        val added = addToPlaylist(toPlaylistId, item)
+        removeFromPlaylist(fromPlaylistId, item)
+        return added
+    }
 
     // --- Offline downloads (Library > Downloads, YouTube-Music-style) ---
 

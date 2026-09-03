@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Download
@@ -52,6 +53,16 @@ fun SongActionsContent(
     onRemoveFromSpeedDial: (() -> Unit)? = null,
     onRemoveFromQuickPicks: (() -> Unit)? = null,
     onRemoveFromHistory: (() -> Unit)? = null,
+    // Playlist-context actions (section: Playlist detail screen) — both
+    // null everywhere the sheet isn't opened from inside a specific
+    // playlist's own track list (Search/Home/Local Library/Favorites),
+    // where "this song's membership in playlist X" isn't a meaningful
+    // concept for the sheet to expose. When non-null, onRemoveFromPlaylist
+    // replaces the generic onAddToPlaylist row below (a song already
+    // known to be inside the playlist the sheet was opened from doesn't
+    // need "Add to playlist" — it needs to leave that specific playlist).
+    onRemoveFromPlaylist: (() -> Unit)? = null,
+    onMoveToOtherPlaylist: (() -> Unit)? = null,
     // Offline downloads (section: Library > Downloads, YouTube-Music-style):
     // isDownloaded reflects real persisted state (see LibraryRepository.observeDownloadedIds),
     // onDownload/onRemoveDownload are null wherever downloading doesn't make
@@ -105,9 +116,16 @@ fun SongActionsContent(
         }
         SongActionRow(
             icon = { Icon(Icons.Filled.LibraryAdd, contentDescription = null, tint = WhiplashColors.textPrimary) },
-            label = "Add to playlist",
-            onClick = onAddToPlaylist,
+            label = if (onRemoveFromPlaylist != null) "Remove from playlist" else "Add to playlist",
+            onClick = onRemoveFromPlaylist ?: onAddToPlaylist,
         )
+        if (onMoveToOtherPlaylist != null) {
+            SongActionRow(
+                icon = { Icon(Icons.Filled.DriveFileMove, contentDescription = null, tint = WhiplashColors.textPrimary) },
+                label = "Move to other playlist",
+                onClick = onMoveToOtherPlaylist,
+            )
+        }
         if (onDownload != null) {
             SongActionRow(
                 icon = {

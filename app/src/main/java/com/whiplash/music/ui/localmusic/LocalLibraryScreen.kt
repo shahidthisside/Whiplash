@@ -47,10 +47,10 @@ import com.whiplash.music.ui.theme.GlassTabRow
 import com.whiplash.music.ui.theme.GlassTokens
 
 private enum class LibraryTab(val label: String) {
+    DOWNLOADS("Downloads"),
     SONGS("Songs"),
     ALBUMS("Albums"),
     ARTISTS("Artists"),
-    DOWNLOADS("Downloads"),
 }
 
 @androidx.compose.material3.ExperimentalMaterial3Api
@@ -123,7 +123,13 @@ private fun LibraryContent(
     onRequestPermission: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    var selectedTab by rememberSaveable { mutableStateOf(LibraryTab.SONGS) }
+    // Defaults to Downloads (not Songs) — Downloads is the only tab that
+    // never needs the local-media permission (see LocalLibraryScreen's
+    // own doc above), so opening the Library tab lands somewhere
+    // immediately useful even for a user who hasn't granted (or has
+    // denied) device-media access yet, rather than landing on a
+    // permission prompt by default.
+    var selectedTab by rememberSaveable { mutableStateOf(LibraryTab.DOWNLOADS) }
     val isScanning by viewModel.isScanning.collectAsState()
     val songs by viewModel.songs.collectAsState()
     val albums by viewModel.albums.collectAsState()

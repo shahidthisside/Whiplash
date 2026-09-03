@@ -49,6 +49,18 @@ import com.whiplash.music.ui.theme.PlainIconButton
 import com.whiplash.music.ui.theme.WhiplashColors
 
 /**
+ * Identifies the playlist a [PlayableItemsList] instance is showing the
+ * tracks *of* — passed only from [com.whiplash.music.ui.playlists.PlaylistDetailScreen],
+ * null everywhere else (Search/Home/Local Library/Favorites), where a
+ * track's membership in a specific playlist isn't a meaningful concept
+ * for the list to expose. Drives the sheet's "Remove from playlist"
+ * (replacing the generic "Add to playlist") and "Move to other playlist"
+ * rows — see [SongActionsContent]'s own doc on why those are mutually
+ * exclusive with the generic add-to-playlist flow.
+ */
+data class PlaylistContext(val playlistId: Long, val playlistName: String)
+
+/**
  * Reusable track list used across Search, Local Library, Home, and
  * Favorites: tap to play the whole visible list as a queue starting at
  * that index (section 21), long-press for the song-actions sheet (play
@@ -75,6 +87,9 @@ fun PlayableItemsList(
     // only) — null everywhere else (Search/Local Library/Favorites),
     // where a track has no history-specific removal concept.
     onRemoveFromHistory: ((PlayableItem) -> Unit)? = null,
+    // See [PlaylistContext]'s own doc — null everywhere except
+    // PlaylistDetailScreen.
+    playlistContext: PlaylistContext? = null,
 ) {
 
     val context = LocalContext.current
@@ -85,6 +100,7 @@ fun PlayableItemsList(
     )
     var actionsSheetItem by remember { mutableStateOf<PlayableItem?>(null) }
     var addToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
+    var moveToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
@@ -194,8 +210,23 @@ fun PlayableItemsList(
                     // AnimatedContent crossfades the ring into the
                     // checkmark rather than an abrupt swap.
                     val inFlightProgress = if (item is PlayableItem.YoutubeTrack) downloadProgress[item.id] else null
-                    val downloaded = item is PlayableItem.DownloadedTrack ||
-                        (item is PlayableItem.YoutubeTrack && item.id in downloadedIds)
+                    // Real, reported bug: this used to trust
+                    // `item is PlayableItem.DownloadedTrack` outright as
+                    // proof of being downloaded — but a playlist's track
+                    // list is resolved from its own persisted
+                    // (trackId, source) rows (see
+                    // LibraryRepository.observePlaylistTracks), which only
+                    // re-resolves when the playlist's own track list
+                    // changes, not when an unrelated removeDownload() call
+                    // deletes the download itself. That left a track
+                    // removed from Downloads still rendering its
+                    // "Downloaded" checkmark inside any playlist it was
+                    // added to until the playlist's own track list
+                    // happened to change for some other reason. Checking
+                    // the live downloadedIds set (already reactive to
+                    // exactly this) instead of the item's static type
+                    // fixes it for every screen at once.
+                    val downloaded = item.id in downloadedIds
                     androidx.compose.animation.AnimatedContent(
                         targetState = when {
                             inFlightProgress?.failed == true -> "failed"
@@ -304,6 +335,18 @@ fun PlayableItemsList(
                     addToPlaylistItem = sheetItem
                     actionsSheetItem = null
                 },
+                onRemoveFromPlaylist = if (playlistContext != null) {
+                    {
+                        songActionsViewModel.removeFromPlaylist(playlistContext.playlistId, playlistContext.playlistName, sheetItem)
+                        actionsSheetItem = null
+                    }
+                } else null,
+                onMoveToOtherPlaylist = if (playlistContext != null) {
+                    {
+                        moveToPlaylistItem = sheetItem
+                        actionsSheetItem = null
+                    }
+                } else null,
                 onStartRadio = if (sheetItem is PlayableItem.YoutubeTrack) {
                     {
                         // "Start radio" plays just this track — the existing
@@ -323,7 +366,17 @@ fun PlayableItemsList(
                     }
                 } else null,
                 isPinned = isPinned,
-                onTogglePinned = if (!isDownloadedTrack) {
+                // Real, reported design gap: Speed dial is meant to be an
+                // *online* listening history — a completely separate,
+                // additional feature from the local on-device library
+                // (its own Library tab). Offering "Pin to Speed dial" for
+                // a LocalTrack let a user pin something that then never
+                // actually appeared anywhere (HomeViewModel.speedDial's
+                // own pinned+recentlyPlayed composition, and
+                // HistoryDao.observeRecentlyPlayed, both now exclude
+                // LOCAL) — a dead, silently-no-op action rather than a
+                // real capability.
+                onTogglePinned = if (!isDownloadedTrack && sheetItem !is PlayableItem.LocalTrack) {
                     {
                         songActionsViewModel.togglePinned(sheetItem, isCurrentlyPinned = isPinned)
                         actionsSheetItem = null
@@ -379,6 +432,38 @@ fun PlayableItemsList(
             },
             onDismiss = { showCreatePlaylistDialog = false },
         )
+    }
+
+    // "Move to other playlist" target picker — same AddToPlaylistContent
+    // sheet reused for the add flow above, minus the playlist currently
+    // being viewed (moving a song to the playlist it's already in is a
+    // no-op the picker shouldn't even offer) and with "New playlist"
+    // omitted (moving into a brand new empty playlist is exactly the same
+    // outcome as just adding it there and removing it from here, which
+    // "New playlist" from the add flow already covers if that's really
+    // what's wanted — this picker is specifically for moving between
+    // *existing* playlists).
+    val moveTargetItem = moveToPlaylistItem
+    if (moveTargetItem != null && playlistContext != null) {
+        val allPlaylists by app.libraryRepository.observePlaylists().collectAsState(initial = emptyList())
+        val otherPlaylists = allPlaylists.filter { it.id != playlistContext.playlistId }
+        GlassSheet(onDismissRequest = { moveToPlaylistItem = null }) {
+            com.whiplash.music.ui.player.AddToPlaylistContent(
+                playlists = otherPlaylists,
+                title = "Move to playlist",
+                showCreateNew = false,
+                onSelectPlaylist = { targetPlaylist ->
+                    songActionsViewModel.moveToPlaylist(
+                        fromPlaylistId = playlistContext.playlistId,
+                        toPlaylistId = targetPlaylist.id,
+                        toPlaylistName = targetPlaylist.name,
+                        item = moveTargetItem,
+                    )
+                    moveToPlaylistItem = null
+                },
+                onCreateNew = {},
+            )
+        }
     }
 
     val cancelTarget = cancelDownloadTarget

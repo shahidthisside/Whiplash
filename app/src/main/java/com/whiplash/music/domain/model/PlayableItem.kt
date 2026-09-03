@@ -70,3 +70,25 @@ enum class MediaSource {
     YOUTUBE,
     DOWNLOAD,
 }
+
+/**
+ * Identity key for "is this the same track" comparisons that must treat
+ * [MediaSource.YOUTUBE] and [MediaSource.DOWNLOAD] as equivalent — a
+ * [PlayableItem.DownloadedTrack]'s [PlayableItem.id] is always the exact
+ * same YouTube video id it was downloaded from (see that class's own
+ * doc), so the same song played once as a live stream and once as an
+ * offline download is genuinely the same track, not two different ones.
+ * [MediaSource.LOCAL] is never normalized with the other two — a
+ * MediaStore row id is a completely different namespace, and a
+ * coincidental numeric collision with a YouTube video id would be a
+ * real (if rare) false-positive merge otherwise.
+ *
+ * Mirrors the equivalent SQL-level normalization in
+ * [com.whiplash.music.data.local.dao.HistoryDao] and
+ * [com.whiplash.music.data.local.dao.PinnedDao] (both fixed for the same
+ * real, reported bug: playing/pinning a song from two different
+ * surfaces — e.g. Search vs. the Downloads tab — produced duplicate
+ * History/Speed dial entries for what a user experiences as one song).
+ */
+fun PlayableItem.speedDialIdentity(): Pair<String, MediaSource> =
+    id to if (source == MediaSource.DOWNLOAD) MediaSource.YOUTUBE else source

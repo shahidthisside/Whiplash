@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.whiplash.music.data.repository.LibraryRepository
 import com.whiplash.music.data.repository.YoutubeSearchRepository
 import com.whiplash.music.domain.model.PlayableItem
+import com.whiplash.music.domain.model.speedDialIdentity
 import com.whiplash.music.ui.common.ToastController
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -70,8 +71,20 @@ class HomeViewModel(
         libraryRepository.observePinned(),
         recentlyPlayed,
     ) { pinned, recent ->
-        val pinnedIds = pinned.map { it.source to it.id }.toSet()
-        (pinned + recent.filter { (it.source to it.id) !in pinnedIds }).take(9)
+        // Real, reported bug: this used to dedup by the raw
+        // (item.source, item.id) pair — the exact same YOUTUBE/DOWNLOAD
+        // identity gap HistoryDao.observeRecentlyPlayed's own doc
+        // explains (a DownloadedTrack's id IS the YouTube video id it
+        // was downloaded from), so a song played once as a live YouTube
+        // stream and once as a downloaded file could appear as two
+        // separate Speed dial tiles for what a user experiences as one
+        // song. speedDialIdentity() normalizes YOUTUBE/DOWNLOAD together
+        // (never LOCAL, a genuinely different id namespace) so both
+        // halves of this composition — the pinned set used to exclude
+        // already-pinned tracks from the "recent" fallback, and the
+        // dedup itself — agree on what counts as the same track.
+        val pinnedIds = pinned.map { it.speedDialIdentity() }.toSet()
+        (pinned + recent.filter { it.speedDialIdentity() !in pinnedIds }).take(9)
     }.onEach { _isSpeedDialLoaded.value = true }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
