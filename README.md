@@ -17,6 +17,7 @@
 - Persistent queue with reordering, "play next," and "add to queue," plus an Autoplay on/off shortcut right in the Queue sheet
 - YouTube-style autoplay: automatically extends the queue with related, music-only tracks when Autoplay is enabled (a video's YouTube category is checked so non-music results never sneak in)
 - Local/offline device music library (MediaStore-backed), including automatic library refresh via a `ContentObserver` when files change on disk
+- Offline downloads: save any YouTube track's audio for playback with no network at all, with its own Downloads tab, a per-row progress/checkmark/failed badge everywhere that track appears, and bulk "Download album/playlist" actions — download quality is configurable independently from streaming quality
 
 ### Library & Discovery
 - Unified local + YouTube search (Songs, Albums, Artists, Playlists — each loads and fails independently)
