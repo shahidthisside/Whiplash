@@ -80,10 +80,22 @@ class SettingsViewModel(
         _backupResult.value = null
     }
 
-    /** Writes a full backup zip to [destination] (a Uri from the system "Save as" picker). */
-    fun backup(destination: android.net.Uri) {
+    /**
+     * Writes a backup zip to [destination] (a Uri from the system "Save
+     * as" picker). [categories] selects which data actually gets backed
+     * up — the "Advanced backup" checkbox sheet (Settings > Backup &
+     * Restore), which replaced the previous unconditional "back up
+     * literally everything" as the one and only backup flow. Passing
+     * every [com.whiplash.music.data.backup.BackupCategory] (the sheet's
+     * default, all-checked state) still produces the exact same practical
+     * outcome as the old always-full backup used to — this isn't a
+     * separate, additional feature bolted on next to the old one, it *is*
+     * the old one, now with real per-category control instead of an
+     * all-or-nothing choice.
+     */
+    fun backup(destination: android.net.Uri, categories: Set<com.whiplash.music.data.backup.BackupCategory>) {
         viewModelScope.launch {
-            val success = backupManager.backup(destination)
+            val success = backupManager.backupSelective(destination, categories)
             if (success) {
                 repository.setLastBackupTimeMs(System.currentTimeMillis())
             }
@@ -92,14 +104,24 @@ class SettingsViewModel(
     }
 
     /**
-     * Restores from [source] (a Uri from the system "Open" picker). The
-     * caller (SettingsScreen) is responsible for fully restarting the app
-     * process right after a successful result — see [BackupManager.restore]'s
-     * doc for why a live Room connection can't just keep running against a
-     * file that was swapped out from underneath it.
+     * Restores from [source] (a Uri from the system "Open" picker).
+     * Transparently detects whether [source] is a selective (category
+     * JSON) backup or a legacy full-DB zip from before this feature
+     * existed — [onRestored] is only invoked for the legacy full-DB path,
+     * which is the only one that needs the caller to fully restart the
+     * app process (see [BackupManager.restore]'s doc for why a live Room
+     * connection can't keep running against a file that was swapped out
+     * from underneath it). A selective restore is a plain additive DAO
+     * merge with no raw file replacement, so it takes effect immediately
+     * with no restart needed.
      */
     fun restore(source: android.net.Uri, onRestored: () -> Unit) {
         viewModelScope.launch {
+            if (backupManager.isSelectiveBackup(source)) {
+                val success = backupManager.restoreSelective(source)
+                _backupResult.value = if (success) BackupResult.RestoreSuccess else BackupResult.RestoreFailed
+                return@launch
+            }
             val success = backupManager.restore(source)
             if (success) {
                 onRestored()
@@ -109,7 +131,7 @@ class SettingsViewModel(
         }
     }
 
-    enum class BackupResult { BackupSuccess, BackupFailed, RestoreFailed }
+    enum class BackupResult { BackupSuccess, BackupFailed, RestoreSuccess, RestoreFailed }
 
     /** Real current on-disk cache size, refreshed on load and after Clear cache — not an estimate. */
     private val _cacheSizeBytes = MutableStateFlow(0L)

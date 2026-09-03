@@ -1,6 +1,7 @@
 package com.whiplash.music.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -59,6 +60,7 @@ import androidx.compose.foundation.clickable
  *   affects every screen, since every Glass* component reads WhiplashColors
  *   reactively.
  */
+@androidx.compose.foundation.layout.ExperimentalLayoutApi
 @Composable
 fun SettingsScreen() {
     val context = LocalContext.current
@@ -80,6 +82,17 @@ fun SettingsScreen() {
 
     var showRestoreConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<android.net.Uri?>(null) }
 
+    // Advanced backup category selection — replaces the old unconditional
+    // "back up literally everything" tap-and-go flow with real per-
+    // category checkboxes, rendered inline in the Backup & Restore card
+    // itself (between the description and the action buttons — not a
+    // separate sheet/screen). Every category defaults to checked, so a
+    // user who just wants the old all-or-nothing behavior still gets it
+    // with zero extra taps beyond the existing "Back up now" press.
+    var selectedBackupCategories by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(com.whiplash.music.data.backup.BackupCategory.entries.toSet())
+    }
+
     // Toast feedback for backup/restore, matching the existing simple,
     // generic "no internet" / "couldn't play this song" Toast pattern in
     // MainActivity — never raw exception text (section: keep user-facing
@@ -88,6 +101,7 @@ fun SettingsScreen() {
         val message = when (backupResult) {
             SettingsViewModel.BackupResult.BackupSuccess -> "Backup saved"
             SettingsViewModel.BackupResult.BackupFailed -> "Couldn't create backup"
+            SettingsViewModel.BackupResult.RestoreSuccess -> "Backup restored"
             SettingsViewModel.BackupResult.RestoreFailed -> "Couldn't restore backup"
             null -> null
         }
@@ -99,7 +113,7 @@ fun SettingsScreen() {
 
     val backupLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip"),
-    ) { uri -> if (uri != null) viewModel.backup(uri) }
+    ) { uri -> if (uri != null) viewModel.backup(uri, selectedBackupCategories) }
 
     val restoreLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
@@ -108,7 +122,7 @@ fun SettingsScreen() {
     if (showRestoreConfirm != null) {
         com.whiplash.music.ui.theme.GlassConfirmDialog(
             title = "Restore this backup?",
-            message = "This replaces your current playlists, favorites, history, pinned songs, and settings with what's in the backup file. This can't be undone. The app will restart.",
+            message = "This adds the backed-up data on top of what you already have (playlists, favorites, history, pinned songs, downloads, and/or settings — whichever categories the backup file actually contains). If it's an older full backup, this replaces everything instead and restarts the app. This can't be undone.",
             confirmLabel = "Restore",
             onConfirm = {
                 val uri = showRestoreConfirm!!
@@ -118,6 +132,9 @@ fun SettingsScreen() {
                     // replaced out from under it (see BackupManager.restore
                     // doc), so a full process restart is the only correct
                     // way to pick up the restored data everywhere at once.
+                    // Only reached for a legacy full-DB backup — a
+                    // selective restore is a plain additive DAO merge with
+                    // no file replacement, so it needs no restart at all.
                     val restartIntent = android.content.Intent(context, com.whiplash.music.MainActivity::class.java)
                     restartIntent.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
                     context.startActivity(restartIntent)
@@ -292,9 +309,56 @@ fun SettingsScreen() {
                 Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceLg)) {
                     SettingRow(
                         title = "Local backup",
-                        subtitle = "Saves your playlists, favorites, history, pinned songs, and settings to a file you choose.\n" +
+                        subtitle = "Choose what to back up below, then save it to a file you choose.\n" +
                             formatLastBackupSubtitle(lastBackupTimeMs),
                     )
+                    // Per-category selector — between the description
+                    // above and the action buttons below, per explicit
+                    // steering on positioning. Uses GlassChip (this app's
+                    // own existing filter/tag component, already used for
+                    // Search's result tabs) in a wrapping FlowRow rather
+                    // than a tall stack of full checkbox rows with
+                    // descriptions — 6 categories' descriptions each on
+                    // their own line pushed this card, and everything
+                    // below it on the Settings screen, considerably
+                    // further down with comparatively little benefit
+                    // (the categories are largely self-explanatory from
+                    // their names alone). All chips selected by default
+                    // so "Back up now" still backs up everything with
+                    // zero extra taps, exactly matching the old always-
+                    // full behavior for anyone who doesn't touch these.
+                    androidx.compose.foundation.layout.FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+                        verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+                    ) {
+                        val allSelected = selectedBackupCategories.size == com.whiplash.music.data.backup.BackupCategory.entries.size
+                        BackupCategoryChip(
+                            text = "All",
+                            selected = allSelected,
+                            onClick = {
+                                selectedBackupCategories = if (allSelected) {
+                                    emptySet()
+                                } else {
+                                    com.whiplash.music.data.backup.BackupCategory.entries.toSet()
+                                }
+                            },
+                        )
+                        com.whiplash.music.data.backup.BackupCategory.entries.forEach { category ->
+                            val checked = category in selectedBackupCategories
+                            BackupCategoryChip(
+                                text = category.displayName,
+                                selected = checked,
+                                onClick = {
+                                    selectedBackupCategories = if (checked) {
+                                        selectedBackupCategories - category
+                                    } else {
+                                        selectedBackupCategories + category
+                                    }
+                                },
+                            )
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
@@ -302,6 +366,7 @@ fun SettingsScreen() {
                         GlassButton(
                             text = "Back up now",
                             modifier = Modifier.weight(1f),
+                            enabled = selectedBackupCategories.isNotEmpty(),
                             onClick = { backupLauncher.launch(com.whiplash.music.data.backup.BackupManager.suggestedFileName()) },
                         )
                         GlassButton(
@@ -344,6 +409,49 @@ fun SettingsScreen() {
 
         item {
             GithubFooter()
+        }
+    }
+}
+
+/**
+ * A selectable chip for the Advanced Backup category picker (Settings >
+ * Backup & Restore) — deliberately a local variant scoped only to this
+ * screen rather than a change to the shared [com.whiplash.music.ui.theme.GlassChip]
+ * component used elsewhere (Search's own result-tab chips, the theme
+ * picker's swatches): per explicit steering, a brighter selected fill is
+ * wanted specifically for backup category selection, not as an app-wide
+ * change to every chip everywhere. [GlassChip]'s own selected state uses
+ * [GlassTokens.opacityElevated] (0.65) — the same value used for elevated
+ * card surfaces, not a primary action — which read as a muted, greyish
+ * accent tint on a light-leaning theme rather than a clean, bright one.
+ * This uses a near-opaque fill instead, matching [GlassButton]'s own
+ * selected/enabled brightness (see its own doc: deliberately near-opaque
+ * so a primary action reads as genuinely solid, not "elevated-surface"
+ * translucent).
+ */
+@Composable
+private fun BackupCategoryChip(text: String, selected: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(WhiplashRadius.pill)
+    val tint = if (selected) WhiplashColors.accent else WhiplashColors.surfaceElevated
+    val opacity = if (selected) 1.0f else GlassTokens.opacityRegular
+    val contentColor = if (selected) WhiplashColors.onAccent else WhiplashColors.textPrimary
+
+    Box(
+        modifier = Modifier
+            .clip(shape)
+            .background(tint.copy(alpha = opacity))
+            .border(GlassTokens.borderWidth, WhiplashColors.glassBorder, shape)
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+            .padding(horizontal = GlassTokens.spaceMd, vertical = GlassTokens.spaceXs),
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides contentColor) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                softWrap = false,
+            )
         }
     }
 }

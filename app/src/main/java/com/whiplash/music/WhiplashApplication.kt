@@ -79,7 +79,7 @@ class WhiplashApplication : Application() {
     }
 
     val backupManager: com.whiplash.music.data.backup.BackupManager by lazy {
-        com.whiplash.music.data.backup.BackupManager(this, database)
+        com.whiplash.music.data.backup.BackupManager(this, database, settingsRepository)
     }
 
     val libraryRepository: LibraryRepository by lazy {

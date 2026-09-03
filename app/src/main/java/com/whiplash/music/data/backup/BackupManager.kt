@@ -3,8 +3,20 @@ package com.whiplash.music.data.backup
 import android.content.Context
 import android.net.Uri
 import com.whiplash.music.data.local.WhiplashDatabase
+import com.whiplash.music.data.local.entity.DownloadEntity
+import com.whiplash.music.data.local.entity.DownloadStatus
+import com.whiplash.music.data.local.entity.FavoriteEntity
+import com.whiplash.music.data.local.entity.HistoryEntity
+import com.whiplash.music.data.local.entity.MediaSource
+import com.whiplash.music.data.local.entity.PinnedEntity
+import com.whiplash.music.data.local.entity.PlaylistEntity
+import com.whiplash.music.data.local.entity.PlaylistTrackEntity
+import com.whiplash.music.data.local.entity.SongEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -51,6 +63,7 @@ import java.util.zip.ZipOutputStream
 class BackupManager(
     private val context: Context,
     private val database: WhiplashDatabase,
+    private val settingsRepository: com.whiplash.music.data.repository.SettingsRepository,
 ) {
 
     /**
@@ -91,6 +104,408 @@ class BackupManager(
                 }
             } ?: return@withContext false
             true
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Writes a JSON-based zip containing only [categories]' data to
+     * [destination] — the "Advanced backup" checkbox flow (Settings >
+     * Backup & Restore), as opposed to [backup]'s "everything, one raw
+     * file copy" default.
+     *
+     * Deliberately a completely different on-disk format from [backup]
+     * (a manifest + one JSON array per category, see [ZIP_MANIFEST_ENTRY]
+     * and [restore]'s own doc) rather than trying to selectively omit
+     * tables from a raw SQLite file copy — Room/SQLite has no supported
+     * "copy only these tables" file-level operation, so a genuine
+     * per-category selection has to be built from actual queried rows,
+     * not a file copy. [PLAYLISTS]/[FAVORITES]/[HISTORY]/[PINNED] each
+     * automatically also include every [SongEntity] row their own
+     * references point to (not exposed as its own separate checkbox —
+     * a user backing up "Favorites" expects the song titles/artwork to
+     * still resolve after restore, not to need to separately remember
+     * "also back up the metadata cache"), deduplicated across categories
+     * so a song referenced by both Favorites and History is only written
+     * once. [BackupCategory.DOWNLOADS]' own doc explains why only
+     * download *records* are included, never the audio files themselves.
+     */
+    suspend fun backupSelective(destination: Uri, categories: Set<BackupCategory>): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            if (categories.isEmpty()) return@withContext false
+
+            database.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(FULL)").use { it.moveToFirst() }
+
+            val songIds = mutableSetOf<String>()
+            val manifest = JSONArray()
+            val categoryPayloads = mutableMapOf<BackupCategory, JSONArray>()
+
+            if (BackupCategory.PLAYLISTS in categories) {
+                val playlists = database.playlistDao().observeAll().first()
+                val playlistsJson = JSONArray()
+                for (playlist in playlists) {
+                    val tracks = database.playlistDao().observeTracks(playlist.id).first()
+                    tracks.forEach { if (it.source == MediaSource.YOUTUBE || it.source == MediaSource.DOWNLOAD) songIds += it.trackId }
+                    playlistsJson.put(
+                        JSONObject().apply {
+                            put("id", playlist.id)
+                            put("name", playlist.name)
+                            put("description", playlist.description)
+                            put("artworkUrl", playlist.artworkUrl)
+                            put("createdAtEpochMs", playlist.createdAtEpochMs)
+                            put("updatedAtEpochMs", playlist.updatedAtEpochMs)
+                            put(
+                                "tracks",
+                                JSONArray().apply {
+                                    tracks.forEach {
+                                        put(
+                                            JSONObject().apply {
+                                                put("position", it.position)
+                                                put("trackId", it.trackId)
+                                                put("source", it.source.name)
+                                                put("addedAtEpochMs", it.addedAtEpochMs)
+                                            }
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    )
+                }
+                categoryPayloads[BackupCategory.PLAYLISTS] = playlistsJson
+            }
+
+            if (BackupCategory.FAVORITES in categories) {
+                val favorites = database.favoriteDao().observeAll().first()
+                favorites.forEach { if (it.source == MediaSource.YOUTUBE || it.source == MediaSource.DOWNLOAD) songIds += it.trackId }
+                categoryPayloads[BackupCategory.FAVORITES] = JSONArray().apply {
+                    favorites.forEach {
+                        put(
+                            JSONObject().apply {
+                                put("trackId", it.trackId)
+                                put("source", it.source.name)
+                                put("addedAtEpochMs", it.addedAtEpochMs)
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (BackupCategory.HISTORY in categories) {
+                // The full history table, not just observeRecentlyPlayed's
+                // deduped/limited view — a genuine "back up my history"
+                // should restore the real underlying rows, not a
+                // display-only projection of them.
+                val history = database.historyDao().let { dao ->
+                    // HistoryDao has no plain "get everything" query (only
+                    // the deduped/limited observeRecentlyPlayed used for
+                    // display) — reading the raw table directly here is
+                    // the correct, minimal way to get every row without
+                    // adding a query to the DAO that nothing else needs.
+                    database.query("SELECT * FROM history", null)
+                }
+                categoryPayloads[BackupCategory.HISTORY] = JSONArray().apply {
+                    history.use { cursor ->
+                        val idIdx = cursor.getColumnIndexOrThrow("id")
+                        val trackIdIdx = cursor.getColumnIndexOrThrow("trackId")
+                        val sourceIdx = cursor.getColumnIndexOrThrow("source")
+                        val playedAtIdx = cursor.getColumnIndexOrThrow("playedAtEpochMs")
+                        while (cursor.moveToNext()) {
+                            val source = cursor.getString(sourceIdx)
+                            val trackId = cursor.getString(trackIdIdx)
+                            if (source == MediaSource.YOUTUBE.name || source == MediaSource.DOWNLOAD.name) songIds += trackId
+                            put(
+                                JSONObject().apply {
+                                    put("id", cursor.getLong(idIdx))
+                                    put("trackId", trackId)
+                                    put("source", source)
+                                    put("playedAtEpochMs", cursor.getLong(playedAtIdx))
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (BackupCategory.PINNED in categories) {
+                val pinned = database.pinnedDao().observeAll().first()
+                pinned.forEach { if (it.source == MediaSource.YOUTUBE || it.source == MediaSource.DOWNLOAD) songIds += it.trackId }
+                categoryPayloads[BackupCategory.PINNED] = JSONArray().apply {
+                    pinned.forEach {
+                        put(
+                            JSONObject().apply {
+                                put("trackId", it.trackId)
+                                put("source", it.source.name)
+                                put("pinnedAtEpochMs", it.pinnedAtEpochMs)
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (BackupCategory.DOWNLOADS in categories) {
+                val downloads = database.downloadDao().getAll()
+                categoryPayloads[BackupCategory.DOWNLOADS] = JSONArray().apply {
+                    downloads.forEach {
+                        put(
+                            JSONObject().apply {
+                                put("id", it.id)
+                                put("title", it.title)
+                                put("artist", it.artist)
+                                put("album", it.album)
+                                put("artworkPath", it.artworkPath)
+                                put("durationMs", it.durationMs)
+                                put("filePath", it.filePath)
+                                put("fileSizeBytes", it.fileSizeBytes)
+                                put("status", it.status.name)
+                                put("downloadedAtEpochMs", it.downloadedAtEpochMs)
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (BackupCategory.SETTINGS in categories) {
+                categoryPayloads[BackupCategory.SETTINGS] = JSONArray().put(
+                    JSONObject().apply {
+                        put("audioQuality", settingsRepository.audioQuality.first().name)
+                        put("downloadQuality", settingsRepository.downloadQuality.first().name)
+                        put("autoplayEnabled", settingsRepository.autoplayEnabled.first())
+                        put("themeVariant", settingsRepository.themeVariant.first().name)
+                        put("seekBarStyle", settingsRepository.seekBarStyle.first().name)
+                        put("crossfadeDurationMs", settingsRepository.crossfadeDurationMs.first())
+                        put("gaplessEnabled", settingsRepository.gaplessEnabled.first())
+                        put("playbackSpeed", settingsRepository.playbackSpeed.first().toDouble())
+                        put("audioCacheEnabled", settingsRepository.audioCacheEnabled.first())
+                    }
+                )
+            }
+
+            // Every song id any selected category referenced, resolved
+            // once here and written as its own "songs" payload — see this
+            // function's own doc for why this isn't a separate checkbox.
+            val songsJson = JSONArray()
+            if (songIds.isNotEmpty()) {
+                database.songDao().getByIds(songIds.toList()).forEach { song ->
+                    songsJson.put(
+                        JSONObject().apply {
+                            put("id", song.id)
+                            put("title", song.title)
+                            put("artist", song.artist)
+                            put("album", song.album)
+                            put("artworkUrl", song.artworkUrl)
+                            put("durationMs", song.durationMs)
+                            put("albumId", song.albumId)
+                            put("artistId", song.artistId)
+                            put("isExplicit", song.isExplicit)
+                            put("cachedAtEpochMs", song.cachedAtEpochMs)
+                        }
+                    )
+                }
+            }
+
+            categories.forEach { manifest.put(it.name) }
+            val root = JSONObject().apply {
+                put("formatVersion", SELECTIVE_FORMAT_VERSION)
+                put("categories", manifest)
+                categoryPayloads.forEach { (category, payload) -> put(category.name, payload) }
+                put("songs", songsJson)
+            }
+
+            context.contentResolver.openOutputStream(destination)?.use { rawOut ->
+                ZipOutputStream(rawOut.buffered()).use { zipOut ->
+                    zipOut.putNextEntry(ZipEntry(ZIP_MANIFEST_ENTRY))
+                    zipOut.write(root.toString().toByteArray(Charsets.UTF_8))
+                    zipOut.closeEntry()
+                }
+            } ?: return@withContext false
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun WhiplashDatabase.query(sql: String, args: Array<Any?>?) =
+        openHelper.readableDatabase.query(sql, args ?: emptyArray())
+
+    /**
+     * Merges [source]'s selective backup categories into the current
+     * database/settings — unlike [restore] (which replaces everything
+     * wholesale and requires a full app restart), this is additive: it
+     * adds rows on top of whatever already exists, using each table's
+     * own existing dedup logic ([com.whiplash.music.data.local.dao.PlaylistDao.addTrack]'s
+     * containsTrack check, [OnConflictStrategy.REPLACE] on
+     * Favorite/Pinned/Download/Song upserts) so restoring the same
+     * selective backup twice is safe and idempotent — never duplicates,
+     * never crashes. No app restart is required since this never touches
+     * the raw database *file*, only inserts rows through the same Room
+     * DAOs the rest of the app already uses live.
+     */
+    suspend fun restoreSelective(source: Uri): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val root = context.contentResolver.openInputStream(source)?.use { rawIn ->
+                ZipInputStream(rawIn.buffered()).use { zipIn ->
+                    var entry = zipIn.nextEntry
+                    var manifestJson: String? = null
+                    while (entry != null) {
+                        if (entry.name == ZIP_MANIFEST_ENTRY) {
+                            manifestJson = zipIn.readBytes().toString(Charsets.UTF_8)
+                        }
+                        zipIn.closeEntry()
+                        entry = zipIn.nextEntry
+                    }
+                    manifestJson
+                }
+            } ?: return@withContext false
+            val json = JSONObject(root)
+
+            // Songs first — every category's own references depend on
+            // these rows already existing to resolve correctly.
+            json.optJSONArray("songs")?.let { songs ->
+                val entities = (0 until songs.length()).map { i ->
+                    val s = songs.getJSONObject(i)
+                    SongEntity(
+                        id = s.getString("id"),
+                        title = s.getString("title"),
+                        artist = s.getString("artist"),
+                        album = s.optString("album").takeIf { s.has("album") && !s.isNull("album") },
+                        artworkUrl = s.optString("artworkUrl").takeIf { s.has("artworkUrl") && !s.isNull("artworkUrl") },
+                        durationMs = s.getLong("durationMs"),
+                        albumId = s.optString("albumId").takeIf { s.has("albumId") && !s.isNull("albumId") },
+                        artistId = s.optString("artistId").takeIf { s.has("artistId") && !s.isNull("artistId") },
+                        isExplicit = s.optBoolean("isExplicit", false),
+                        cachedAtEpochMs = s.getLong("cachedAtEpochMs"),
+                    )
+                }
+                if (entities.isNotEmpty()) database.songDao().upsertAll(entities)
+            }
+
+            json.optJSONArray(BackupCategory.PLAYLISTS.name)?.let { playlists ->
+                for (i in 0 until playlists.length()) {
+                    val p = playlists.getJSONObject(i)
+                    // A fresh playlist row (never reusing the backed-up
+                    // id) — the id is auto-generated and restoring it
+                    // verbatim risks colliding with an unrelated existing
+                    // playlist that happens to already occupy that id
+                    // (e.g. after restoring the same backup twice, or on
+                    // a device that already has other playlists). The
+                    // *name* is what a user actually recognizes their
+                    // playlist by, not its internal id.
+                    val newId = database.playlistDao().insert(
+                        PlaylistEntity(
+                            name = p.getString("name"),
+                            description = p.optString("description").takeIf { p.has("description") && !p.isNull("description") },
+                            artworkUrl = p.optString("artworkUrl").takeIf { p.has("artworkUrl") && !p.isNull("artworkUrl") },
+                            createdAtEpochMs = p.getLong("createdAtEpochMs"),
+                            updatedAtEpochMs = p.getLong("updatedAtEpochMs"),
+                        )
+                    )
+                    val tracks = p.optJSONArray("tracks") ?: JSONArray()
+                    for (j in 0 until tracks.length()) {
+                        val t = tracks.getJSONObject(j)
+                        database.playlistDao().addTrack(
+                            playlistId = newId,
+                            trackId = t.getString("trackId"),
+                            source = MediaSource.valueOf(t.getString("source")),
+                            addedAtEpochMs = t.getLong("addedAtEpochMs"),
+                        )
+                    }
+                }
+            }
+
+            json.optJSONArray(BackupCategory.FAVORITES.name)?.let { favorites ->
+                for (i in 0 until favorites.length()) {
+                    val f = favorites.getJSONObject(i)
+                    database.favoriteDao().add(
+                        FavoriteEntity(
+                            trackId = f.getString("trackId"),
+                            source = MediaSource.valueOf(f.getString("source")),
+                            addedAtEpochMs = f.getLong("addedAtEpochMs"),
+                        )
+                    )
+                }
+            }
+
+            json.optJSONArray(BackupCategory.HISTORY.name)?.let { history ->
+                for (i in 0 until history.length()) {
+                    val h = history.getJSONObject(i)
+                    database.historyDao().insert(
+                        HistoryEntity(
+                            trackId = h.getString("trackId"),
+                            source = MediaSource.valueOf(h.getString("source")),
+                            playedAtEpochMs = h.getLong("playedAtEpochMs"),
+                        )
+                    )
+                }
+            }
+
+            json.optJSONArray(BackupCategory.PINNED.name)?.let { pinned ->
+                for (i in 0 until pinned.length()) {
+                    val p = pinned.getJSONObject(i)
+                    database.pinnedDao().add(
+                        PinnedEntity(
+                            trackId = p.getString("trackId"),
+                            source = MediaSource.valueOf(p.getString("source")),
+                            pinnedAtEpochMs = p.getLong("pinnedAtEpochMs"),
+                        )
+                    )
+                }
+            }
+
+            json.optJSONArray(BackupCategory.DOWNLOADS.name)?.let { downloads ->
+                for (i in 0 until downloads.length()) {
+                    val d = downloads.getJSONObject(i)
+                    database.downloadDao().upsert(
+                        DownloadEntity(
+                            id = d.getString("id"),
+                            title = d.getString("title"),
+                            artist = d.getString("artist"),
+                            album = d.optString("album").takeIf { d.has("album") && !d.isNull("album") },
+                            artworkPath = d.optString("artworkPath").takeIf { d.has("artworkPath") && !d.isNull("artworkPath") },
+                            durationMs = d.getLong("durationMs"),
+                            filePath = d.getString("filePath"),
+                            fileSizeBytes = d.getLong("fileSizeBytes"),
+                            status = DownloadStatus.valueOf(d.getString("status")),
+                            downloadedAtEpochMs = d.getLong("downloadedAtEpochMs"),
+                        )
+                    )
+                }
+            }
+
+            json.optJSONArray(BackupCategory.SETTINGS.name)?.let { settingsArray ->
+                if (settingsArray.length() > 0) {
+                    val s = settingsArray.getJSONObject(0)
+                    runCatching { settingsRepository.setAudioQuality(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("audioQuality"))) }
+                    runCatching { settingsRepository.setDownloadQuality(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("downloadQuality"))) }
+                    runCatching { settingsRepository.setAutoplayEnabled(s.getBoolean("autoplayEnabled")) }
+                    runCatching { settingsRepository.setThemeVariant(com.whiplash.music.ui.theme.ThemeVariant.valueOf(s.getString("themeVariant"))) }
+                    runCatching { settingsRepository.setSeekBarStyle(com.whiplash.music.ui.theme.SeekBarStyle.valueOf(s.getString("seekBarStyle"))) }
+                    runCatching { settingsRepository.setCrossfadeDurationMs(s.getInt("crossfadeDurationMs")) }
+                    runCatching { settingsRepository.setGaplessEnabled(s.getBoolean("gaplessEnabled")) }
+                    runCatching { settingsRepository.setPlaybackSpeed(s.getDouble("playbackSpeed").toFloat()) }
+                    runCatching { settingsRepository.setAudioCacheEnabled(s.getBoolean("audioCacheEnabled")) }
+                }
+            }
+
+            true
+        }.getOrDefault(false)
+    }
+
+    /** True if [source] is a selective (category-based JSON) backup rather than a legacy full-DB zip — lets the caller route to [restoreSelective] vs [restore] without the user needing to know the difference. */
+    suspend fun isSelectiveBackup(source: Uri): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.openInputStream(source)?.use { rawIn ->
+                ZipInputStream(rawIn.buffered()).use { zipIn ->
+                    var entry = zipIn.nextEntry
+                    var found = false
+                    while (entry != null) {
+                        if (entry.name == ZIP_MANIFEST_ENTRY) {
+                            found = true
+                            break
+                        }
+                        zipIn.closeEntry()
+                        entry = zipIn.nextEntry
+                    }
+                    found
+                }
+            } ?: false
         }.getOrDefault(false)
     }
 
@@ -142,6 +557,12 @@ class BackupManager(
     companion object {
         private const val DB_NAME = "whiplash.db"
         private const val SETTINGS_FILENAME = "whiplash_settings.preferences_pb"
+
+        /** Distinguishes a selective (category JSON) backup zip from a legacy full-DB zip — see [isSelectiveBackup]. */
+        private const val ZIP_MANIFEST_ENTRY = "whiplash_backup_manifest.json"
+
+        /** Bumped only if the selective JSON schema itself changes shape; not tied to [WhiplashDatabase]'s own Room schema version. */
+        private const val SELECTIVE_FORMAT_VERSION = 1
 
         /** Suggested file name for the system "Save as" picker, timestamped so repeated backups don't silently collide. */
         fun suggestedFileName(): String {
