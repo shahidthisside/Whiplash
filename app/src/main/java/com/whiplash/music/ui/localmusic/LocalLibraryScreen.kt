@@ -133,13 +133,14 @@ private fun LibraryContent(
     val inFlightTracks by viewModel.inFlightTracks.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
+    val downloadSearchResults by viewModel.downloadSearchResults.collectAsState()
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
     GlassSearchField(
         query = searchQuery,
         onQueryChange = viewModel::onSearchQueryChanged,
-        placeholder = "Search your music...",
+        placeholder = if (selectedTab == LibraryTab.DOWNLOADS) "Search downloads..." else "Search your music...",
         modifier = Modifier.fillMaxWidth(),
     )
 
@@ -149,11 +150,25 @@ private fun LibraryContent(
     // (tabs hidden) — matches the same "search overlays the current view"
     // pattern as the online SearchScreen, rather than trying to filter
     // three different tab contents (songs/albums/artists) simultaneously.
-    // Local search itself needs the media permission too (it searches the
-    // same MediaStore-backed index), so this stays gated the same way the
-    // Songs/Albums/Artists tabs are below — Downloads has no search of
-    // its own to worry about here.
+    // Search is scope-aware (section: search should follow the selected
+    // tab): the DOWNLOADS tab searches only downloaded tracks (in-memory
+    // filter, no media permission needed — Downloads never required it);
+    // every other tab searches the local MediaStore-backed library, which
+    // does need the permission, same as the Songs/Albums/Artists tabs
+    // below.
     if (searchQuery.isNotBlank()) {
+        if (selectedTab == LibraryTab.DOWNLOADS) {
+            DownloadSearchResults(
+                query = searchQuery,
+                results = downloadSearchResults,
+                onPlayQueue = { queue, index ->
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                    onPlayQueue(queue, index)
+                },
+            )
+            return
+        }
         if (!hasMediaPermission) {
             PermissionRequestState(
                 permanentlyDenied = permissionPermanentlyDenied,
@@ -185,7 +200,15 @@ private fun LibraryContent(
         items = LibraryTab.entries,
         selected = selectedTab,
         onSelect = { selectedTab = it },
-        label = { it.label },
+        label = { tab ->
+            val count = when (tab) {
+                LibraryTab.SONGS -> songs.size
+                LibraryTab.ALBUMS -> albums.size
+                LibraryTab.ARTISTS -> artists.size
+                LibraryTab.DOWNLOADS -> downloads.size
+            }
+            if (count > 0) "${tab.label} ($count)" else tab.label
+        },
         modifier = Modifier.padding(start = GlassTokens.spaceLg - GlassTokens.spaceMd),
     )
 
@@ -234,6 +257,38 @@ private fun LocalSearchResults(
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
                 text = "No local songs match \"$query\"",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+    com.whiplash.music.ui.player.PlayableItemsList(
+        items = results,
+        onPlayQueue = { _, index -> onPlayQueue(results, index) },
+        modifier = Modifier.fillMaxSize(),
+    )
+}
+
+/**
+ * Downloads-scope search results (Library > Downloads tab, section:
+ * search bar should follow the selected tab): mirrors [LocalSearchResults]
+ * exactly, but over [PlayableItem.DownloadedTrack] filtered in-memory by
+ * [LocalLibraryViewModel.downloadSearchResults] rather than a Room query —
+ * Downloads never needed the media permission and this search doesn't
+ * either.
+ */
+@androidx.compose.material3.ExperimentalMaterial3Api
+@Composable
+private fun DownloadSearchResults(
+    query: String,
+    results: List<PlayableItem.DownloadedTrack>,
+    onPlayQueue: (List<PlayableItem>, Int) -> Unit,
+) {
+    if (results.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = "No downloaded songs match \"$query\"",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

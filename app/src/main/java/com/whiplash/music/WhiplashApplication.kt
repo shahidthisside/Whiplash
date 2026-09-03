@@ -131,7 +131,7 @@ class WhiplashApplication : Application() {
     }
 
     val downloadManager: com.whiplash.music.data.download.DownloadManager by lazy {
-        com.whiplash.music.data.download.DownloadManager(this, playbackManager, database.downloadDao(), downloadOkHttpClient)
+        com.whiplash.music.data.download.DownloadManager(this, playbackManager, database.downloadDao(), downloadOkHttpClient, settingsRepository)
     }
 
     override fun onCreate() {

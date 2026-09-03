@@ -41,6 +41,29 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[AUDIO_QUALITY_KEY] = quality.name }
     }
 
+    /**
+     * Quality used when resolving the audio stream for an offline
+     * download (Library > Downloads) — deliberately a separate setting
+     * from [audioQuality] (which only applies to live streaming
+     * playback): a user may want small, storage-friendly downloads for
+     * offline listening while still streaming at a higher quality when
+     * online, or vice versa. Reuses the same real [AudioQuality] enum
+     * and the same [com.whiplash.music.playback.provider.PlaybackManager.resolveStream]
+     * quality parameter [audioQuality] already drives — genuinely
+     * changes which bitrate is fetched, never a cosmetic-only setting.
+     * Defaults to AUTO (currently: highest available), matching
+     * [audioQuality]'s own default.
+     */
+    val downloadQuality: Flow<AudioQuality> = dataStore.data.map { prefs ->
+        prefs[DOWNLOAD_QUALITY_KEY]?.let { stored ->
+            runCatching { AudioQuality.valueOf(stored) }.getOrNull()
+        } ?: AudioQuality.AUTO
+    }
+
+    suspend fun setDownloadQuality(quality: AudioQuality) {
+        dataStore.edit { prefs -> prefs[DOWNLOAD_QUALITY_KEY] = quality.name }
+    }
+
     /** Whether to auto-extend the queue with related tracks when it runs low (section 13/22). Defaults on. */
     val autoplayEnabled: Flow<Boolean> = dataStore.data.map { prefs -> prefs[AUTOPLAY_KEY] ?: true }
 
@@ -115,6 +138,7 @@ class SettingsRepository(context: Context) {
 
     private companion object {
         val AUDIO_QUALITY_KEY: Preferences.Key<String> = stringPreferencesKey("audio_quality")
+        val DOWNLOAD_QUALITY_KEY: Preferences.Key<String> = stringPreferencesKey("download_quality")
         val AUTOPLAY_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("autoplay_enabled")
         val THEME_KEY: Preferences.Key<String> = stringPreferencesKey("theme_variant")
         val SEEK_BAR_STYLE_KEY: Preferences.Key<String> = stringPreferencesKey("seek_bar_style")

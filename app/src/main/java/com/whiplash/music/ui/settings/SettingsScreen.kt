@@ -66,6 +66,7 @@ fun SettingsScreen() {
     val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository, app.audioCacheManager, app.backupManager))
 
     val audioQuality by viewModel.audioQuality.collectAsState()
+    val downloadQuality by viewModel.downloadQuality.collectAsState()
     val autoplayEnabled by viewModel.autoplayEnabled.collectAsState()
     val gaplessEnabled by viewModel.gaplessEnabled.collectAsState()
     val crossfadeDurationMs by viewModel.crossfadeDurationMs.collectAsState()
@@ -163,6 +164,28 @@ fun SettingsScreen() {
                         AudioQualitySelector(
                             selected = quality,
                             onSelect = viewModel::setAudioQuality,
+                        )
+                    }
+
+                    Divider()
+
+                    // --- Download Quality ---
+                    // Deliberately separate from Audio Quality above: a
+                    // download is a one-time, permanent fetch (storage +
+                    // one-time data cost) rather than a repeated streaming
+                    // cost, so a user may reasonably want a different
+                    // quality for offline downloads than for live
+                    // streaming playback (e.g. small downloads for
+                    // offline listening while still streaming at a
+                    // higher quality when online).
+                    SettingRow(
+                        title = "Download Quality",
+                        subtitle = "Applies to new downloads. Higher quality uses more storage.",
+                    )
+                    downloadQuality?.let { quality ->
+                        AudioQualitySelector(
+                            selected = quality,
+                            onSelect = viewModel::setDownloadQuality,
                         )
                     }
 

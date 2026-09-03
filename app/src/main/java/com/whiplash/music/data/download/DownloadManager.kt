@@ -12,8 +12,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,6 +59,7 @@ class DownloadManager(
     private val playbackManager: PlaybackManager,
     private val downloadDao: DownloadDao,
     private val okHttpClient: OkHttpClient,
+    private val settingsRepository: com.whiplash.music.data.repository.SettingsRepository? = null,
 ) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -86,8 +89,14 @@ class DownloadManager(
 
     private fun audioFileFor(trackId: String) = File(downloadsDir, "$trackId.audio")
 
-    /** Starts downloading [track] in the background. No-op if a download for this id is already in flight. */
-    fun startDownload(track: PlayableItem.YoutubeTrack) {
+    /**
+     * Starts downloading [track] in the background. No-op if a download
+     * for this id is already in flight. Shows a single "Download
+     * started" toast (section: user feedback for silent actions) —
+     * suppressed when called from [downloadAll], which shows its own
+     * single batch toast instead of one per song.
+     */
+    fun startDownload(track: PlayableItem.YoutubeTrack, showToast: Boolean = true) {
         if (activeDownloads[track.id]?.job?.isActive == true) return
         _inFlightTracks.update { it + (track.id to track) }
         val job = scope.launch {
@@ -98,6 +107,9 @@ class DownloadManager(
             activeDownloads.remove(track.id)
             _inFlightTracks.update { it - track.id }
         }
+        if (showToast) {
+            com.whiplash.music.ui.common.ToastController.show("Download started")
+        }
     }
 
     /**
@@ -107,9 +119,15 @@ class DownloadManager(
      * [startDownload] path — already-downloaded or already-in-flight
      * tracks are silently skipped rather than re-downloaded, exactly as
      * a single [startDownload] call would behave on its own.
+     *
+     * Shows exactly one "Download started" toast for the whole batch
+     * (not per song) — [startDownload] is called with `showToast =
+     * false` here so it doesn't also post its own per-track toast.
      */
     fun downloadAll(tracks: List<PlayableItem.YoutubeTrack>) {
-        tracks.forEach { startDownload(it) }
+        if (tracks.isEmpty()) return
+        tracks.forEach { startDownload(it, showToast = false) }
+        com.whiplash.music.ui.common.ToastController.show("Download started")
     }
 
     /**
@@ -180,6 +198,7 @@ class DownloadManager(
             // failed marker for a short, deliberate delay before clearing
             // it gives AnimatedContent/the UI a real chance to show it.
             _progress.update { it + (track.id to DownloadProgress(track.id, 0L, 0L, failed = true)) }
+            com.whiplash.music.ui.common.ToastController.show("Download failed: ${track.title.truncateForToast()}")
             kotlinx.coroutines.delay(FAILED_STATE_VISIBLE_MS)
         }
         _progress.update { it - track.id }
@@ -187,7 +206,14 @@ class DownloadManager(
 
     /** A single download attempt: resolve stream, download bytes, download artwork, persist the completed row. Throws on any failure (including a non-eligible stream resolution failure). */
     private suspend fun attemptDownload(track: PlayableItem.YoutubeTrack, audioFile: File) {
-        val streamResult = playbackManager.resolveStream(track)
+        // Downloads use their own Settings > Download Quality preference
+        // (deliberately separate from the streaming Audio Quality
+        // setting — see SettingsRepository.downloadQuality) rather than
+        // always resolving at AUTO/highest, so a lower quality tier here
+        // genuinely fetches a smaller/lower-bitrate file, not just a
+        // cosmetic label.
+        val quality = settingsRepository?.downloadQuality?.first() ?: com.whiplash.music.domain.model.AudioQuality.AUTO
+        val streamResult = playbackManager.resolveStream(track, quality)
         val resolved = when (streamResult) {
             is FallbackResult.Success -> streamResult.value
             is FallbackResult.Failure -> error("Stream resolution failed: ${streamResult.failure.message}")
@@ -221,6 +247,7 @@ class DownloadManager(
 
     private suspend fun downloadToFile(url: String, destination: File, onProgress: (Long, Long) -> Unit) {
         withContext(Dispatchers.IO) {
+            val downloadScope = this
             val request = Request.Builder().url(url).build()
             okHttpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) error("HTTP ${response.code} downloading $url")
@@ -231,6 +258,29 @@ class DownloadManager(
                         val buffer = ByteArray(8 * 1024)
                         var downloaded = 0L
                         while (true) {
+                            // Real, reported bug: this loop only ever
+                            // called plain blocking I/O (InputStream.read,
+                            // not a suspend function), so it never
+                            // actually checked for cancellation — tapping
+                            // "Cancel download" called Job.cancel() (which
+                            // only *requests* cooperative cancellation)
+                            // and deleted the file, but this loop kept
+                            // running regardless, re-writing to the
+                            // now-deleted file's fd and re-emitting
+                            // onProgress() (which re-added the track to
+                            // DownloadManager.progress) for as long as the
+                            // underlying socket kept delivering bytes —
+                            // "cancel download" visibly did nothing until
+                            // the transfer happened to finish or stall on
+                            // its own, sometimes tens of seconds later.
+                            // ensureActive() makes this loop check the
+                            // coroutine's own cancellation state on every
+                            // iteration, so a cancelled job now stops
+                            // reading (and therefore stops re-emitting
+                            // progress) within one buffer-read's worth of
+                            // latency instead of waiting for the whole
+                            // response body to drain.
+                            downloadScope.ensureActive()
                             val read = input.read(buffer)
                             if (read == -1) break
                             output.write(buffer, 0, read)
@@ -286,13 +336,46 @@ class DownloadManager(
         downloadDao.deleteAll()
     }
 
-    /** Called once at app startup: any row left in DOWNLOADING (process was killed mid-download) is marked FAILED and its partial file removed. */
+    /**
+     * Called once at app startup: cleans up anything left behind by a
+     * process that was killed mid-download (section: app killed
+     * mid-download must not leave a stuck or orphaned state forever).
+     *
+     * Covers two distinct gaps, both real:
+     *
+     * 1. Any row left in DOWNLOADING status (would only happen if a
+     *    future code path ever persists an in-progress row before
+     *    completion) is marked FAILED and its partial file removed.
+     *
+     * 2. Real, reported gap: [attemptDownload] only ever calls
+     *    [DownloadDao.upsert] once, at the very end, on success — a
+     *    download that never gets that far (including one interrupted by
+     *    the process being killed, e.g. force-stopped or swiped away by
+     *    the OS while a large file was still transferring) never gets a
+     *    DOWNLOADING row in the first place, so scanning the DB alone
+     *    (case 1 above) can never find or clean it up. The partial
+     *    `*.audio` file it already wrote to [downloadsDir] before being
+     *    killed is real and stays on disk forever otherwise — a genuine,
+     *    silent storage leak with zero corresponding UI entry to ever
+     *    surface it. This sweeps [downloadsDir] directly and deletes any
+     *    file whose id isn't a completed download's own file — safe
+     *    because a legitimate in-flight download can only exist while
+     *    this class's own coroutine scope is alive, which is never true
+     *    at the app-startup call site this method is meant for.
+     */
     suspend fun cleanUpIncompleteDownloads() {
         val stale = downloadDao.getAll().filter { it.status == DownloadStatus.DOWNLOADING }
         stale.forEach { entity ->
             runCatching { File(entity.filePath).delete() }
         }
         downloadDao.failAllInProgress()
+
+        val completedFilePaths = downloadDao.getAll().map { it.filePath }.toSet()
+        downloadsDir.listFiles()?.forEach { file ->
+            if (file.absolutePath !in completedFilePaths) {
+                runCatching { file.delete() }
+            }
+        }
     }
 
     private companion object {
@@ -302,5 +385,12 @@ class DownloadManager(
 
         /** How long a failed download's progress-ring badge stays visible (showing the failure) before the row disappears entirely. */
         const val FAILED_STATE_VISIBLE_MS = 2_500L
+
+        /** Longest a track title is allowed to run inside a toast message before being ellipsized — a real YouTube video title can run 50+ characters, which previously stretched the "Download failed: <title>" toast into an oversized banner. */
+        const val TOAST_TITLE_MAX_CHARS = 40
     }
+
+    /** Ellipsizes [this] to [TOAST_TITLE_MAX_CHARS] characters for use inside a short toast message, leaving long titles untouched everywhere else (list rows, notifications, etc.). */
+    private fun String.truncateForToast(): String =
+        if (length <= TOAST_TITLE_MAX_CHARS) this else take(TOAST_TITLE_MAX_CHARS - 1).trimEnd() + "\u2026"
 }

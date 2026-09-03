@@ -37,6 +37,10 @@ class SettingsViewModel(
     val audioQuality: StateFlow<AudioQuality?> = repository.audioQuality
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    /** Same null-until-loaded pattern as [audioQuality] above, for the same reason (avoids a flash of the wrong selected option on first render). */
+    val downloadQuality: StateFlow<AudioQuality?> = repository.downloadQuality
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     val autoplayEnabled: StateFlow<Boolean> = repository.autoplayEnabled
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
@@ -142,6 +146,10 @@ class SettingsViewModel(
 
     fun setAudioQuality(quality: AudioQuality) {
         viewModelScope.launch { repository.setAudioQuality(quality) }
+    }
+
+    fun setDownloadQuality(quality: AudioQuality) {
+        viewModelScope.launch { repository.setDownloadQuality(quality) }
     }
 
     fun setAutoplayEnabled(enabled: Boolean) {

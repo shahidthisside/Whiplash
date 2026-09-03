@@ -113,6 +113,26 @@ class LocalLibraryViewModel(
     private val _searchResults = MutableStateFlow<List<PlayableItem.LocalTrack>>(emptyList())
     val searchResults: StateFlow<List<PlayableItem.LocalTrack>> = _searchResults
 
+    /**
+     * Downloads-scope search results (Library > Downloads tab): a plain
+     * in-memory filter over [downloads] by title/artist/album, matching
+     * [LocalLibraryRepository.search]'s own matched fields. No debounce
+     * needed — unlike [repository.search] this never touches Room/disk,
+     * it just filters a list already held in memory.
+     */
+    val downloadSearchResults: StateFlow<List<PlayableItem.DownloadedTrack>> =
+        combine(downloads, _searchQuery) { tracks, query ->
+            if (query.isBlank()) {
+                tracks
+            } else {
+                tracks.filter { track ->
+                    track.title.contains(query, ignoreCase = true) ||
+                        track.artist.contains(query, ignoreCase = true) ||
+                        track.album?.contains(query, ignoreCase = true) == true
+                }
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     private var searchJob: Job? = null
 
     fun onSearchQueryChanged(query: String) {

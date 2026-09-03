@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -18,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import com.whiplash.music.ui.common.ToastController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -79,6 +81,7 @@ fun GlassToastHost(modifier: Modifier = Modifier) {
         if (currentMessage != null) {
             Box(
                 modifier = Modifier
+                    .widthIn(max = MAX_WIDTH)
                     .clip(RoundedCornerShape(WhiplashRadius.pill))
                     .background(WhiplashColors.surfaceElevated),
             ) {
@@ -97,3 +100,17 @@ fun GlassToastHost(modifier: Modifier = Modifier) {
 }
 
 private const val DURATION_MS = 2600L
+
+/**
+ * Caps how wide the toast pill can grow (section: fixing an oversized
+ * toast). Most toast messages in this app are short, fixed phrases
+ * ("Added to favorites", "Queue cleared"), so the pill never needed an
+ * explicit width cap before — but a per-track message that interpolates
+ * a real (sometimes very long) YouTube video title, like "Download
+ * failed: <title>", could otherwise stretch the pill almost the full
+ * screen width and make it look like an oversized banner rather than a
+ * normal toast. Capping the width forces long text to wrap within
+ * [maxLines] and ellipsize instead, matching how a stock system Toast
+ * or Snackbar caps its own width.
+ */
+private val MAX_WIDTH = 320.dp
