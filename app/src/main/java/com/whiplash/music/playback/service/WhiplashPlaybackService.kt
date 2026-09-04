@@ -10,6 +10,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.whiplash.music.WhiplashApplication
+import com.whiplash.music.playback.cache.ChunkedDataSourceFactory
 import com.whiplash.music.playback.cache.TogglableCacheDataSourceFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,7 +51,11 @@ class WhiplashPlaybackService : MediaSessionService() {
 
         val cachingFactory = TogglableCacheDataSourceFactory(
             cacheManager = app.audioCacheManager,
-            plainFactory = DefaultDataSource.Factory(this),
+            // Chunked even with disk caching off (see ChunkedDataSource) —
+            // the googlevideo throttling this avoids applies to the raw
+            // network fetch regardless of whether the bytes are also being
+            // written to disk.
+            plainFactory = ChunkedDataSourceFactory(DefaultDataSource.Factory(this)),
             isCacheEnabled = { audioCacheEnabled },
             resolveFreshUri = { cacheKey ->
                 // Narrow fallback only: fires when PlaybackController's
@@ -68,7 +73,7 @@ class WhiplashPlaybackService : MediaSessionService() {
                 // NewPipePlaybackProvider expects.
                 val videoId = cacheKey.substringAfter(':', missingDelimiterValue = cacheKey)
                 kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-                    val quality = app.settingsRepository.audioQuality.first()
+                    val quality = app.settingsRepository.effectiveAudioQuality()
                     runCatching { app.newPipePlaybackProvider.getStream(videoId, quality).streamUrl }.getOrNull()
                 }
             },
@@ -96,6 +101,20 @@ class WhiplashPlaybackService : MediaSessionService() {
 
         app.settingsRepository.audioCacheEnabled
             .onEach { audioCacheEnabled = it }
+            .launchIn(serviceScope)
+
+        // Skip Silence (adapted from BitChord's use of the same standard
+        // Media3 API): ExoPlayer's own setSkipSilenceEnabled wires in
+        // DefaultAudioSink's built-in SilenceSkippingAudioProcessor, no
+        // custom DSP or renderer factory needed. Applied immediately here
+        // and kept live for the whole player lifetime via this collector,
+        // matching audioCacheEnabled's own pattern above — flipping the
+        // Settings toggle mid-playback takes effect on the current track,
+        // not just the next one, since this is a direct property on the
+        // already-playing ExoPlayer instance rather than something baked
+        // in at construction time.
+        app.settingsRepository.skipSilenceEnabled
+            .onEach { player.setSkipSilenceEnabled(it) }
             .launchIn(serviceScope)
 
         // Wrap the raw player so the system (notification/lock screen/
