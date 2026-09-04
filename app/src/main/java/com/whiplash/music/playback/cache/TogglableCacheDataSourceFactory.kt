@@ -70,7 +70,25 @@ class TogglableCacheDataSourceFactory(
     // cheap (it's a small wrapper object, not the cache itself) and always
     // reflects whatever Cache instance is currently live.
     override fun createDataSource(): DataSource {
-        if (!isCacheEnabled()) return plainFactory.createDataSource()
+        if (!isCacheEnabled()) {
+            // Real gap this closes: this used to be a bare
+            // `return plainFactory.createDataSource()`. isCacheEnabled() is
+            // read fresh on every call, so if the user turned Audio Cache off
+            // *after* PlaybackController had already built a `cache://<key>`
+            // fast-path MediaItem (and ExoPlayer opens a new DataSource on
+            // every seek, buffer refill and network resume, not just once),
+            // that placeholder URI was handed to a plain DefaultDataSource —
+            // which has no idea what the "cache" scheme is. The very layer
+            // responsible for de-referencing the placeholder was the one
+            // being switched off, so the track died with a source error and,
+            // unlike every other branch, had no route back to a real URL.
+            // Resolving the placeholder here too means turning the cache off
+            // degrades cleanly to plain network playback, which is exactly
+            // what the user asked for by flipping the switch.
+            return ResolvingDataSource.Factory(plainFactory) { dataSpec ->
+                resolvePlaceholderForUncachedRead(dataSpec)
+            }.createDataSource()
+        }
 
         val cachingFactory = cacheManager.cachingDataSourceFactory()
         val resolvingFactory = ResolvingDataSource.Factory(cachingFactory) { dataSpec ->
@@ -115,6 +133,21 @@ class TogglableCacheDataSourceFactory(
             }
         }
         return resolvingFactory.createDataSource()
+    }
+
+    /**
+     * Turns a `cache://<key>` fast-path placeholder into a real, playable URL
+     * for a read that will not be served from the disk cache at all (the
+     * cache-disabled branch of [createDataSource]). Any non-placeholder
+     * request, or one with no stable cache key, passes through untouched.
+     */
+    private fun resolvePlaceholderForUncachedRead(
+        dataSpec: androidx.media3.datasource.DataSpec,
+    ): androidx.media3.datasource.DataSpec {
+        if (dataSpec.uri.scheme != PLACEHOLDER_SCHEME) return dataSpec
+        val cacheKey = dataSpec.key ?: return dataSpec
+        val freshUrl = resolveFreshUri(cacheKey) ?: return dataSpec
+        return dataSpec.withUri(android.net.Uri.parse(freshUrl))
     }
 
     companion object {
