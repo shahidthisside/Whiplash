@@ -68,6 +68,36 @@ class SettingsViewModel(
     val audioCacheEnabled: StateFlow<Boolean> = repository.audioCacheEnabled
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    /** Whether silent passages are sped through during playback (see SettingsRepository.skipSilenceEnabled doc). */
+    val skipSilenceEnabled: StateFlow<Boolean> = repository.skipSilenceEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setSkipSilenceEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setSkipSilenceEnabled(enabled) }
+    }
+
+    /** Whether Wi-Fi/cellular each have their own audio quality ceiling (see SettingsRepository.perNetworkQualityEnabled doc). */
+    val perNetworkQualityEnabled: StateFlow<Boolean> = repository.perNetworkQualityEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setPerNetworkQualityEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setPerNetworkQualityEnabled(enabled) }
+    }
+
+    val audioQualityWifi: StateFlow<AudioQuality> = repository.audioQualityWifi
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AudioQuality.AUTO)
+
+    fun setAudioQualityWifi(quality: AudioQuality) {
+        viewModelScope.launch { repository.setAudioQualityWifi(quality) }
+    }
+
+    val audioQualityCellular: StateFlow<AudioQuality> = repository.audioQualityCellular
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AudioQuality.MEDIUM)
+
+    fun setAudioQualityCellular(quality: AudioQuality) {
+        viewModelScope.launch { repository.setAudioQualityCellular(quality) }
+    }
+
     /** Epoch millis of the last successful manual backup, null if never backed up (see SettingsRepository doc). */
     val lastBackupTimeMs: StateFlow<Long?> = repository.lastBackupTimeMs
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)

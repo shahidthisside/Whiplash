@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -60,6 +62,9 @@ import androidx.compose.foundation.clickable
  *   affects every screen, since every Glass* component reads WhiplashColors
  *   reactively.
  */
+/** Request code for the Equalizer's startActivityForResult call — the result itself is never consulted, only the launch mechanism it enables (see the Equalizer SettingActionRow's onClick). */
+private const val EQUALIZER_REQUEST_CODE = 4242
+
 @androidx.compose.foundation.layout.ExperimentalLayoutApi
 @Composable
 fun SettingsScreen() {
@@ -76,6 +81,10 @@ fun SettingsScreen() {
     val themeVariant by viewModel.themeVariant.collectAsState()
     val seekBarStyle by viewModel.seekBarStyle.collectAsState()
     val audioCacheEnabled by viewModel.audioCacheEnabled.collectAsState()
+    val skipSilenceEnabled by viewModel.skipSilenceEnabled.collectAsState()
+    val perNetworkQualityEnabled by viewModel.perNetworkQualityEnabled.collectAsState()
+    val audioQualityWifi by viewModel.audioQualityWifi.collectAsState()
+    val audioQualityCellular by viewModel.audioQualityCellular.collectAsState()
     val cacheSizeBytes by viewModel.cacheSizeBytes.collectAsState()
     val lastBackupTimeMs by viewModel.lastBackupTimeMs.collectAsState()
     val backupResult by viewModel.backupResult.collectAsState()
@@ -186,6 +195,39 @@ fun SettingsScreen() {
 
                     Divider()
 
+                    // --- Per-network audio quality (adapted from BitChord) ---
+                    // Off by default so the single Audio Quality control above
+                    // keeps working exactly as before for anyone who never
+                    // opens this; turning it on lets Wi-Fi and cellular each
+                    // keep their own ceiling, so a data plan isn't spent at
+                    // the same bitrate used at home.
+                    SettingToggleRow(
+                        title = "Per-Network Audio Quality",
+                        subtitle = "Use separate quality ceilings for Wi-Fi and mobile data, instead of one setting for both.",
+                        checked = perNetworkQualityEnabled,
+                        onCheckedChange = viewModel::setPerNetworkQualityEnabled,
+                    )
+                    if (perNetworkQualityEnabled) {
+                        SettingRow(
+                            title = "Wi-Fi Quality",
+                            subtitle = "Used only when connected to Wi-Fi.",
+                        )
+                        AudioQualitySelector(
+                            selected = audioQualityWifi,
+                            onSelect = viewModel::setAudioQualityWifi,
+                        )
+                        SettingRow(
+                            title = "Cellular Quality",
+                            subtitle = "Used only on mobile data. Lower this to save your data plan.",
+                        )
+                        AudioQualitySelector(
+                            selected = audioQualityCellular,
+                            onSelect = viewModel::setAudioQualityCellular,
+                        )
+                    }
+
+                    Divider()
+
                     // --- Download Quality ---
                     // Deliberately separate from Audio Quality above: a
                     // download is a one-time, permanent fetch (storage +
@@ -228,6 +270,21 @@ fun SettingsScreen() {
 
                     Divider()
 
+                    // --- Skip Silence (adapted from BitChord) ---
+                    // Uses Media3's own built-in SilenceSkippingAudioProcessor
+                    // (no custom DSP) — genuinely shortens silent passages
+                    // during playback rather than just detecting them, so
+                    // this is off by default like every other setting that
+                    // audibly changes what's heard.
+                    SettingToggleRow(
+                        title = "Skip Silence",
+                        subtitle = "Automatically speed through quiet passages during playback.",
+                        checked = skipSilenceEnabled,
+                        onCheckedChange = viewModel::setSkipSilenceEnabled,
+                    )
+
+                    Divider()
+
                     // --- Crossfade / fade duration ---
                     SettingRow(
                         title = "Crossfade",
@@ -254,6 +311,48 @@ fun SettingsScreen() {
                         onSelect = { speed ->
                             viewModel.setPlaybackSpeed(speed)
                             app.playbackController.setPlaybackSpeed(speed)
+                        },
+                    )
+
+                    Divider()
+
+                    // --- System Equalizer (adapted from BitChord) ---
+                    // Hands off to whichever equalizer app is installed
+                    // (system EQ, Wavelet, Poweramp EQ, etc.) rather than
+                    // building custom DSP — the standard, documented way
+                    // for a media app to support this at all.
+                    SettingActionRow(
+                        title = "Equalizer",
+                        subtitle = "Open the system or a third-party equalizer app for this audio session.",
+                        onClick = onClick@{
+                            val sessionId = app.playbackController.audioSessionId()
+                            if (sessionId == androidx.media3.common.C.AUDIO_SESSION_ID_UNSET) {
+                                com.whiplash.music.ui.common.ToastController.show("Start playing a song first")
+                                return@onClick
+                            }
+                            val intent = android.content.Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
+                                putExtra(android.media.audiofx.AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
+                                putExtra(android.media.audiofx.AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+                                putExtra(android.media.audiofx.AudioEffect.EXTRA_CONTENT_TYPE, android.media.audiofx.AudioEffect.CONTENT_TYPE_MUSIC)
+                            }
+                            runCatching {
+                                // Some equalizer apps (confirmed on-device: AOSP's own
+                                // MusicFX) derive the calling package from the launching
+                                // Activity's own identity via startActivityForResult
+                                // rather than trusting EXTRA_PACKAGE_NAME alone — a plain
+                                // startActivity() left MusicFX logging "Package name is
+                                // null" even though the intent otherwise launched
+                                // correctly. Prefer startActivityForResult when this
+                                // context is (or wraps) a real Activity; fall back to
+                                // plain startActivity if it's some other Context type.
+                                val activity = context as? android.app.Activity
+                                    ?: (context as? android.content.ContextWrapper)?.baseContext as? android.app.Activity
+                                if (activity != null) {
+                                    activity.startActivityForResult(intent, EQUALIZER_REQUEST_CODE)
+                                } else {
+                                    context.startActivity(intent)
+                                }
+                            }.onFailure { com.whiplash.music.ui.common.ToastController.show("No equalizer app found") }
                         },
                     )
                 }
@@ -474,7 +573,20 @@ private fun GithubFooter() {
                     android.content.Intent.ACTION_VIEW,
                     android.net.Uri.parse("https://github.com/shahidthisside"),
                 )
-                context.startActivity(intent)
+                // Real, reproduced crash this fixes: this was a bare
+                // context.startActivity(intent), which throws
+                // ActivityNotFoundException — killing the whole app process —
+                // on any device or profile with nothing registered to handle an
+                // https VIEW intent (a bare AOSP build with no browser, a
+                // managed/enterprise profile, or simply a user who disabled
+                // their browser). Confirmed on-device: disabling Chrome and
+                // tapping this footer produced
+                // "FATAL EXCEPTION: main / android.content.ActivityNotFoundException"
+                // and "Process com.whiplash.music has died". The app already
+                // guards exactly this pattern elsewhere (the equalizer intent
+                // and the share sheet); this one call site was missed.
+                runCatching { context.startActivity(intent) }
+                    .onFailure { com.whiplash.music.ui.common.ToastController.show("No app available to open links") }
             },
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -512,6 +624,7 @@ private fun SeekBarStylePicker(selected: com.whiplash.music.ui.theme.SeekBarStyl
                         shape = RoundedCornerShape(WhiplashRadius.medium),
                     )
                     .clickable(role = androidx.compose.ui.semantics.Role.Button) { onSelect(style) }
+                    .semantics { this.selected = isSelected }
                     .padding(GlassTokens.spaceMd),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
@@ -638,6 +751,29 @@ private fun SettingRow(title: String, subtitle: String) {
     }
 }
 
+/** A tappable settings row with no toggle/selector — just a title/subtitle that launches [onClick] (section 57: accessible 48dp+ touch target via the Row's own padding). */
+@Composable
+private fun SettingActionRow(title: String, subtitle: String, onClick: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .padding(vertical = GlassTokens.spaceSm),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.titleSmall, color = WhiplashColors.textPrimary)
+            Spacer(Modifier.height(2.dp))
+            Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = WhiplashColors.textSecondary)
+        }
+    }
+}
+
 @Composable
 private fun SettingToggleRow(
     title: String,
@@ -656,7 +792,7 @@ private fun SettingToggleRow(
             Spacer(Modifier.height(2.dp))
             Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = WhiplashColors.textSecondary)
         }
-        Spacer(Modifier.height(GlassTokens.spaceSm))
+        Spacer(Modifier.width(GlassTokens.spaceSm))
         Switch(
             checked = checked,
             onCheckedChange = { newValue ->
@@ -718,6 +854,7 @@ private fun AudioQualitySelector(selected: AudioQuality, onSelect: (AudioQuality
                     .weight(1f)
                     .clip(RoundedCornerShape(WhiplashRadius.pill))
                     .background(bg)
+                    .semantics { this.selected = isSelected }
                     .clickable(role = androidx.compose.ui.semantics.Role.Button) { onSelect(quality) }
                     .padding(vertical = GlassTokens.spaceSm),
                 horizontalArrangement = Arrangement.Center,
@@ -756,6 +893,7 @@ private fun CrossfadeSelector(selectedMs: Int, onSelect: (Int) -> Unit) {
                     .clip(RoundedCornerShape(WhiplashRadius.pill))
                     .background(bg)
                     .clickable(role = androidx.compose.ui.semantics.Role.Button) { onSelect(ms) }
+                    .semantics { this.selected = isSelected }
                     .padding(vertical = GlassTokens.spaceSm),
                 horizontalArrangement = Arrangement.Center,
             ) {
@@ -797,6 +935,7 @@ private fun PlaybackSpeedSelector(selected: Float, onSelect: (Float) -> Unit) {
                     .clip(RoundedCornerShape(WhiplashRadius.pill))
                     .background(bg)
                     .clickable(role = androidx.compose.ui.semantics.Role.Button) { onSelect(speed) }
+                    .semantics { this.selected = isSelected }
                     .padding(vertical = GlassTokens.spaceSm),
                 horizontalArrangement = Arrangement.Center,
             ) {
@@ -830,6 +969,7 @@ private fun ThemeSwatch(variant: ThemeVariant, isSelected: Boolean, onClick: () 
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+            .semantics { selected = isSelected }
             .padding(GlassTokens.spaceXs),
     ) {
         Row(
