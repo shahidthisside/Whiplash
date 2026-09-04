@@ -3,6 +3,7 @@ package com.whiplash.music.playback.controller
 
 import android.content.ComponentName
 import android.content.Context
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -142,6 +143,21 @@ class PlaybackController(
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             _state.update { it.copy(isBuffering = playbackState == Player.STATE_BUFFERING) }
+            // Reaching READY means this track is genuinely playing, so re-arm
+            // its single automatic error re-resolve (see [handlePlayerError]).
+            // Without this the budget was spent per *track* rather than per
+            // *failure*: a stream URL that expired, self-healed, then played
+            // fine for another half hour could not self-heal a second time
+            // when the replacement URL also expired — and googlevideo URLs are
+            // time-limited, so one long listening session genuinely outlives
+            // more than one of them. Clearing the flag here also clears any
+            // error surfaced for a previous attempt at this same track.
+            if (playbackState == Player.STATE_READY) {
+                errorRecoveryAttemptedForItemId = null
+                if (_state.value.playbackError != null) {
+                    _state.update { it.copy(playbackError = null) }
+                }
+            }
             // Handle natural end-of-track directly and immediately here
             // (section 13 autoplay), rather than relying solely on the
             // 500ms position-poll loop in updatePositionTicker: that loop
@@ -162,6 +178,109 @@ class PlaybackController(
 
         override fun onEvents(player: Player, events: Player.Events) {
             refreshPositionAndDuration()
+        }
+
+        /**
+         * Real, silent-failure bug this fixes: this listener previously had
+         * NO onPlayerError override at all, anywhere in the app (and
+         * [PlaybackState.playbackError] was only ever set non-null from the
+         * *stream-resolution* failure branch in [playIndex] — never from an
+         * actual player failure). ExoPlayer reports every fatal playback
+         * failure exclusively through this callback and then drops to
+         * STATE_IDLE, which is NOT STATE_ENDED, so [handleTrackEnded] never
+         * ran either. The result was that any player-level failure stopped
+         * the music dead with zero feedback: no error, no toast, no retry,
+         * no advance — the UI just sat there looking paused forever.
+         *
+         * The most likely trigger in normal use is an expired stream URL.
+         * googlevideo URLs are time-limited, which this app already knew —
+         * [com.whiplash.music.playback.provider.ResolvedStream.expiresAtEpochMs]
+         * was being computed on every resolve — but that field had zero
+         * readers, so nothing ever acted on it. A URL resolved a while ago
+         * (prefetched into [prefetched] for gapless, or simply a track left
+         * paused for a long time) comes back HTTP 403 and playback died
+         * silently.
+         *
+         * Recovery: a YouTube track gets exactly ONE automatic re-resolve
+         * with a freshly fetched URL, resuming at the position it failed at,
+         * which makes an expired URL self-heal invisibly. Anything else — a
+         * second consecutive failure for the same track, a local file, or a
+         * downloaded file whose bytes are gone — surfaces a real, visible
+         * error instead of failing silently. Bounded to one attempt on
+         * purpose so a genuinely dead track can never spin in a retry loop.
+         */
+        override fun onPlayerError(error: PlaybackException) {
+            handlePlayerError(error)
+        }
+    }
+
+    /**
+     * Tracks which item we've already burned our single automatic
+     * re-resolve on, so a permanently broken track fails visibly on its
+     * second error rather than looping. Reset in [startMediaItem] whenever
+     * a genuinely new playback attempt begins.
+     */
+    private var errorRecoveryAttemptedForItemId: String? = null
+
+    private fun handlePlayerError(error: PlaybackException) {
+        val current = _state.value.currentItem
+        // Clamped against the track's own duration: the raw currentPosition is
+        // read at error time, and if the error for an outgoing track lands just
+        // after the user already skipped, an unclamped value could seek the new
+        // track past its end. A position at or beyond the end is treated as
+        // "restart from the beginning" rather than an invalid seek.
+        val rawPositionMs = (controller?.currentPosition ?: 0L).coerceAtLeast(0L)
+        val durationMs = current?.durationMs ?: 0L
+        val failedPositionMs = if (durationMs > 0L && rawPositionMs >= durationMs) 0L else rawPositionMs
+        val track = current as? PlayableItem.YoutubeTrack
+
+        // Not recoverable by re-resolving: local files and downloaded files
+        // point at real paths on disk, so an error there means the file is
+        // missing/corrupt, and a fresh network resolve wouldn't be what the
+        // user asked to play anyway. A repeat failure for the same track is
+        // also treated as genuinely broken.
+        if (track == null || errorRecoveryAttemptedForItemId == track.id) {
+            surfacePlayerError(current, error)
+            return
+        }
+
+        errorRecoveryAttemptedForItemId = track.id
+        // A stale prefetched URL for this same item would just fail again.
+        if (prefetched?.forItemId == track.id) prefetched = null
+
+        scope.launch {
+            val quality = settingsRepository.effectiveAudioQuality()
+            val result = try {
+                kotlinx.coroutines.withTimeout(RESOLVE_STREAM_TIMEOUT_MS) {
+                    playbackManager.resolveStream(track, quality)
+                }
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                null
+            }
+            // The user may have skipped/stopped while we were re-resolving;
+            // never yank a different track out from under them.
+            if (_state.value.currentItem?.id != track.id) return@launch
+            val fresh = (result as? FallbackResult.Success)?.value
+            if (fresh == null) {
+                surfacePlayerError(track, error)
+                return@launch
+            }
+            startMediaItem(track, resolvedStreamUrl = fresh.streamUrl, resumeAtMs = failedPositionMs, isErrorRecovery = true)
+        }
+    }
+
+    private fun surfacePlayerError(item: PlayableItem?, error: PlaybackException) {
+        val isNetwork = error.errorCode in NETWORK_ERROR_CODES
+        _state.update {
+            it.copy(
+                isResolvingStream = false,
+                isBuffering = false,
+                playbackError = PlaybackError(
+                    itemTitle = item?.title ?: "This track",
+                    message = if (isNetwork) "Couldn't stream this track. Check your connection." else "This track couldn't be played.",
+                    isNetworkFailure = isNetwork,
+                ),
+            )
         }
     }
 
@@ -378,7 +497,11 @@ class PlaybackController(
             )
         }
 
-        scope.launch { libraryRepository.recordPlayed(item) }
+        // History is deliberately NOT recorded here any more — see
+        // [startMediaItem], which records it only once playback actually
+        // starts, and only after the track's metadata has been cached.
+        // Recording at this point caused two separate real bugs; both are
+        // described in detail at that call site.
 
         // Resolve high-res artwork for BOTH neighbors as soon as this track
         // starts — not just in the last few seconds before it ends (that
@@ -467,7 +590,7 @@ class PlaybackController(
                     // on top of it.
                     maybeExtendQueueWithRecommendations(item)
                     scope.launch {
-                        val quality = settingsRepository.audioQuality.first()
+                        val quality = settingsRepository.effectiveAudioQuality()
                         libraryRepository.cacheSong(item)
                         // Wrapped in withTimeout: playbackManager.resolveStream()
                         // (and the NewPipeExtractor calls under it) has no
@@ -581,7 +704,7 @@ class PlaybackController(
                     // shouldn't bring back the artwork-blink bug as a
                     // side effect.
                     if (!settingsRepository.gaplessEnabled.first()) return@launch
-                    val quality = settingsRepository.audioQuality.first()
+                    val quality = settingsRepository.effectiveAudioQuality()
                     // Same withTimeout guard as the main resolve path in
                     // playIndex() — without it, a hung upstream here would
                     // leak this prefetch coroutine forever rather than
@@ -740,6 +863,7 @@ class PlaybackController(
                 if (toAdd.isEmpty()) return@launch
 
                 queue.addAll(toAdd)
+                trimConsumedQueueHistory()
                 _state.update { it.copy(queue = queue.toList()) }
             } catch (_: Exception) {
                 // Autoplay extension is a nice-to-have; a failure here must
@@ -769,14 +893,90 @@ class PlaybackController(
         return updated
     }
 
-    private fun startMediaItem(item: PlayableItem, resolvedStreamUrl: String?) {
+    /**
+     * Keeps the queue from growing without limit during a long unattended
+     * autoplay session.
+     *
+     * Real growth this bounds: autoplay re-fires every time the current track
+     * becomes the last queue item and appends up to
+     * [MAX_AUTOPLAY_ADDITIONS] more each time, with nothing ever removing
+     * anything — so hours of continuous listening pushed the queue into the
+     * hundreds or thousands, and every extension also paid an O(n)
+     * `queue.toList()` copy to publish it. Only already-played entries well
+     * behind the current track are dropped, so the user keeps a generous
+     * backward history for Previous and the upcoming queue is never touched.
+     * [currentIndex] is shifted by exactly the number removed so it keeps
+     * pointing at the same track.
+     */
+    private fun trimConsumedQueueHistory() {
+        if (queue.size <= MAX_QUEUE_ENTRIES) return
+        val keepBehind = MAX_PLAYED_HISTORY_IN_QUEUE
+        val removable = (currentIndex - keepBehind).coerceAtLeast(0)
+        if (removable <= 0) return
+        repeat(removable) { queue.removeAt(0) }
+        currentIndex -= removable
+    }
+
+    private fun startMediaItem(
+        item: PlayableItem,
+        resolvedStreamUrl: String?,
+        resumeAtMs: Long = 0L,
+        isErrorRecovery: Boolean = false,
+    ) {
         handledEnded = false
+        // Any genuinely new playback attempt re-arms the single automatic
+        // error re-resolve (see [handlePlayerError]); a recovery restart
+        // deliberately does not, so one bad track can't retry forever.
+        if (!isErrorRecovery) errorRecoveryAttemptedForItemId = null
         val mediaItem = PlayableItemMediaItemMapper.toMediaItem(item, resolvedStreamUrl)
         controller?.apply {
-            setMediaItem(mediaItem)
+            if (resumeAtMs > 0L) setMediaItem(mediaItem, resumeAtMs) else setMediaItem(mediaItem)
             prepare()
             play()
         }
+
+        // Two real, separately-reported bugs are fixed by recording the play
+        // HERE, sequentially, rather than at the top of [playIndex]:
+        //
+        // 1. "Couldn't play this song, but it still shows up in my history and
+        //    twice in Speed dial." recordPlayed used to fire the instant a
+        //    track was tapped, before its stream had been resolved — so a
+        //    track YouTube reports as UNPLAYABLE (a deleted or region-blocked
+        //    video still listed in an imported playlist) was written into
+        //    history despite never playing a single second. Because Speed dial
+        //    is built from history and keyed by video id, a song that exists
+        //    on YouTube as two different uploads then showed up as two tiles:
+        //    one playable, one permanently dead. This function is only ever
+        //    reached once a track genuinely starts, and is never reached from
+        //    the resolve-failure branch, so an unplayable track can no longer
+        //    pollute history at all.
+        //
+        // 2. "On a fresh install the very first song I play doesn't appear in
+        //    History or Speed dial until I play a second song or restart the
+        //    app." This was an ordering race. recordPlayed (which writes the
+        //    `history` row) and cacheSong (which writes the `songs` metadata
+        //    row) used to run as two INDEPENDENT coroutines with no ordering
+        //    guarantee. LibraryRepository.flatMapResolve resolves a history
+        //    reference against the `songs` table with a one-shot read and
+        //    silently drops anything it can't resolve (mapNotNull), and
+        //    observeRecentlyPlayed only re-emits when the `history` table
+        //    changes — never when `songs` is written. So if the history row
+        //    landed first, the UI resolved it to nothing and had no reason to
+        //    ever recompute. On a warm install the metadata was usually
+        //    already cached from a previous session, which is exactly why this
+        //    only reproduced on a fresh install or after clearing data.
+        //    Caching the metadata and THEN recording the play, in that order
+        //    inside one coroutine, guarantees the first emission can resolve.
+        //
+        // Skipped for an error-recovery restart so a self-healed expired URL
+        // doesn't count as a second play of the same song.
+        if (!isErrorRecovery) {
+            scope.launch {
+                if (item is PlayableItem.YoutubeTrack) libraryRepository.cacheSong(item)
+                libraryRepository.recordPlayed(item)
+            }
+        }
+
         scope.launch {
             val speed = settingsRepository.playbackSpeed.first()
             if (speed != 1.0f) controller?.setPlaybackParameters(androidx.media3.common.PlaybackParameters(speed))
@@ -923,6 +1123,18 @@ class PlaybackController(
      * single-item timeline can never express this (see that class's doc).
      */
     fun hasNext(): Boolean = nextIndex() != null
+
+    /**
+     * The live ExoPlayer's audio session id (adapted from BitChord's system
+     * equalizer integration) — the same id [android.media.audiofx.Equalizer]
+     * and every other system/third-party equalizer app expects when told
+     * which app's audio to affect via
+     * [android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL].
+     * [androidx.media3.common.C.AUDIO_SESSION_ID_UNSET] before the controller
+     * has connected or while nothing has ever been prepared — callers should
+     * treat that as "no equalizer session yet" rather than a real id.
+     */
+    fun audioSessionId(): Int = controller?.audioSessionId ?: androidx.media3.common.C.AUDIO_SESSION_ID_UNSET
 
     /** Whether [seekToPrevious] would actually do anything right now (see [hasNext]). */
     fun hasPrevious(): Boolean = previousIndex() != null
@@ -1122,8 +1334,36 @@ class PlaybackController(
     }
 
     private companion object {
+        /**
+         * [PlaybackException] error codes that mean "the network/stream was
+         * the problem" rather than "this media is broken", used by
+         * [surfacePlayerError] to pick a message the user can actually act
+         * on (and to set [PlaybackError.isNetworkFailure], which the UI uses
+         * to offer a retry).
+         */
+        val NETWORK_ERROR_CODES = setOf(
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+            PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
+            PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+            PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
+        )
+
+
         /** Caps how many related tracks autoplay appends at once, to avoid an unbounded queue (section 22: "do not unexpectedly add enormous queues"). */
         const val MAX_AUTOPLAY_ADDITIONS = 10
+
+        /**
+         * Queue length past which [trimConsumedQueueHistory] starts dropping
+         * already-played entries. Autoplay appends indefinitely, so without a
+         * ceiling a long session grows the queue (and the O(n) state copy
+         * published on every extension) without limit.
+         */
+        const val MAX_QUEUE_ENTRIES = 300
+
+        /** How many already-played tracks stay reachable behind the current one when trimming. */
+        const val MAX_PLAYED_HISTORY_IN_QUEUE = 50
 
         /**
          * Caps how many getPlayerInfo() category-checks run at once during
