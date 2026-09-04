@@ -30,7 +30,21 @@ class LyricsViewModel(
     private val lrcLibProvider: LrcLibProvider,
 ) : ViewModel() {
 
-    private val cache = mutableMapOf<String, LyricsResult>()
+    /**
+     * Already-fetched lyrics, so re-opening the sheet for a track doesn't
+     * re-hit the network.
+     *
+     * Bounded by an LRU. This used to be a plain [mutableMapOf] that was only
+     * ever written to and never trimmed, while this ViewModel lives for the
+     * whole Activity lifetime — so a long session across hundreds of distinct
+     * tracks retained a fully-parsed synced-lyrics line list for every one of
+     * them, growing without limit. [MAX_CACHED_TRACKS] keeps the benefit for
+     * realistic back-and-forth listening while giving the map a hard ceiling.
+     */
+    private val cache = object : LinkedHashMap<String, LyricsResult>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, LyricsResult>?): Boolean =
+            size > MAX_CACHED_TRACKS
+    }
 
     val lyrics: StateFlow<LyricsResult?> = controller.state
         .map { it.currentItem }
@@ -56,4 +70,9 @@ class LyricsViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     private fun trackKey(item: PlayableItem?): String? = item?.let { "${it.source}:${it.id}" }
+
+    private companion object {
+        /** Hard ceiling on how many tracks' lyrics stay in memory — see [cache]. */
+        const val MAX_CACHED_TRACKS = 50
+    }
 }
