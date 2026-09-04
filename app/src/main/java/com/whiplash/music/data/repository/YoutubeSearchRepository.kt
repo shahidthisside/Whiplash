@@ -80,6 +80,19 @@ class YoutubeSearchRepository(
                 ),
             )
         }.onFailure { Log.w(TAG, "Failed to cache search results for '$normalized'", it) }
+
+        // Real storage leak this closes: the cache TTL was only ever applied
+        // on the *read* side (cachedResults returns null past maxAge) — the
+        // stale row itself was never deleted, and SearchCacheDao.pruneOlderThan
+        // had no callers anywhere in the app. Every distinct query a user ever
+        // typed therefore left a permanent row holding a full serialized JSON
+        // result payload, and Settings > "Clear cache" only clears the audio
+        // cache, so nothing ever reclaimed it. Pruning on write keeps the
+        // table bounded to genuinely live entries without changing what any
+        // read returns.
+        runCatching {
+            searchCacheDao.pruneOlderThan(System.currentTimeMillis() - DEFAULT_CACHE_MAX_AGE_MS)
+        }.onFailure { Log.w(TAG, "Failed to prune expired search cache entries", it) }
         return results
     }
 
