@@ -2,6 +2,7 @@ package com.whiplash.music.data.backup
 
 import android.content.Context
 import android.net.Uri
+import androidx.room.withTransaction
 import android.util.Log
 import com.whiplash.music.data.local.WhiplashDatabase
 import com.whiplash.music.data.local.entity.DownloadEntity
@@ -277,6 +278,21 @@ class BackupManager(
                         put("gaplessEnabled", settingsRepository.gaplessEnabled.first())
                         put("playbackSpeed", settingsRepository.playbackSpeed.first().toDouble())
                         put("audioCacheEnabled", settingsRepository.audioCacheEnabled.first())
+                        // Real silent data-loss gap this closes: these four
+                        // real, user-facing settings were simply absent from
+                        // the SETTINGS payload (and from the restore side),
+                        // so a user who had enabled Skip Silence or
+                        // Per-Network Quality — including their separate
+                        // Wi-Fi/cellular quality tiers — silently lost those
+                        // choices on any reinstall-and-restore, with the
+                        // backup reporting complete success. Added purely
+                        // additively: an older backup file that lacks these
+                        // keys still restores exactly as before, because the
+                        // restore side reads each one only if present.
+                        put("skipSilenceEnabled", settingsRepository.skipSilenceEnabled.first())
+                        put("perNetworkQualityEnabled", settingsRepository.perNetworkQualityEnabled.first())
+                        put("audioQualityWifi", settingsRepository.audioQualityWifi.first().name)
+                        put("audioQualityCellular", settingsRepository.audioQualityCellular.first().name)
                     }
                 )
             }
@@ -357,117 +373,31 @@ class BackupManager(
             } ?: return@withContext false
             val json = JSONObject(root)
 
-            // Songs first — every category's own references depend on
-            // these rows already existing to resolve correctly.
-            json.optJSONArray("songs")?.let { songs ->
-                val entities = (0 until songs.length()).map { i ->
-                    val s = songs.getJSONObject(i)
-                    SongEntity(
-                        id = s.getString("id"),
-                        title = s.getString("title"),
-                        artist = s.getString("artist"),
-                        album = s.optString("album").takeIf { s.has("album") && !s.isNull("album") },
-                        artworkUrl = s.optString("artworkUrl").takeIf { s.has("artworkUrl") && !s.isNull("artworkUrl") },
-                        durationMs = s.getLong("durationMs"),
-                        albumId = s.optString("albumId").takeIf { s.has("albumId") && !s.isNull("albumId") },
-                        artistId = s.optString("artistId").takeIf { s.has("artistId") && !s.isNull("artistId") },
-                        isExplicit = s.optBoolean("isExplicit", false),
-                        cachedAtEpochMs = s.getLong("cachedAtEpochMs"),
-                    )
-                }
-                if (entities.isNotEmpty()) database.songDao().upsertAll(entities)
+            // Real gap this closes: SELECTIVE_FORMAT_VERSION was written into
+            // every backup but never read back, so a file produced by a
+            // *newer* app version (or a corrupted/foreign file that merely
+            // happens to contain the manifest entry) was parsed best-effort.
+            // Anything it couldn't understand was silently skipped, or threw
+            // partway through and aborted a restore that had already mutated
+            // the database. Refusing an unsupported version outright is the
+            // honest outcome — the caller surfaces a failed restore rather
+            // than importing something half-understood.
+            val fileVersion = json.optInt("formatVersion", 1)
+            if (fileVersion > SELECTIVE_FORMAT_VERSION) {
+                Log.w(TAG, "Refusing backup with unsupported formatVersion=$fileVersion (this build supports up to $SELECTIVE_FORMAT_VERSION)")
+                return@withContext false
             }
 
-            json.optJSONArray(BackupCategory.PLAYLISTS.name)?.let { playlists ->
-                for (i in 0 until playlists.length()) {
-                    val p = playlists.getJSONObject(i)
-                    // A fresh playlist row (never reusing the backed-up
-                    // id) — the id is auto-generated and restoring it
-                    // verbatim risks colliding with an unrelated existing
-                    // playlist that happens to already occupy that id
-                    // (e.g. after restoring the same backup twice, or on
-                    // a device that already has other playlists). The
-                    // *name* is what a user actually recognizes their
-                    // playlist by, not its internal id.
-                    val newId = database.playlistDao().insert(
-                        PlaylistEntity(
-                            name = p.getString("name"),
-                            description = p.optString("description").takeIf { p.has("description") && !p.isNull("description") },
-                            artworkUrl = p.optString("artworkUrl").takeIf { p.has("artworkUrl") && !p.isNull("artworkUrl") },
-                            createdAtEpochMs = p.getLong("createdAtEpochMs"),
-                            updatedAtEpochMs = p.getLong("updatedAtEpochMs"),
-                        )
-                    )
-                    val tracks = p.optJSONArray("tracks") ?: JSONArray()
-                    for (j in 0 until tracks.length()) {
-                        val t = tracks.getJSONObject(j)
-                        database.playlistDao().addTrack(
-                            playlistId = newId,
-                            trackId = t.getString("trackId"),
-                            source = MediaSource.valueOf(t.getString("source")),
-                            addedAtEpochMs = t.getLong("addedAtEpochMs"),
-                        )
-                    }
-                }
-            }
-
-            json.optJSONArray(BackupCategory.FAVORITES.name)?.let { favorites ->
-                for (i in 0 until favorites.length()) {
-                    val f = favorites.getJSONObject(i)
-                    database.favoriteDao().add(
-                        FavoriteEntity(
-                            trackId = f.getString("trackId"),
-                            source = MediaSource.valueOf(f.getString("source")),
-                            addedAtEpochMs = f.getLong("addedAtEpochMs"),
-                        )
-                    )
-                }
-            }
-
-            json.optJSONArray(BackupCategory.HISTORY.name)?.let { history ->
-                for (i in 0 until history.length()) {
-                    val h = history.getJSONObject(i)
-                    database.historyDao().insert(
-                        HistoryEntity(
-                            trackId = h.getString("trackId"),
-                            source = MediaSource.valueOf(h.getString("source")),
-                            playedAtEpochMs = h.getLong("playedAtEpochMs"),
-                        )
-                    )
-                }
-            }
-
-            json.optJSONArray(BackupCategory.PINNED.name)?.let { pinned ->
-                for (i in 0 until pinned.length()) {
-                    val p = pinned.getJSONObject(i)
-                    database.pinnedDao().add(
-                        PinnedEntity(
-                            trackId = p.getString("trackId"),
-                            source = MediaSource.valueOf(p.getString("source")),
-                            pinnedAtEpochMs = p.getLong("pinnedAtEpochMs"),
-                        )
-                    )
-                }
-            }
-
-            json.optJSONArray(BackupCategory.DOWNLOADS.name)?.let { downloads ->
-                for (i in 0 until downloads.length()) {
-                    val d = downloads.getJSONObject(i)
-                    database.downloadDao().upsert(
-                        DownloadEntity(
-                            id = d.getString("id"),
-                            title = d.getString("title"),
-                            artist = d.getString("artist"),
-                            album = d.optString("album").takeIf { d.has("album") && !d.isNull("album") },
-                            artworkPath = d.optString("artworkPath").takeIf { d.has("artworkPath") && !d.isNull("artworkPath") },
-                            durationMs = d.getLong("durationMs"),
-                            filePath = d.getString("filePath"),
-                            fileSizeBytes = d.getLong("fileSizeBytes"),
-                            status = DownloadStatus.valueOf(d.getString("status")),
-                            downloadedAtEpochMs = d.getLong("downloadedAtEpochMs"),
-                        )
-                    )
-                }
+            // Real gap this closes: the whole sequence below was a bare run of
+            // independent DB writes. A single malformed row partway through
+            // (a bad enum name, a missing required key) threw, the outer
+            // runCatching returned false — and the categories already imported
+            // stayed imported. The user saw "restore failed" while their
+            // library had in fact been half-overwritten, with no way to tell
+            // how far it got. Running it inside one transaction makes the
+            // database side genuinely all-or-nothing.
+            database.withTransaction {
+                restoreDatabaseCategories(json)
             }
 
             json.optJSONArray(BackupCategory.SETTINGS.name)?.let { settingsArray ->
@@ -482,6 +412,23 @@ class BackupManager(
                     runCatching { settingsRepository.setGaplessEnabled(s.getBoolean("gaplessEnabled")) }
                     runCatching { settingsRepository.setPlaybackSpeed(s.getDouble("playbackSpeed").toFloat()) }
                     runCatching { settingsRepository.setAudioCacheEnabled(s.getBoolean("audioCacheEnabled")) }
+                    // Restore side of the four settings that used to be
+                    // omitted from backups entirely (see the backup payload's
+                    // own comment). Each is guarded on the key being present
+                    // so a backup taken before this fix restores unchanged
+                    // rather than resetting these to their defaults.
+                    if (s.has("skipSilenceEnabled")) {
+                        runCatching { settingsRepository.setSkipSilenceEnabled(s.getBoolean("skipSilenceEnabled")) }
+                    }
+                    if (s.has("perNetworkQualityEnabled")) {
+                        runCatching { settingsRepository.setPerNetworkQualityEnabled(s.getBoolean("perNetworkQualityEnabled")) }
+                    }
+                    if (s.has("audioQualityWifi")) {
+                        runCatching { settingsRepository.setAudioQualityWifi(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("audioQualityWifi"))) }
+                    }
+                    if (s.has("audioQualityCellular")) {
+                        runCatching { settingsRepository.setAudioQualityCellular(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("audioQualityCellular"))) }
+                    }
                 }
             }
 
@@ -553,6 +500,141 @@ class BackupManager(
             } ?: return@withContext false
             restoredAnything
         }.onFailure { Log.w(TAG, "restore() failed", it) }.getOrDefault(false)
+    }
+
+
+    /**
+     * The database half of [restoreSelective], extracted so it can run
+     * inside a single Room transaction (see its call site). Settings are
+     * deliberately NOT restored here — they live in DataStore, not the
+     * database, so they cannot participate in a SQLite transaction.
+     */
+    private suspend fun restoreDatabaseCategories(json: JSONObject) {
+        // Songs first — every category's own references depend on
+        // these rows already existing to resolve correctly.
+        json.optJSONArray("songs")?.let { songs ->
+            val entities = (0 until songs.length()).map { i ->
+                val s = songs.getJSONObject(i)
+                SongEntity(
+                    id = s.getString("id"),
+                    title = s.getString("title"),
+                    artist = s.getString("artist"),
+                    album = s.optString("album").takeIf { s.has("album") && !s.isNull("album") },
+                    artworkUrl = s.optString("artworkUrl").takeIf { s.has("artworkUrl") && !s.isNull("artworkUrl") },
+                    durationMs = s.getLong("durationMs"),
+                    albumId = s.optString("albumId").takeIf { s.has("albumId") && !s.isNull("albumId") },
+                    artistId = s.optString("artistId").takeIf { s.has("artistId") && !s.isNull("artistId") },
+                    isExplicit = s.optBoolean("isExplicit", false),
+                    cachedAtEpochMs = s.getLong("cachedAtEpochMs"),
+                )
+            }
+            if (entities.isNotEmpty()) database.songDao().upsertAll(entities)
+        }
+
+        json.optJSONArray(BackupCategory.PLAYLISTS.name)?.let { playlists ->
+            for (i in 0 until playlists.length()) {
+                val p = playlists.getJSONObject(i)
+                // A fresh playlist row (never reusing the backed-up
+                // id) — the id is auto-generated and restoring it
+                // verbatim risks colliding with an unrelated existing
+                // playlist that happens to already occupy that id
+                // (e.g. after restoring the same backup twice, or on
+                // a device that already has other playlists). The
+                // *name* is what a user actually recognizes their
+                // playlist by, not its internal id.
+                val newId = database.playlistDao().insert(
+                    PlaylistEntity(
+                        name = p.getString("name"),
+                        description = p.optString("description").takeIf { p.has("description") && !p.isNull("description") },
+                        artworkUrl = p.optString("artworkUrl").takeIf { p.has("artworkUrl") && !p.isNull("artworkUrl") },
+                        createdAtEpochMs = p.getLong("createdAtEpochMs"),
+                        updatedAtEpochMs = p.getLong("updatedAtEpochMs"),
+                    )
+                )
+                val tracks = p.optJSONArray("tracks") ?: JSONArray()
+                for (j in 0 until tracks.length()) {
+                    val t = tracks.getJSONObject(j)
+                    database.playlistDao().addTrack(
+                        playlistId = newId,
+                        trackId = t.getString("trackId"),
+                        source = MediaSource.valueOf(t.getString("source")),
+                        addedAtEpochMs = t.getLong("addedAtEpochMs"),
+                    )
+                }
+            }
+        }
+
+        json.optJSONArray(BackupCategory.FAVORITES.name)?.let { favorites ->
+            for (i in 0 until favorites.length()) {
+                val f = favorites.getJSONObject(i)
+                database.favoriteDao().add(
+                    FavoriteEntity(
+                        trackId = f.getString("trackId"),
+                        source = MediaSource.valueOf(f.getString("source")),
+                        addedAtEpochMs = f.getLong("addedAtEpochMs"),
+                    )
+                )
+            }
+        }
+
+        json.optJSONArray(BackupCategory.HISTORY.name)?.let { history ->
+            for (i in 0 until history.length()) {
+                val h = history.getJSONObject(i)
+                database.historyDao().insert(
+                    HistoryEntity(
+                        trackId = h.getString("trackId"),
+                        source = MediaSource.valueOf(h.getString("source")),
+                        playedAtEpochMs = h.getLong("playedAtEpochMs"),
+                    )
+                )
+            }
+        }
+
+        json.optJSONArray(BackupCategory.PINNED.name)?.let { pinned ->
+            for (i in 0 until pinned.length()) {
+                val p = pinned.getJSONObject(i)
+                database.pinnedDao().add(
+                    PinnedEntity(
+                        trackId = p.getString("trackId"),
+                        source = MediaSource.valueOf(p.getString("source")),
+                        pinnedAtEpochMs = p.getLong("pinnedAtEpochMs"),
+                    )
+                )
+            }
+        }
+
+        json.optJSONArray(BackupCategory.DOWNLOADS.name)?.let { downloads ->
+            for (i in 0 until downloads.length()) {
+                val d = downloads.getJSONObject(i)
+                val filePath = d.getString("filePath")
+                // Real silent-failure gap this closes: a DOWNLOADS row was
+                // recreated verbatim, including its absolute filePath and
+                // its COMPLETED status — but a selective backup
+                // deliberately stores download *records*, never the audio
+                // bytes. After a reinstall (or on a different device) that
+                // path does not exist, so the restore produced a Downloads
+                // tab full of confidently checkmarked songs that could
+                // never play, with no error and no hint that they needed
+                // re-downloading. Only restoring rows whose audio is
+                // genuinely present keeps the tab honest; the rest simply
+                // reappear as normal, re-downloadable tracks.
+                if (!java.io.File(filePath).exists()) continue
+                database.downloadDao().upsert(
+                    DownloadEntity(
+                        id = d.getString("id"),
+                        title = d.getString("title"),
+                        artist = d.getString("artist"),
+                        album = d.optString("album").takeIf { d.has("album") && !d.isNull("album") },
+                        artworkPath = d.optString("artworkPath").takeIf { d.has("artworkPath") && !d.isNull("artworkPath") },
+                        durationMs = d.getLong("durationMs"),
+                        filePath = filePath,
+                        fileSizeBytes = d.getLong("fileSizeBytes"),
+                        status = DownloadStatus.valueOf(d.getString("status")),
+                        downloadedAtEpochMs = d.getLong("downloadedAtEpochMs"),
+                    )
+                )
+            }
+        }
     }
 
     companion object {
