@@ -12,7 +12,7 @@
 - Background playback via a genuine `MediaSessionService` + `ExoPlayer` pipeline (survives Activity recreation, screen-off, and app backgrounding)
 - Real YouTube / YouTube Music search and streaming through [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) — no official API key required
 - Multi-provider fallback architecture (`PlaybackManager` + `ProviderHealthTracker`) designed to add additional extraction providers without touching call sites
-- Gapless playback, crossfade, and adjustable playback speed
+- Gapless playback, adjustable playback speed, and a fade between tracks (the current song fades out and the next fades in — a genuine audible fade rather than an overlapping two-stream crossfade, since the player holds one resolved track at a time)
 - Sleep timer (fixed durations, end-of-song, end-of-queue)
 - Persistent queue with reordering, "play next," and "add to queue," plus an Autoplay on/off shortcut right in the Queue sheet
 - YouTube-style autoplay: automatically extends the queue with related, music-only tracks when Autoplay is enabled (a video's YouTube category is checked so non-music results never sneak in)
@@ -20,7 +20,7 @@
 - Offline downloads: save any YouTube track's audio for playback with no network at all, with its own Downloads tab, a per-row progress/checkmark/failed badge everywhere that track appears, and bulk "Download album/playlist" actions — download quality is configurable independently from streaming quality
 
 ### Library & Discovery
-- Unified local + YouTube search (Songs, Albums, Artists, Playlists — each loads and fails independently), with YouTube-Music-style recent searches, live search suggestions while typing, and genuine infinite scroll on every result tab
+- YouTube search across Songs, Albums, Artists and Playlists — each tab loads and fails independently, so one category erroring never blanks another and each shows its own retry — with YouTube-Music-style recent searches, live search suggestions while typing, and genuine infinite scroll on every result tab. On-device music has its own dedicated search inside the Library tab.
 - Album and Artist detail pages with real metadata, track listings, playback actions, and a Share button on search-result albums/playlists (shares the real YouTube link)
 - A full History screen (up to 200 recently played tracks, with per-item removal), Favorites, Playlists (create/rename/delete, plus importing a whole playlist by pasting a YouTube or YouTube Music playlist link), and a Speed Dial / Quick Picks home surface
 - Favorites and Playlists both offer one-tap Shuffle and Play-all actions
