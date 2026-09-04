@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
 
     @androidx.compose.material3.ExperimentalMaterial3Api
     @androidx.compose.foundation.ExperimentalFoundationApi
+    @androidx.compose.foundation.layout.ExperimentalLayoutApi
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -178,6 +179,7 @@ private fun MiniPlayerHost(
 
 @androidx.compose.material3.ExperimentalMaterial3Api
 @androidx.compose.foundation.ExperimentalFoundationApi
+@androidx.compose.foundation.layout.ExperimentalLayoutApi
 @Composable
 private fun WhiplashApp() {
     val context = LocalContext.current
@@ -463,7 +465,33 @@ private fun WhiplashApp() {
                 GlassBottomBar(
                     items = AppTab.entries,
                     selected = selectedTab,
-                    onSelect = { selectedTab = it },
+                    onSelect = { tab ->
+                        // Real, reported navigation bug (UAT audit
+                        // finding): re-tapping the *already-selected*
+                        // bottom-nav tab while a nested sub-screen was
+                        // open (History under Home, a playlist's detail
+                        // view under Playlists, an album/artist detail
+                        // under Search) silently did nothing — Compose
+                        // never recomposes from `selectedTab = it` when
+                        // `it` already equals the current value, and none
+                        // of those nested-state variables were ever reset
+                        // anywhere except their own screen-local `onBack`.
+                        // Every other major app treats "tap the tab
+                        // you're already on" as "return to that tab's
+                        // root", so this now explicitly collapses the
+                        // matching nested state when the tap target is
+                        // the tab already selected, in addition to the
+                        // always-correct plain tab switch.
+                        if (tab == selectedTab) {
+                            when (tab) {
+                                AppTab.HOME -> showHistory = false
+                                AppTab.SEARCH -> searchDetailStack = emptyList()
+                                AppTab.PLAYLISTS -> openPlaylist = null
+                                else -> {}
+                            }
+                        }
+                        selectedTab = tab
+                    },
                     label = { it.label },
                     icon = { tab ->
                         Icon(
