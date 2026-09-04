@@ -49,6 +49,9 @@ class LocalLibraryViewModel(
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning
 
+    private val _scanError = MutableStateFlow(false)
+    val scanError: StateFlow<Boolean> = _scanError
+
     private val _permissionGranted = MutableStateFlow(false)
     val permissionGranted: StateFlow<Boolean> = _permissionGranted
 
@@ -162,6 +165,16 @@ class LocalLibraryViewModel(
             _isScanning.value = true
             try {
                 repository.refresh()
+                _scanError.value = false
+            } catch (e: Exception) {
+                // A mid-session permission revocation (SecurityException), a
+                // malformed/missing MediaStore column on some OEM build
+                // (IllegalArgumentException from getColumnIndexOrThrow), or
+                // a provider-level SQLiteException must never crash the app
+                // via an uncaught coroutine exception - surface it as a
+                // user-facing error state instead, matching how every other
+                // data-loading failure in this app is handled.
+                _scanError.value = true
             } finally {
                 _isScanning.value = false
             }

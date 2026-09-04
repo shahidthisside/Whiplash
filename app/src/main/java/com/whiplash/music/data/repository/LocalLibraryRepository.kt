@@ -8,6 +8,7 @@ import com.whiplash.music.domain.model.LocalAlbum
 import com.whiplash.music.domain.model.LocalArtist
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.localmedia.MediaStoreScanner
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -23,6 +24,7 @@ class LocalLibraryRepository(
     private val localSongDao: LocalSongDao,
     private val localAlbumDao: LocalAlbumDao,
     private val localArtistDao: LocalArtistDao,
+    private val database: com.whiplash.music.data.local.WhiplashDatabase,
 ) {
 
     fun observeSongs(): Flow<List<PlayableItem.LocalTrack>> =
@@ -58,6 +60,22 @@ class LocalLibraryRepository(
     suspend fun refresh() {
         val result = scanner.scan()
 
+        // The scan itself stays outside the transaction (it's MediaStore I/O,
+        // not database work, and can take a while on a large library), but the
+        // reconciliation below is wrapped so it is atomic. Previously these
+        // were six independent writes: an upsert and a delete for each of
+        // songs, albums and artists. A cancellation or process death between
+        // any two of them — entirely possible, since refresh() is triggered by
+        // a ContentObserver that can fire at any moment — left the local
+        // library in a visibly inconsistent state, e.g. songs already removed
+        // while their albums/artists still listed them, or album counts
+        // disagreeing with the songs actually present.
+        database.withTransaction {
+            reconcileScanResult(result)
+        }
+    }
+
+    private suspend fun reconcileScanResult(result: MediaStoreScanner.ScanResult) {
         val previousSongIds = localSongDao.getAllIds().toSet()
         val currentSongIds = result.songs.map { it.mediaStoreId }.toSet()
         val removedSongIds = (previousSongIds - currentSongIds).toList()

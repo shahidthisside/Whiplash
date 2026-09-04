@@ -100,11 +100,21 @@ fun LocalLibraryScreen(
             permissionPermanentlyDenied = permissionPermanentlyDenied,
             onRequestPermission = { permissionLauncher.launch(LocalMediaPermission.permission) },
             onOpenSettings = {
-                context.startActivity(
-                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = android.net.Uri.fromParts("package", context.packageName, null)
-                    }
-                )
+                // Guarded for the same reason as the GitHub footer link in
+                // SettingsScreen (which was a confirmed on-device crash):
+                // an unhandled intent throws ActivityNotFoundException and
+                // kills the process. This particular action exists on
+                // essentially every real device, but a bare startActivity is
+                // never worth a potential hard crash.
+                runCatching {
+                    context.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = android.net.Uri.fromParts("package", context.packageName, null)
+                        }
+                    )
+                }.onFailure {
+                    com.whiplash.music.ui.common.ToastController.show("Couldn't open app settings")
+                }
             },
         )
     }
