@@ -84,7 +84,7 @@ fun QueueContent(
                 PlainIconButton(
                     contentDescription = if (autoplayEnabled) "Autoplay on. Tap to turn off." else "Autoplay off. Tap to turn on.",
                     onClick = { onToggleAutoplay(!autoplayEnabled) },
-                    size = 40.dp,
+                    size = 48.dp,
                 ) {
                     Icon(
                         imageVector = if (autoplayEnabled) Icons.Filled.Autorenew else Icons.Outlined.Autorenew,
@@ -93,7 +93,7 @@ fun QueueContent(
                     )
                 }
                 if (queue.size > 1) {
-                    PlainIconButton(contentDescription = "Clear queue", onClick = onClear, size = 40.dp) {
+                    PlainIconButton(contentDescription = "Clear queue", onClick = onClear, size = 48.dp) {
                         Icon(Icons.Filled.DeleteSweep, contentDescription = null, tint = WhiplashColors.textSecondary)
                     }
                 }
@@ -170,7 +170,7 @@ private fun QueueRow(
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onMoveUp()
                 },
-                size = 40.dp,
+                size = 48.dp,
             ) {
                 Icon(Icons.Filled.KeyboardArrowUp, contentDescription = null, tint = WhiplashColors.textTertiary)
             }
@@ -182,12 +182,12 @@ private fun QueueRow(
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onMoveDown()
                 },
-                size = 40.dp,
+                size = 48.dp,
             ) {
                 Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = WhiplashColors.textTertiary)
             }
         }
-        PlainIconButton(contentDescription = "Remove from queue", onClick = onRemove, size = 40.dp) {
+        PlainIconButton(contentDescription = "Remove from queue", onClick = onRemove, size = 48.dp) {
             Icon(Icons.Filled.Close, contentDescription = null, tint = WhiplashColors.textTertiary)
         }
     }

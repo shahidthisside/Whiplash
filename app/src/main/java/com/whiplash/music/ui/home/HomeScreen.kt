@@ -249,7 +249,7 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
                                 actionsSheetOrigin = SheetOrigin.QUICK_PICKS
                                 actionsSheetItem = track
                             },
-                            size = 40.dp,
+                            size = 48.dp,
                         ) {
                             androidx.compose.material3.Icon(
                                 Icons.Filled.MoreVert,
@@ -582,7 +582,7 @@ private fun SectionHeader(
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (onHistory != null) {
-                PlainIconButton(contentDescription = "See full history", onClick = onHistory, size = 40.dp) {
+                PlainIconButton(contentDescription = "See full history", onClick = onHistory, size = 48.dp) {
                     androidx.compose.material3.Icon(
                         Icons.Filled.History,
                         contentDescription = null,
@@ -600,7 +600,7 @@ private fun SectionHeader(
                 PlainIconButton(
                     contentDescription = if (isRefreshing) "Refreshing $title" else "Refresh $title",
                     onClick = onRefresh,
-                    size = 40.dp,
+                    size = 48.dp,
                     enabled = !isRefreshing,
                 ) {
                     if (isRefreshing) {
@@ -619,7 +619,7 @@ private fun SectionHeader(
                 }
             }
             if (onClear != null) {
-                PlainIconButton(contentDescription = "Clear $title", onClick = onClear, size = 40.dp) {
+                PlainIconButton(contentDescription = "Clear $title", onClick = onClear, size = 48.dp) {
                     androidx.compose.material3.Icon(
                         Icons.Filled.Close,
                         contentDescription = null,

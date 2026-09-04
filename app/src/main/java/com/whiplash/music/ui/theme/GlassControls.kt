@@ -141,13 +141,22 @@ fun GlassIconButton(
  * "more options" (3-dot) button in track lists, matching YouTube Music's
  * minimal inline overflow button rather than the heavier glass-button
  * style used for primary/transport controls.
+ *
+ * Default [size] is 48dp to actually meet the documented minimum touch
+ * target. It used to default to 40dp, which put every icon-only inline
+ * button in the app (per-row 3-dot overflow, mini-player prev/next, header
+ * actions) below the 48dp accessibility guideline the README claims to
+ * honour — a real, if quiet, a11y gap. Because this button deliberately
+ * draws no background, border or ripple circle, the extra 8dp is an
+ * invisible hit area: the icon inside keeps its own size and stays centred,
+ * so nothing changes visually.
  */
 @Composable
 fun PlainIconButton(
     contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: androidx.compose.ui.unit.Dp = 40.dp,
+    size: androidx.compose.ui.unit.Dp = 48.dp,
     enabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {

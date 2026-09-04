@@ -136,7 +136,7 @@ fun GlassMiniPlayer(
                 PlainIconButton(
                     contentDescription = "Previous",
                     onClick = onPrevious,
-                    size = 40.dp,
+                    size = 48.dp,
                 ) {
                     Icon(
                         imageVector = Icons.Filled.SkipPrevious,
@@ -159,7 +159,7 @@ fun GlassMiniPlayer(
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onTogglePlayPause()
                         },
-                        size = 40.dp,
+                        size = 48.dp,
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
@@ -172,7 +172,7 @@ fun GlassMiniPlayer(
                 PlainIconButton(
                     contentDescription = "Next",
                     onClick = onNext,
-                    size = 40.dp,
+                    size = 48.dp,
                 ) {
                     Icon(
                         imageVector = Icons.Filled.SkipNext,

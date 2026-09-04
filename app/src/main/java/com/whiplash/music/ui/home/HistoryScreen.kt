@@ -58,7 +58,7 @@ fun HistoryScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = GlassTokens.spaceMd, vertical = GlassTokens.spaceSm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                PlainIconButton(contentDescription = "Back", onClick = onBack, size = 40.dp) {
+                PlainIconButton(contentDescription = "Back", onClick = onBack, size = 48.dp) {
                     Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = WhiplashColors.textPrimary)
                 }
                 Text(
@@ -68,7 +68,7 @@ fun HistoryScreen(
                     modifier = Modifier.padding(start = GlassTokens.spaceSm).weight(1f),
                 )
                 if (history.isNotEmpty()) {
-                    PlainIconButton(contentDescription = "Clear history", onClick = { showClearConfirm = true }, size = 40.dp) {
+                    PlainIconButton(contentDescription = "Clear history", onClick = { showClearConfirm = true }, size = 48.dp) {
                         Icon(Icons.Filled.DeleteSweep, contentDescription = null, tint = WhiplashColors.textSecondary)
                     }
                 }

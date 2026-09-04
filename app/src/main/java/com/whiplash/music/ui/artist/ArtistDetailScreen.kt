@@ -288,7 +288,7 @@ private fun ArtistDetailContent(
                         PlainIconButton(
                             contentDescription = "More options for ${track.title}",
                             onClick = { actionsSheetItem = track },
-                            size = 40.dp,
+                            size = 48.dp,
                         ) {
                             Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textSecondary)
                         }
