@@ -78,6 +78,11 @@ class LibraryRepository(
                 playedAtEpochMs = System.currentTimeMillis(),
             ),
         )
+        // Actually enforce the documented history cap. Without this the
+        // table grew by one row per play forever and the "200 recently
+        // played" limit existed only as a LIMIT clause on the read side —
+        // see HistoryDao.trimToMostRecent.
+        runCatching { historyDao.trimToMostRecent(MAX_HISTORY_ENTRIES) }
     }
 
     fun observeRecentlyPlayed(limit: Int = 50): Flow<List<PlayableItem>> =
@@ -312,5 +317,14 @@ class LibraryRepository(
                 }
             }
         }
+    }
+
+    private companion object {
+        /**
+         * The real, enforced cap on stored play history — matches the 200
+         * the History screen reads (HistoryViewModel.observeRecentlyPlayed)
+         * so the table can no longer grow past what is actually reachable.
+         */
+        const val MAX_HISTORY_ENTRIES = 200
     }
 }

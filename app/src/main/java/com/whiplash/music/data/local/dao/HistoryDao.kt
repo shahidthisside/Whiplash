@@ -97,4 +97,25 @@ interface HistoryDao {
 
     @Query("DELETE FROM history WHERE playedAtEpochMs < :olderThanEpochMs")
     suspend fun pruneOlderThan(olderThanEpochMs: Long)
+
+    /**
+     * Enforces the real "up to N recently played tracks" cap by deleting
+     * everything outside the most recent [keep] rows.
+     *
+     * Real gap this closes: the 200-entry limit was only ever a read-side
+     * `LIMIT` in the History screen's query, and [pruneOlderThan] — the only
+     * delete-by-age query here — had no callers anywhere in the app. The
+     * `history` table itself therefore grew by one row on every single play,
+     * forever, with nothing ever trimming it. The advertised cap was purely a
+     * display illusion over an unbounded, ever-slower table.
+     */
+    @Query(
+        """
+        DELETE FROM history
+        WHERE id NOT IN (
+            SELECT id FROM history ORDER BY playedAtEpochMs DESC, id DESC LIMIT :keep
+        )
+        """
+    )
+    suspend fun trimToMostRecent(keep: Int)
 }
