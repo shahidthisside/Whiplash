@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -85,6 +87,9 @@ class DownloadManager(
 
     private val _progress = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
     val progress: StateFlow<Map<String, DownloadProgress>> = _progress
+
+    /** Bounds how many downloads actually transfer bytes at once — see [runDownload]. */
+    private val transferSemaphore = Semaphore(MAX_CONCURRENT_TRANSFERS)
 
     /**
      * Full track metadata (title/artist/artwork) for every currently
@@ -179,6 +184,28 @@ class DownloadManager(
     private suspend fun runDownload(track: PlayableItem.YoutubeTrack) {
         _progress.update { it + (track.id to DownloadProgress(track.id, 0L, 0L)) }
 
+        // Real resource gap this closes: downloadAll() (the "Download
+        // album/playlist" action) called startDownload() for every track in
+        // a loop, and each of those launches its own independent coroutine
+        // on Dispatchers.IO with no concurrency limit at all. A 50-track
+        // playlist therefore opened ~50 simultaneous OkHttp connections and
+        // ~50 FileOutputStreams, and because the metadata-tagging step reads
+        // each finished file fully into memory (audioFile.readBytes(), plus a
+        // second tagged copy), dozens of multi-megabyte byte arrays could be
+        // live at once — saturating the network so every individual song
+        // crawled, and risking an OutOfMemoryError on a large batch.
+        //
+        // The permit is taken here, inside the already-launched coroutine,
+        // rather than in startDownload(), so nothing about the UI contract
+        // changes: every track still registers in activeDownloads and
+        // _inFlightTracks immediately, still shows its progress row, and is
+        // still individually cancellable while it waits its turn.
+        transferSemaphore.withPermit {
+            runDownloadTransfer(track)
+        }
+    }
+
+    private suspend fun runDownloadTransfer(track: PlayableItem.YoutubeTrack) {
         val audioFile = audioFileFor(track.id)
         // One automatic retry for a transient failure (a flaky mobile/
         // Wi-Fi connection dropping mid-transfer, or a stream URL that
@@ -256,6 +283,54 @@ class DownloadManager(
         // one step fails — artwork is a nice-to-have, not the point.
         val artworkPath = track.artworkUri?.let { url -> downloadArtwork(track.id, url) }
 
+        // Embed title/artist/album/cover directly into the file's own
+        // metadata (adapted from BitChord) so it shows correctly in any
+        // other app — a file manager, a different player, a computer —
+        // not only inside Whiplash's own Downloads tab. MP4/M4A only
+        // (see Mp4Tagger doc): a WebM download is left byte-for-byte
+        // untouched. Never fails the download itself — tag() always
+        // returns the original bytes unchanged on any parsing doubt, and
+        // this whole step is wrapped so even an unexpected I/O failure
+        // here can't turn a successful download into a failed one.
+        if (resolved.mimeType == MP4_MIME_TYPE) {
+            runCatching {
+                val cover = artworkPath?.let { path -> File(path).takeIf { it.exists() }?.readBytes() }
+                val original = audioFile.readBytes()
+                val tagged = Mp4Tagger.tag(
+                    bytes = original,
+                    title = track.title,
+                    artist = track.artist ?: "",
+                    album = track.album,
+                    cover = cover,
+                )
+                if (!tagged.contentEquals(original)) {
+                    // Real corruption risk this closes: this used to be a
+                    // direct audioFile.writeBytes(tagged), which truncates
+                    // the existing file and then writes. If the process died
+                    // (force-stop, OS kill, battery) partway through that
+                    // write, the user was left with a half-written,
+                    // unplayable audio file — and since this runs *after* the
+                    // bytes were successfully downloaded, the very next step
+                    // persists a COMPLETED row for it. A fully downloaded
+                    // song could therefore end up permanently broken while
+                    // the Downloads tab showed a confident checkmark.
+                    // Writing to a sibling temp file and then renaming makes
+                    // the swap atomic: the original stays fully intact until
+                    // the complete tagged copy exists on disk, so a kill at
+                    // any point leaves either the untagged-but-valid original
+                    // or the tagged-and-valid replacement, never a partial
+                    // file.
+                    val tempFile = File(audioFile.parentFile, "${audioFile.name}.tag.tmp")
+                    runCatching { tempFile.delete() }
+                    tempFile.writeBytes(tagged)
+                    if (!tempFile.renameTo(audioFile)) {
+                        runCatching { tempFile.delete() }
+                        error("Could not replace ${audioFile.name} with its tagged copy")
+                    }
+                }
+            }.onFailure { Log.w(TAG, "Metadata tagging failed for ${track.id}, download itself still succeeded", it) }
+        }
+
         downloadDao.upsert(
             DownloadEntity(
                 id = track.id,
@@ -313,6 +388,31 @@ class DownloadManager(
                             output.write(buffer, 0, read)
                             downloaded += read
                             onProgress(downloaded, totalBytes)
+                        }
+                        // Real silent-failure gap this closes: the loop above
+                        // exits on read() == -1, and that was treated as
+                        // unconditional success — attemptDownload went
+                        // straight on to persist a COMPLETED row. But -1 only
+                        // means "this stream produced no more bytes", which is
+                        // also exactly what a connection dropped mid-transfer
+                        // looks like once the body has been partially
+                        // consumed. Content-Length was being read into
+                        // totalBytes and used for the progress ring, yet never
+                        // compared against what actually landed on disk, so a
+                        // truncated file could be saved, marked COMPLETED with
+                        // a full checkmark, and never retried — the user's
+                        // "downloaded for offline" song silently cut off part
+                        // way through, with no error anywhere.
+                        //
+                        // Throwing here routes into runDownload's existing
+                        // retry-once-then-fail-visibly path, which already
+                        // deletes the partial file and surfaces a toast.
+                        // Guarded on totalBytes > 0 so a chunked/gzip response
+                        // with no declared length (contentLength() == -1)
+                        // keeps its previous behaviour rather than failing
+                        // every time.
+                        if (totalBytes > 0 && downloaded != totalBytes) {
+                            error("Truncated download: wrote $downloaded of $totalBytes bytes for $url")
                         }
                     }
                 }
@@ -397,9 +497,43 @@ class DownloadManager(
         }
         downloadDao.failAllInProgress()
 
-        val completedFilePaths = downloadDao.getAll().map { it.filePath }.toSet()
+        val rows = downloadDao.getAll()
+
+        // Real silent-failure gap this closes (DB -> disk divergence): a row
+        // is only ever written as COMPLETED, and nothing ever checked that
+        // the file it points at still exists. app-private files can and do
+        // disappear independently of the database — a restore from backup
+        // recreates COMPLETED rows with absolute paths from a *different*
+        // install, and storage pressure/manual cleanup can remove the bytes.
+        // observeDownloads() maps every COMPLETED row straight to a
+        // playable DownloadedTrack with no existence check, so the Downloads
+        // tab confidently showed a full checkmark for a song whose audio was
+        // gone, and tapping it just silently failed to play with no
+        // explanation and no way to know it needed re-downloading. Dropping
+        // these rows makes the tab honest and lets the user simply download
+        // the track again.
+        rows.filter { it.status == DownloadStatus.COMPLETED && !File(it.filePath).exists() }
+            .forEach { orphanRow ->
+                orphanRow.artworkPath?.let { runCatching { File(it).delete() } }
+                downloadDao.delete(orphanRow.id)
+            }
+
+        // Real race this closes: the doc above used to claim this sweep was
+        // safe because "a legitimate in-flight download can only exist while
+        // this class's own coroutine scope is alive, which is never true at
+        // the app-startup call site." That is not true — DownloadManager is a
+        // process-lifetime singleton and this method is launched into a
+        // detached Dispatchers.IO scope from Application.onCreate(), so it
+        // runs *concurrently* with the UI coming up. A download the user
+        // starts as soon as the first screen renders has no COMPLETED row
+        // yet, so its live, actively-being-written *.audio file looked
+        // exactly like process-death garbage and got deleted out from under
+        // the open FileOutputStream. Excluding the files of everything
+        // currently in flight makes the sweep safe no matter when it lands.
+        val protectedPaths = rows.map { it.filePath }.toSet() +
+            activeDownloads.keys.map { audioFileFor(it).absolutePath }
         downloadsDir.listFiles()?.forEach { file ->
-            if (file.absolutePath !in completedFilePaths) {
+            if (file.absolutePath !in protectedPaths) {
                 runCatching { file.delete() }
             }
         }
@@ -410,11 +544,23 @@ class DownloadManager(
         const val DOWNLOADS_DIR_NAME = "downloads"
         const val ARTWORK_DIR_NAME = "download_artwork"
 
+        /**
+         * How many downloads may transfer bytes simultaneously. Bulk
+         * album/playlist downloads previously ran every track at once (see
+         * [runDownload]); 3 keeps a batch genuinely parallel and fast without
+         * saturating the connection or holding dozens of whole audio files in
+         * memory for the tagging step at the same time.
+         */
+        const val MAX_CONCURRENT_TRANSFERS = 3
+
         /** How long a failed download's progress-ring badge stays visible (showing the failure) before the row disappears entirely. */
         const val FAILED_STATE_VISIBLE_MS = 2_500L
 
         /** Longest a track title is allowed to run inside a toast message before being ellipsized — a real YouTube video title can run 50+ characters, which previously stretched the "Download failed: <title>" toast into an oversized banner. */
         const val TOAST_TITLE_MAX_CHARS = 40
+
+        /** [com.whiplash.music.playback.provider.ResolvedStream.mimeType] value NewPipeExtractor reports for AAC-in-MP4/M4A streams — the only container [Mp4Tagger] is written to handle. */
+        const val MP4_MIME_TYPE = "audio/mp4"
     }
 
     /** Ellipsizes [this] to [TOAST_TITLE_MAX_CHARS] characters for use inside a short toast message, leaving long titles untouched everywhere else (list rows, notifications, etc.). */
