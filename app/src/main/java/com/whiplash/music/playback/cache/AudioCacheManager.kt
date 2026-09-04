@@ -68,7 +68,12 @@ class AudioCacheManager(context: Context) {
      * the cache, not just a cosmetic toggle.
      */
     fun cachingDataSourceFactory(): CacheDataSource.Factory {
-        val upstreamFactory = DefaultDataSource.Factory(appContext)
+        // The real network fetch happens as bounded byte-range requests
+        // rather than one open-ended GET (see ChunkedDataSource) — this is
+        // what CacheDataSource's own read-ahead and the current track's
+        // live read both benefit from, since both ultimately go through
+        // this same upstream factory.
+        val upstreamFactory = ChunkedDataSourceFactory(DefaultDataSource.Factory(appContext))
         return CacheDataSource.Factory()
             .setCache(getOrCreateCache())
             .setUpstreamDataSourceFactory(upstreamFactory)
