@@ -117,9 +117,20 @@ class YoutubeSearchProvider(
             val extractor = youtube.getSearchExtractor(queryHandler)
             extractor.fetchPage()
 
+
+            // Deduplicated at the source. A keyed LazyColumn throws
+            // IllegalArgumentException ("Key was already used") on a duplicate
+            // key, which is a hard crash rather than a visual glitch, and real
+            // YouTube search backends legitimately return the same video/
+            // playlist/channel more than once within a single response. Page 2+
+            // was already protected by SearchViewModel.dedupeAppend, but the
+            // FIRST page went into state completely undeduplicated — an
+            // asymmetric gap that left the initial render of every search
+            // exposed.
             val results = extractor.initialPage.items
                 .filterIsInstance<StreamInfoItem>()
                 .mapNotNull { it.toPlayableItemOrNull() }
+                .distinctBy { it.id }
 
             healthTracker.recordSuccess(PROVIDER_ID)
             results
@@ -198,9 +209,20 @@ class YoutubeSearchProvider(
             val extractor = youtube.getSearchExtractor(queryHandler)
             extractor.fetchPage()
 
+
+            // Deduplicated at the source. A keyed LazyColumn throws
+            // IllegalArgumentException ("Key was already used") on a duplicate
+            // key, which is a hard crash rather than a visual glitch, and real
+            // YouTube search backends legitimately return the same video/
+            // playlist/channel more than once within a single response. Page 2+
+            // was already protected by SearchViewModel.dedupeAppend, but the
+            // FIRST page went into state completely undeduplicated — an
+            // asymmetric gap that left the initial render of every search
+            // exposed.
             val results = extractor.initialPage.items
                 .filterIsInstance<PlaylistInfoItem>()
                 .map { it.toDomain(isAlbum) }
+                .distinctBy { it.url }
 
             healthTracker.recordSuccess(PROVIDER_ID)
             results
@@ -232,9 +254,20 @@ class YoutubeSearchProvider(
             val extractor = youtube.getSearchExtractor(queryHandler)
             extractor.fetchPage()
 
+
+            // Deduplicated at the source. A keyed LazyColumn throws
+            // IllegalArgumentException ("Key was already used") on a duplicate
+            // key, which is a hard crash rather than a visual glitch, and real
+            // YouTube search backends legitimately return the same video/
+            // playlist/channel more than once within a single response. Page 2+
+            // was already protected by SearchViewModel.dedupeAppend, but the
+            // FIRST page went into state completely undeduplicated — an
+            // asymmetric gap that left the initial render of every search
+            // exposed.
             val results = extractor.initialPage.items
                 .filterIsInstance<ChannelInfoItem>()
                 .map { it.toDomain() }
+                .distinctBy { it.channelUrl }
 
             healthTracker.recordSuccess(PROVIDER_ID)
             results
@@ -328,6 +361,7 @@ class YoutubeSearchProvider(
             val tracks = info.relatedItems
                 .filterIsInstance<StreamInfoItem>()
                 .mapNotNull { it.toPlayableItemOrNull() }
+                .distinctBy { it.id }
             healthTracker.recordSuccess(PROVIDER_ID)
             ImportedPlaylist(name = info.name.orEmpty(), tracks = tracks)
         } catch (e: Exception) {

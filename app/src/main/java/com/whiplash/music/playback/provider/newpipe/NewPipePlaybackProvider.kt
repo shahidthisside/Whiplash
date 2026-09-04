@@ -93,6 +93,7 @@ class NewPipePlaybackProvider(
      * never assumes a fixed absolute bitrate exists.
      */
     private fun selectAudioStream(streams: List<AudioStream>, quality: AudioQuality): AudioStream {
+        require(streams.isNotEmpty()) { "selectAudioStream called with an empty stream list" }
         val sorted = streams.sortedBy { it.averageBitrate }
         return when (quality) {
             AudioQuality.AUTO, AudioQuality.HIGHEST -> sorted.last()
