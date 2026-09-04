@@ -29,6 +29,22 @@ data class SearchUiState(
     val isSearching: Boolean = false,
     val hasSearched: Boolean = false,
     val errorMessage: String? = null,
+    /**
+     * Per-category failure messages for the three secondary tabs.
+     *
+     * Real silent-failure bug these exist to fix: the Albums/Playlists/
+     * Artists lookups were fired with `runCatching { … }.onSuccess { … }`
+     * and no `onFailure` at all, so a genuine network or extraction failure
+     * simply left that tab's list empty — rendering the ordinary "No
+     * results" state. A failed category was therefore completely
+     * indistinguishable from a category that really had nothing to show,
+     * with no error, no explanation and no way to retry. Songs (the primary
+     * category) already had a real error path via [errorMessage]; these give
+     * the other three the same honesty.
+     */
+    val albumsError: String? = null,
+    val playlistsError: String? = null,
+    val artistsError: String? = null,
     // Real infinite-scroll state per tab (section: search pagination).
     // hasMoreX starts true optimistically for a freshly submitted query
     // (we don't yet know if there's a second page until we ask) and
@@ -168,6 +184,9 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
                     hasSearched = false,
                     isSearching = false,
                     errorMessage = null,
+                    albumsError = null,
+                    playlistsError = null,
+                    artistsError = null,
                     hasMoreSongs = true,
                     hasMoreAlbums = true,
                     hasMorePlaylists = true,
@@ -194,6 +213,9 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
                     hasSearched = false,
                     isSearching = false,
                     errorMessage = null,
+                    albumsError = null,
+                    playlistsError = null,
+                    artistsError = null,
                     hasMoreSongs = true,
                     hasMoreAlbums = true,
                     hasMorePlaylists = true,
@@ -301,13 +323,19 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
             // Albums/playlists/artists are independent, best-effort lookups:
             // a failure in one never blanks out results already shown for
             // another, and none of them block songs (the primary result
-            // type) from displaying immediately.
+            // type) from displaying immediately. Each one records its own
+            // failure (see SearchUiState.albumsError) so a network/extraction
+            // error shows a real, retryable error state for that tab instead
+            // of silently masquerading as "no results".
             runCatching { repository.searchAlbums(query) }
-                .onSuccess { albums -> _state.update { it.copy(albums = albums) } }
+                .onSuccess { albums -> _state.update { it.copy(albums = albums, albumsError = null) } }
+                .onFailure { failure -> _state.update { it.copy(albumsError = failure.toUserFacingMessage("Couldn't load albums")) } }
             runCatching { repository.searchPlaylists(query) }
-                .onSuccess { playlists -> _state.update { it.copy(playlists = playlists) } }
+                .onSuccess { playlists -> _state.update { it.copy(playlists = playlists, playlistsError = null) } }
+                .onFailure { failure -> _state.update { it.copy(playlistsError = failure.toUserFacingMessage("Couldn't load playlists")) } }
             runCatching { repository.searchArtists(query) }
-                .onSuccess { artists -> _state.update { it.copy(artists = artists) } }
+                .onSuccess { artists -> _state.update { it.copy(artists = artists, artistsError = null) } }
+                .onFailure { failure -> _state.update { it.copy(artistsError = failure.toUserFacingMessage("Couldn't load artists")) } }
         }
     }
 

@@ -179,8 +179,13 @@ fun SearchScreen(
                 },
             )
             state.results.isEmpty() && state.errorMessage != null -> ErrorState(state.errorMessage!!, onRetry = viewModel::retry)
+            // Only claim "no results" when every category genuinely came back
+            // empty. If a category actually *failed*, fall through to the tab
+            // rows so its own retryable error state can be shown instead of a
+            // misleading "nothing found".
             state.results.isEmpty() && state.albums.isEmpty() && state.artists.isEmpty() &&
-                state.playlists.isEmpty() && state.hasSearched -> NoResultsState()
+                state.playlists.isEmpty() && state.hasSearched &&
+                state.albumsError == null && state.playlistsError == null && state.artistsError == null -> NoResultsState()
             else -> {
                 GlassTabRow(
                     items = SearchResultTab.entries,
@@ -219,26 +224,43 @@ fun SearchScreen(
                             onLoadMore = { viewModel.loadMore(SearchResultTab.SONGS) },
                             isLoadingMore = state.isLoadingMoreSongs,
                         )
-                        SearchResultTab.ALBUMS -> PlaylistResultsList(
-                            items = state.albums,
-                            isAlbum = true,
-                            onClick = handleOpenAlbum,
-                            onLoadMore = { viewModel.loadMore(SearchResultTab.ALBUMS) },
-                            isLoadingMore = state.isLoadingMoreAlbums,
-                        )
-                        SearchResultTab.PLAYLISTS -> PlaylistResultsList(
-                            items = state.playlists,
-                            isAlbum = false,
-                            onClick = handleOpenAlbum,
-                            onLoadMore = { viewModel.loadMore(SearchResultTab.PLAYLISTS) },
-                            isLoadingMore = state.isLoadingMorePlaylists,
-                        )
-                        SearchResultTab.ARTISTS -> ArtistResultsList(
-                            items = state.artists,
-                            onClick = handleOpenArtist,
-                            onLoadMore = { viewModel.loadMore(SearchResultTab.ARTISTS) },
-                            isLoadingMore = state.isLoadingMoreArtists,
-                        )
+                        // Each secondary tab now shows a real, retryable
+                        // error when its own lookup failed and it has nothing
+                        // to show, instead of rendering an empty list that
+                        // looked exactly like a genuine "no results" (see
+                        // SearchUiState.albumsError).
+                        SearchResultTab.ALBUMS -> if (state.albums.isEmpty() && state.albumsError != null) {
+                            ErrorState(state.albumsError!!, onRetry = viewModel::retry)
+                        } else {
+                            PlaylistResultsList(
+                                items = state.albums,
+                                isAlbum = true,
+                                onClick = handleOpenAlbum,
+                                onLoadMore = { viewModel.loadMore(SearchResultTab.ALBUMS) },
+                                isLoadingMore = state.isLoadingMoreAlbums,
+                            )
+                        }
+                        SearchResultTab.PLAYLISTS -> if (state.playlists.isEmpty() && state.playlistsError != null) {
+                            ErrorState(state.playlistsError!!, onRetry = viewModel::retry)
+                        } else {
+                            PlaylistResultsList(
+                                items = state.playlists,
+                                isAlbum = false,
+                                onClick = handleOpenAlbum,
+                                onLoadMore = { viewModel.loadMore(SearchResultTab.PLAYLISTS) },
+                                isLoadingMore = state.isLoadingMorePlaylists,
+                            )
+                        }
+                        SearchResultTab.ARTISTS -> if (state.artists.isEmpty() && state.artistsError != null) {
+                            ErrorState(state.artistsError!!, onRetry = viewModel::retry)
+                        } else {
+                            ArtistResultsList(
+                                items = state.artists,
+                                onClick = handleOpenArtist,
+                                onLoadMore = { viewModel.loadMore(SearchResultTab.ARTISTS) },
+                                isLoadingMore = state.isLoadingMoreArtists,
+                            )
+                        }
                     }
                 }
             }
@@ -285,7 +307,7 @@ private fun ResultsList(
         } else {
             PlayableItemsList(
                 items = results,
-                onPlayQueue = { _, index -> onPlayTrack(results[index] as PlayableItem.YoutubeTrack) },
+                onPlayQueue = { _, index -> (results.getOrNull(index) as? PlayableItem.YoutubeTrack)?.let(onPlayTrack) },
                 modifier = Modifier.fillMaxSize(),
                 onLoadMore = onLoadMore,
                 isLoadingMore = isLoadingMore,
@@ -307,7 +329,7 @@ private fun PlaylistResultsList(
         return
     }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    androidx.compose.runtime.LaunchedEffect(listState) {
+    androidx.compose.runtime.LaunchedEffect(listState, isLoadingMore, items.size) {
             androidx.compose.runtime.snapshotFlow {
                 Triple(listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index, isLoadingMore, items.size)
             }.collect { (lastVisibleIndex, currentlyLoadingMore, _) ->
@@ -376,7 +398,7 @@ private fun ArtistResultsList(
         return
     }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    androidx.compose.runtime.LaunchedEffect(listState) {
+    androidx.compose.runtime.LaunchedEffect(listState, isLoadingMore, items.size) {
             androidx.compose.runtime.snapshotFlow {
                 Triple(listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index, isLoadingMore, items.size)
             }.collect { (lastVisibleIndex, currentlyLoadingMore, _) ->

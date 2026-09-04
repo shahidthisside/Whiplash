@@ -139,7 +139,7 @@ fun PlayableItemsList(
         // scrolling fast made the list appear to freeze at the last
         // loaded item even after more items had actually finished
         // loading underneath.
-        LaunchedEffect(listState) {
+        LaunchedEffect(listState, isLoadingMore, items.size) {
             // The snapshotFlow block itself reads lastVisibleIndex,
             // isLoadingMore, AND items.size — not just lastVisibleIndex —
             // so it re-emits whenever any of the three changes, not only
@@ -283,7 +283,7 @@ fun PlayableItemsList(
                     PlainIconButton(
                         contentDescription = "More options for ${item.title}",
                         onClick = { actionsSheetItem = item },
-                        size = 40.dp,
+                        size = 48.dp,
                     ) {
                         Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textSecondary)
                     }
