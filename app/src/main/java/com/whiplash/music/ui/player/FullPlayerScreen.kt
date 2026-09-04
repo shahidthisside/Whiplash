@@ -135,10 +135,30 @@ fun FullPlayerScreen(
     val hapticToggleShuffle: () -> Unit = {
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         onToggleShuffle()
+        // state.shuffleEnabled still holds the pre-toggle value here since
+        // onToggleShuffle() only dispatches the change (the real, new value
+        // arrives on the next recomposition via the StateFlow) - negate it
+        // to announce the value the user is actually toggling TO, matching
+        // the shuffle button's own content-description convention above.
+        com.whiplash.music.ui.common.ToastController.show(
+            if (!state.shuffleEnabled) "Shuffle on" else "Shuffle off"
+        )
     }
     val hapticCycleRepeat: () -> Unit = {
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         onCycleRepeat()
+        val next = when (state.repeatMode) {
+            RepeatMode.OFF -> RepeatMode.ALL
+            RepeatMode.ALL -> RepeatMode.ONE
+            RepeatMode.ONE -> RepeatMode.OFF
+        }
+        com.whiplash.music.ui.common.ToastController.show(
+            when (next) {
+                RepeatMode.OFF -> "Repeat off"
+                RepeatMode.ALL -> "Repeat all"
+                RepeatMode.ONE -> "Repeat one"
+            }
+        )
     }
 
     Column(
@@ -289,7 +309,7 @@ fun FullPlayerScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             GlassIconButton(
-                contentDescription = "Shuffle",
+                contentDescription = if (state.shuffleEnabled) "Shuffle: ON" else "Shuffle: OFF",
                 onClick = hapticToggleShuffle,
             ) {
                 Icon(
