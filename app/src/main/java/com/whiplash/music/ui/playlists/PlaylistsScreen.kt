@@ -68,6 +68,15 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
     var playlistPendingDelete by remember { mutableStateOf<Playlist?>(null) }
     var playlistPendingRename by remember { mutableStateOf<Playlist?>(null) }
     var playlistPendingDownload by remember { mutableStateOf<Playlist?>(null) }
+    // Real, reported safety gap (UAT audit finding): unlike every other
+    // destructive action in this app (removing a single download,
+    // clearing all downloads, clearing history), deleting an entire
+    // playlist — which can represent significant curation effort —
+    // previously fired immediately on tap with zero confirmation. This
+    // holds the playlist awaiting a second, explicit confirm tap via
+    // GlassConfirmDialog below, matching every other destructive action's
+    // existing convention.
+    var playlistPendingDeleteConfirm by remember { mutableStateOf<Playlist?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -86,7 +95,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                 PlainIconButton(
                     contentDescription = "Import playlist from YouTube",
                     onClick = { showImportDialog = true },
-                    size = 40.dp,
+                    size = 48.dp,
                     enabled = !isImporting,
                 ) {
                     if (isImporting) {
@@ -95,7 +104,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                         Icon(Icons.Filled.Link, contentDescription = null, tint = WhiplashColors.textPrimary)
                     }
                 }
-                PlainIconButton(contentDescription = "New playlist", onClick = { showCreateDialog = true }, size = 40.dp) {
+                PlainIconButton(contentDescription = "New playlist", onClick = { showCreateDialog = true }, size = 48.dp) {
                     Icon(Icons.Filled.Add, contentDescription = null, tint = WhiplashColors.textPrimary)
                 }
             }
@@ -134,7 +143,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                             PlainIconButton(
                                 contentDescription = "More options for ${playlist.name}",
                                 onClick = { playlistPendingDelete = playlist },
-                                size = 40.dp,
+                                size = 48.dp,
                             ) {
                                 Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textSecondary)
                             }
@@ -240,7 +249,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                         .padding(vertical = GlassTokens.spaceSm)
                         .clickable(
                             onClick = {
-                                viewModel.deletePlaylist(toDelete.id, toDelete.name)
+                                playlistPendingDeleteConfirm = toDelete
                                 playlistPendingDelete = null
                             },
                         ),
@@ -256,6 +265,21 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                 }
             }
         }
+    }
+
+    val toConfirmDelete = playlistPendingDeleteConfirm
+    if (toConfirmDelete != null) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Delete playlist?",
+            message = "\"${toConfirmDelete.name}\" will be permanently deleted. This can't be undone.",
+            confirmLabel = "Delete",
+            dismissLabel = "Cancel",
+            onConfirm = {
+                viewModel.deletePlaylist(toConfirmDelete.id, toConfirmDelete.name)
+                playlistPendingDeleteConfirm = null
+            },
+            onDismiss = { playlistPendingDeleteConfirm = null },
+        )
     }
 
     val toRename = playlistPendingRename

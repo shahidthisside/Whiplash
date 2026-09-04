@@ -73,8 +73,10 @@ class PlayerViewModel(
     fun addCurrentToPlaylist(playlistId: Long, playlistName: String) {
         val item = state.value.currentItem ?: return
         viewModelScope.launch {
-            libraryRepository.addToPlaylist(playlistId, item)
-            com.whiplash.music.ui.common.ToastController.show("Added to $playlistName")
+            val added = libraryRepository.addToPlaylist(playlistId, item)
+            com.whiplash.music.ui.common.ToastController.show(
+                if (added) "Added to $playlistName" else "Already in $playlistName",
+            )
         }
     }
 
