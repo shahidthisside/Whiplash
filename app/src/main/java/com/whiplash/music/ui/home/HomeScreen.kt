@@ -21,7 +21,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DownloadDone
@@ -31,8 +33,12 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -82,6 +88,7 @@ private const val QUICK_PICKS_SKELETON_ROW_COUNT = 5
 
 @androidx.compose.material3.ExperimentalMaterial3Api
 @ExperimentalFoundationApi
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     onPlayTrack: (PlayableItem) -> Unit,
@@ -104,6 +111,8 @@ fun HomeScreen(
     val isSpeedDialLoaded by viewModel.isSpeedDialLoaded.collectAsState()
     val quickPicks by viewModel.quickPicks.collectAsState()
     val isLoadingQuickPicks by viewModel.isLoadingQuickPicks.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val pullState = rememberPullToRefreshState()
     val haptic = LocalHapticFeedback.current
     var actionsSheetItem by remember { mutableStateOf<PlayableItem?>(null) }
     var actionsSheetOrigin by remember { mutableStateOf(SheetOrigin.SPEED_DIAL) }
@@ -118,161 +127,190 @@ fun HomeScreen(
     // skeleton with a flash of "Play something to see it here." that
     // then immediately gets replaced by real content once data arrives.
     if (isSpeedDialLoaded && speedDial.isEmpty() && quickPicks.isEmpty() && !isLoadingQuickPicks) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = "Play something to see it here.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = WhiplashColors.textSecondary,
-            )
+        // Pullable too, and deliberately so: an empty Home is the single
+        // most likely place someone reaches for a pull-to-refresh, and a
+        // screen that says "nothing here" while ignoring the gesture reads
+        // as broken. Needs verticalScroll because pull-to-refresh is driven
+        // by nested-scroll events — a plain Box emits none, so the gesture
+        // would be silently dead here even though the indicator existed.
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = { viewModel.refreshHome() },
+            state = pullState,
+            indicator = { HomeRefreshIndicator(pullState, isRefreshing, Modifier.align(Alignment.TopCenter)) },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "Play something to see it here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = WhiplashColors.textSecondary,
+                )
+            }
         }
         return
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd),
-        verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = { viewModel.refreshHome() },
+        state = pullState,
+        indicator = { HomeRefreshIndicator(pullState, isRefreshing, Modifier.align(Alignment.TopCenter)) },
+        modifier = Modifier.fillMaxSize(),
     ) {
-        // Show a real skeleton — not a blank gap, not the earlier
-        // "Play something to see it here." flash — for the brief window
-        // between the screen first composing and Speed dial's Room flow
-        // emitting its first real snapshot, since that snapshot could
-        // turn out to have items (needing the section to have already
-        // been "expecting" content) or turn out empty (in which case the
-        // skeleton simply disappears once isSpeedDialLoaded flips true).
-        if (!isSpeedDialLoaded) {
-            item {
-                SectionHeader(title = "Speed dial")
-            }
-            item { SpeedDialSkeletonGrid() }
-        } else if (speedDial.isNotEmpty()) {
-            item {
-                SectionHeader(title = "Speed dial", onHistory = onOpenHistory, onClear = { showClearSpeedDialConfirm = true })
-            }
-            item {
-                SpeedDialGrid(
-                    items = speedDial,
-                    onPlayTrack = onPlayTrack,
-                    onLongPressTrack = { track ->
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        actionsSheetOrigin = SheetOrigin.SPEED_DIAL
-                        actionsSheetItem = track
-                    },
-                )
-            }
-        }
-
-        if (quickPicks.isNotEmpty() || isLoadingQuickPicks) {
-            item {
-                SectionHeader(
-                    title = "Quick Picks",
-                    // Only offered once there is something to play. The header
-                    // itself also renders during the initial load, when
-                    // quickPicks is still empty, and a Play all that silently
-                    // did nothing would be worse than no button.
-                    onPlayAll = if (quickPicks.isNotEmpty()) {
-                        { onPlayQueue(quickPicks, 0) }
-                    } else {
-                        null
-                    },
-                    onRefresh = { viewModel.loadQuickPicks() },
-                    isRefreshing = isLoadingQuickPicks,
-                )
-            }
-            if (isLoadingQuickPicks && quickPicks.isEmpty()) {
-                items(QUICK_PICKS_SKELETON_ROW_COUNT) {
-                    com.whiplash.music.ui.theme.ShimmerSkeletonRow()
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd),
+            verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
+        ) {
+            // Show a real skeleton — not a blank gap, not the earlier
+            // "Play something to see it here." flash — for the brief window
+            // between the screen first composing and Speed dial's Room flow
+            // emitting its first real snapshot, since that snapshot could
+            // turn out to have items (needing the section to have already
+            // been "expecting" content) or turn out empty (in which case the
+            // skeleton simply disappears once isSpeedDialLoaded flips true).
+            if (!isSpeedDialLoaded) {
+                item {
+                    SectionHeader(title = "Speed dial")
+                }
+                item { SpeedDialSkeletonGrid() }
+            } else if (speedDial.isNotEmpty()) {
+                item {
+                    SectionHeader(title = "Speed dial", onHistory = onOpenHistory, onClear = { showClearSpeedDialConfirm = true })
+                }
+                item {
+                    SpeedDialGrid(
+                        items = speedDial,
+                        onPlayTrack = onPlayTrack,
+                        onLongPressTrack = { track ->
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            actionsSheetOrigin = SheetOrigin.SPEED_DIAL
+                            actionsSheetItem = track
+                        },
+                    )
                 }
             }
-            items(quickPicks, key = { "quickpick:${it.id}" }) { track ->
-                GlassListItem(
-                    title = track.title,
-                    subtitle = track.artist,
-                    onClick = { onPlayTrack(track) },
-                    onLongClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        actionsSheetOrigin = SheetOrigin.QUICK_PICKS
-                        actionsSheetItem = track
-                    },
-                    leading = { GlassArtworkThumbnail(artworkUri = track.artworkUri) },
-                    trailing = {
-                        // Same animated progress-ring/checkmark/failed
-                        // badge PlayableItemsList shows elsewhere (Search,
-                        // Local Library, Downloads tab) — a real, reported
-                        // gap: Quick Picks rows only ever checked the
-                        // completed-downloads set, never the in-flight
-                        // progress map, so a track downloaded from Quick
-                        // Picks itself showed no progress indicator and no
-                        // checkmark until the next full recomposition
-                        // (e.g. navigating away and back). Also adds the
-                        // missing 3-dot "more options" button — Quick
-                        // Picks rows previously only opened the actions
-                        // sheet via long-press, with no visible affordance
-                        // for it at all, unlike every other track list in
-                        // the app.
-                        val inFlightProgress = downloadProgress[track.id]
-                        val downloaded = track.id in downloadedIds
-                        androidx.compose.animation.AnimatedContent(
-                            targetState = when {
-                                inFlightProgress?.failed == true -> "failed"
-                                inFlightProgress != null -> "downloading"
-                                downloaded -> "downloaded"
-                                else -> "none"
-                            },
-                            label = "quickPicksDownloadStatusBadge",
-                        ) { state ->
-                            when (state) {
-                                "downloading" -> Box(
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .padding(end = GlassTokens.spaceXs)
-                                        .clickable(
-                                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                            indication = null,
-                                            role = androidx.compose.ui.semantics.Role.Button,
-                                            onClick = { cancelDownloadTarget = track },
+
+            if (quickPicks.isNotEmpty() || isLoadingQuickPicks) {
+                item {
+                    SectionHeader(
+                        title = "Quick Picks",
+                        // Only offered once there is something to play. The header
+                        // itself also renders during the initial load, when
+                        // quickPicks is still empty, and a Play all that silently
+                        // did nothing would be worse than no button.
+                        onPlayAll = if (quickPicks.isNotEmpty()) {
+                            { onPlayQueue(quickPicks, 0) }
+                        } else {
+                            null
+                        },
+                        // Scoped to this section only: it lives in the Quick
+                        // Picks header, so it refreshes Quick Picks and leaves
+                        // Speed dial alone. Pulling the whole screen down is
+                        // the gesture that refreshes everything.
+                        onRefresh = { viewModel.refreshQuickPicks() },
+                        isRefreshing = isLoadingQuickPicks,
+                    )
+                }
+                if (isLoadingQuickPicks && quickPicks.isEmpty()) {
+                    items(QUICK_PICKS_SKELETON_ROW_COUNT) {
+                        com.whiplash.music.ui.theme.ShimmerSkeletonRow()
+                    }
+                }
+                items(quickPicks, key = { "quickpick:${it.id}" }) { track ->
+                    GlassListItem(
+                        title = track.title,
+                        subtitle = track.artist,
+                        onClick = { onPlayTrack(track) },
+                        onLongClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            actionsSheetOrigin = SheetOrigin.QUICK_PICKS
+                            actionsSheetItem = track
+                        },
+                        leading = { GlassArtworkThumbnail(artworkUri = track.artworkUri) },
+                        trailing = {
+                            // Same animated progress-ring/checkmark/failed
+                            // badge PlayableItemsList shows elsewhere (Search,
+                            // Local Library, Downloads tab) — a real, reported
+                            // gap: Quick Picks rows only ever checked the
+                            // completed-downloads set, never the in-flight
+                            // progress map, so a track downloaded from Quick
+                            // Picks itself showed no progress indicator and no
+                            // checkmark until the next full recomposition
+                            // (e.g. navigating away and back). Also adds the
+                            // missing 3-dot "more options" button — Quick
+                            // Picks rows previously only opened the actions
+                            // sheet via long-press, with no visible affordance
+                            // for it at all, unlike every other track list in
+                            // the app.
+                            val inFlightProgress = downloadProgress[track.id]
+                            val downloaded = track.id in downloadedIds
+                            androidx.compose.animation.AnimatedContent(
+                                targetState = when {
+                                    inFlightProgress?.failed == true -> "failed"
+                                    inFlightProgress != null -> "downloading"
+                                    downloaded -> "downloaded"
+                                    else -> "none"
+                                },
+                                label = "quickPicksDownloadStatusBadge",
+                            ) { state ->
+                                when (state) {
+                                    "downloading" -> Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .padding(end = GlassTokens.spaceXs)
+                                            .clickable(
+                                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                                indication = null,
+                                                role = androidx.compose.ui.semantics.Role.Button,
+                                                onClick = { cancelDownloadTarget = track },
+                                            )
+                                            .semantics { contentDescription = "Cancel download of ${track.title}" },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        androidx.compose.material3.CircularProgressIndicator(
+                                            progress = { inFlightProgress?.fraction ?: 0f },
+                                            color = com.whiplash.music.ui.theme.WhiplashColors.accent,
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier.size(18.dp),
                                         )
-                                        .semantics { contentDescription = "Cancel download of ${track.title}" },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    androidx.compose.material3.CircularProgressIndicator(
-                                        progress = { inFlightProgress?.fraction ?: 0f },
-                                        color = com.whiplash.music.ui.theme.WhiplashColors.accent,
-                                        strokeWidth = 2.dp,
-                                        modifier = Modifier.size(18.dp),
+                                    }
+                                    "failed" -> androidx.compose.material3.Icon(
+                                        Icons.Filled.ErrorOutline,
+                                        contentDescription = "Download failed for ${track.title}",
+                                        tint = com.whiplash.music.ui.theme.WhiplashColors.error,
+                                        modifier = Modifier.size(18.dp).padding(end = GlassTokens.spaceXs),
                                     )
+                                    "downloaded" -> androidx.compose.material3.Icon(
+                                        Icons.Filled.DownloadDone,
+                                        contentDescription = "Downloaded",
+                                        tint = com.whiplash.music.ui.theme.WhiplashColors.accent,
+                                        modifier = Modifier.size(18.dp).padding(end = GlassTokens.spaceXs),
+                                    )
+                                    else -> androidx.compose.foundation.layout.Spacer(Modifier.size(0.dp))
                                 }
-                                "failed" -> androidx.compose.material3.Icon(
-                                    Icons.Filled.ErrorOutline,
-                                    contentDescription = "Download failed for ${track.title}",
-                                    tint = com.whiplash.music.ui.theme.WhiplashColors.error,
-                                    modifier = Modifier.size(18.dp).padding(end = GlassTokens.spaceXs),
-                                )
-                                "downloaded" -> androidx.compose.material3.Icon(
-                                    Icons.Filled.DownloadDone,
-                                    contentDescription = "Downloaded",
-                                    tint = com.whiplash.music.ui.theme.WhiplashColors.accent,
-                                    modifier = Modifier.size(18.dp).padding(end = GlassTokens.spaceXs),
-                                )
-                                else -> androidx.compose.foundation.layout.Spacer(Modifier.size(0.dp))
                             }
-                        }
-                        com.whiplash.music.ui.theme.PlainIconButton(
-                            contentDescription = "More options for ${track.title}",
-                            onClick = {
-                                actionsSheetOrigin = SheetOrigin.QUICK_PICKS
-                                actionsSheetItem = track
-                            },
-                            size = 48.dp,
-                        ) {
-                            androidx.compose.material3.Icon(
-                                Icons.Filled.MoreVert,
-                                contentDescription = null,
-                                tint = com.whiplash.music.ui.theme.WhiplashColors.textSecondary,
-                            )
-                        }
-                    },
-                )
+                            com.whiplash.music.ui.theme.PlainIconButton(
+                                contentDescription = "More options for ${track.title}",
+                                onClick = {
+                                    actionsSheetOrigin = SheetOrigin.QUICK_PICKS
+                                    actionsSheetItem = track
+                                },
+                                size = 48.dp,
+                            ) {
+                                androidx.compose.material3.Icon(
+                                    Icons.Filled.MoreVert,
+                                    contentDescription = null,
+                                    tint = com.whiplash.music.ui.theme.WhiplashColors.textSecondary,
+                                )
+                            }
+                        },
+                    )
+                }
             }
         }
     }
@@ -574,6 +612,38 @@ private fun SpeedDialTile(
             modifier = Modifier.padding(top = GlassTokens.spaceXs),
         )
     }
+}
+
+/**
+ * The pull-to-refresh spinner, themed to the app's own palette rather than
+ * left on Material's defaults — the stock indicator renders on a light
+ * container that reads as a bright blob against this app's dark frosted
+ * surfaces.
+ *
+ * Takes an explicit [modifier] because overriding `PullToRefreshBox`'s
+ * `indicator` parameter replaces its default lambda, and that default is
+ * what supplies `Modifier.align(Alignment.TopCenter)`. Without passing the
+ * alignment back in, the indicator inherits the Box's `TopStart` and draws
+ * jammed against the left edge of the screen instead of centred — which is
+ * exactly what it did until this was caught on-device.
+ *
+ * Shared by both the populated and empty Home states so the gesture looks
+ * identical either way.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HomeRefreshIndicator(
+    state: androidx.compose.material3.pulltorefresh.PullToRefreshState,
+    isRefreshing: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    PullToRefreshDefaults.Indicator(
+        state = state,
+        isRefreshing = isRefreshing,
+        containerColor = WhiplashColors.surfaceElevated,
+        color = WhiplashColors.accent,
+        modifier = modifier,
+    )
 }
 
 @Composable

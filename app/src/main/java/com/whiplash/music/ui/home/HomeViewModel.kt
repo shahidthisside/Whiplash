@@ -7,12 +7,15 @@ import com.whiplash.music.data.repository.YoutubeSearchRepository
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.domain.model.speedDialIdentity
 import com.whiplash.music.ui.common.ToastController
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
@@ -36,6 +39,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * instead: search for more music from artists the user actually played,
  * blended together rather than dominated by a single artist.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModel(
     private val libraryRepository: LibraryRepository,
     private val youtubeSearchRepository: YoutubeSearchRepository,
@@ -61,31 +65,50 @@ class HomeViewModel(
     val isSpeedDialLoaded: StateFlow<Boolean> = _isSpeedDialLoaded
 
     /**
+     * Bumped by [refreshHome] to force [speedDial] to genuinely re-subscribe
+     * to its two Room queries, which makes Room re-execute them. This is the
+     * difference between a real re-read and pretending: incrementing a
+     * counter that only re-ran the mapping block would recompute the same
+     * list from the same cached emissions and change nothing.
+     */
+    private val speedDialRefreshTrigger = MutableStateFlow(0)
+
+    /**
      * YouTube-Music-style "Speed dial" (a 3x3 grid of artwork, section 31).
      * Pinned tracks (explicitly pinned via the 3-dot menu, section 51) are
      * shown first and stay until unpinned — real persisted state, not a
      * fake toggle — filling any remaining slots with the most recently
      * played tracks that aren't already pinned.
+     *
+     * Subscribes to the repository Flows directly rather than to this
+     * ViewModel's own [recentlyPlayed] StateFlow so that a refresh actually
+     * re-queries the database: re-subscribing to a StateFlow just replays
+     * its cached value, whereas re-subscribing to a Room Flow re-runs the
+     * SQL.
      */
-    val speedDial: StateFlow<List<PlayableItem>> = kotlinx.coroutines.flow.combine(
-        libraryRepository.observePinned(),
-        recentlyPlayed,
-    ) { pinned, recent ->
-        // Real, reported bug: this used to dedup by the raw
-        // (item.source, item.id) pair — the exact same YOUTUBE/DOWNLOAD
-        // identity gap HistoryDao.observeRecentlyPlayed's own doc
-        // explains (a DownloadedTrack's id IS the YouTube video id it
-        // was downloaded from), so a song played once as a live YouTube
-        // stream and once as a downloaded file could appear as two
-        // separate Speed dial tiles for what a user experiences as one
-        // song. speedDialIdentity() normalizes YOUTUBE/DOWNLOAD together
-        // (never LOCAL, a genuinely different id namespace) so both
-        // halves of this composition — the pinned set used to exclude
-        // already-pinned tracks from the "recent" fallback, and the
-        // dedup itself — agree on what counts as the same track.
-        val pinnedIds = pinned.map { it.speedDialIdentity() }.toSet()
-        (pinned + recent.filter { it.speedDialIdentity() !in pinnedIds }).take(9)
-    }.onEach { _isSpeedDialLoaded.value = true }
+    val speedDial: StateFlow<List<PlayableItem>> = speedDialRefreshTrigger
+        .flatMapLatest {
+            kotlinx.coroutines.flow.combine(
+                libraryRepository.observePinned(),
+                libraryRepository.observeRecentlyPlayed(limit = 25),
+            ) { pinned, recent ->
+                // Real, reported bug: this used to dedup by the raw
+                // (item.source, item.id) pair — the exact same YOUTUBE/DOWNLOAD
+                // identity gap HistoryDao.observeRecentlyPlayed's own doc
+                // explains (a DownloadedTrack's id IS the YouTube video id it
+                // was downloaded from), so a song played once as a live YouTube
+                // stream and once as a downloaded file could appear as two
+                // separate Speed dial tiles for what a user experiences as one
+                // song. speedDialIdentity() normalizes YOUTUBE/DOWNLOAD together
+                // (never LOCAL, a genuinely different id namespace) so both
+                // halves of this composition — the pinned set used to exclude
+                // already-pinned tracks from the "recent" fallback, and the
+                // dedup itself — agree on what counts as the same track.
+                val pinnedIds = pinned.map { it.speedDialIdentity() }.toSet()
+                (pinned + recent.filter { it.speedDialIdentity() !in pinnedIds }).take(9)
+            }
+        }
+        .onEach { _isSpeedDialLoaded.value = true }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _quickPicks = MutableStateFlow<List<PlayableItem.YoutubeTrack>>(emptyList())
@@ -94,39 +117,136 @@ class HomeViewModel(
     private val _isLoadingQuickPicks = MutableStateFlow(false)
     val isLoadingQuickPicks: StateFlow<Boolean> = _isLoadingQuickPicks
 
+    /**
+     * True only while a whole-screen refresh the user asked for by pulling
+     * Home down is in flight. Deliberately separate from
+     * [isLoadingQuickPicks], which is also true during the automatic load
+     * from `init{}`: binding the pull-to-refresh indicator to that would
+     * drop a spinner onto the top of Home on every single cold start,
+     * unprompted, competing with the shimmer skeleton that already
+     * communicates the initial load.
+     *
+     * Only the pull gesture sets this. The Quick Picks header button does
+     * not, because it is scoped to its own section (see [refreshQuickPicks])
+     * and a section-scoped action should not animate a screen-wide control.
+     */
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing
+
     init {
         loadQuickPicks()
     }
 
+    /**
+     * Background/automatic load (app start). Fire-and-forget: nothing is
+     * waiting on it and no user-visible refresh affordance is tied to it.
+     */
     fun loadQuickPicks() {
+        viewModelScope.launch { fetchQuickPicks() }
+    }
+
+    /**
+     * Refreshes **only** Quick Picks — what the refresh button in the Quick
+     * Picks section header means. It sits in that section's header, so it
+     * refreshes that section and deliberately leaves Speed dial alone.
+     *
+     * Reports progress through [isLoadingQuickPicks], which the button
+     * already spins on, and pointedly not through [isRefreshing]: a
+     * section-scoped button should not drive the screen-wide pull indicator.
+     */
+    fun refreshQuickPicks() {
+        viewModelScope.launch { fetchQuickPicks() }
+    }
+
+    /**
+     * Refreshes the **whole** Home screen — both Speed dial and Quick Picks —
+     * which is what pulling the screen down means. Holds [isRefreshing] true
+     * until the work genuinely finishes rather than releasing the indicator
+     * on a timer, because the whole point of the spinner is that it means
+     * "still working".
+     *
+     * The two halves run concurrently and the pull is held until both are
+     * done. Speed dial's half is a local database re-read and will normally
+     * finish long before the network search; being honest about scope, that
+     * re-read rarely produces different tiles, because Speed dial is fed by
+     * Room Flows that already emit on every write to the pinned and history
+     * tables — it cannot go stale the way a cached network response can. It
+     * is re-run anyway so the gesture genuinely covers everything on screen
+     * rather than quietly ignoring half of it.
+     *
+     * Re-entrant pulls are ignored while one is already running, so
+     * repeatedly yanking the list can't stack up concurrent searches.
+     */
+    fun refreshHome() {
+        if (_isRefreshing.value) return
         viewModelScope.launch {
-            val queries = personalizedQuickPicksQueries()
-
-            // Show cached results immediately (from any query that already
-            // has a fresh cache entry) while a real network refresh runs,
-            // same "cache -> display immediately -> background refresh"
-            // pattern YoutubeSearchRepository already documents.
-            val cachedBlend = blend(queries.map { youtubeSearchRepository.cachedResults(it) ?: emptyList() })
-            if (cachedBlend.isNotEmpty()) _quickPicks.value = cachedBlend
-
-            _isLoadingQuickPicks.value = true
+            _isRefreshing.value = true
             try {
-                // Run all artist searches in parallel rather than one
-                // sequential search per artist — same total latency as
-                // the old single-query version, just fanned out.
+                coroutineScope {
+                    launch { refreshSpeedDial() }
+                    launch { fetchQuickPicks() }
+                }
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
+    }
+
+    /**
+     * Forces Room to re-execute Speed dial's two queries and waits for the
+     * fresh emission, so the pull indicator's lifetime honestly covers the
+     * database work instead of the gesture claiming to refresh something it
+     * never touched.
+     *
+     * Bounded by a timeout for the same reason
+     * [personalizedQuickPicksQueries] is: a genuinely stuck database must
+     * not leave the refresh indicator spinning forever.
+     */
+    private suspend fun refreshSpeedDial() {
+        speedDialRefreshTrigger.value += 1
+        withTimeoutOrNull(5_000L) {
+            kotlinx.coroutines.flow.combine(
+                libraryRepository.observePinned(),
+                libraryRepository.observeRecentlyPlayed(limit = 25),
+            ) { pinned, recent -> pinned.size + recent.size }.first()
+        }
+    }
+
+    private suspend fun fetchQuickPicks() {
+        val queries = personalizedQuickPicksQueries()
+
+        // Show cached results immediately (from any query that already
+        // has a fresh cache entry) while a real network refresh runs,
+        // same "cache -> display immediately -> background refresh"
+        // pattern YoutubeSearchRepository already documents.
+        val cachedBlend = blend(queries.map { youtubeSearchRepository.cachedResults(it) ?: emptyList() })
+        if (cachedBlend.isNotEmpty()) _quickPicks.value = cachedBlend
+
+        _isLoadingQuickPicks.value = true
+        try {
+            // Run all artist searches in parallel rather than one
+            // sequential search per artist — same total latency as
+            // the old single-query version, just fanned out.
+            // coroutineScope because this is a plain suspend function
+            // rather than a viewModelScope.launch block: it supplies the
+            // scope async needs, and also means a caller that cancels
+            // (refreshHome's job being cancelled with the ViewModel)
+            // cancels the in-flight searches with it rather than leaking
+            // them.
+            val blended = coroutineScope {
                 val resultSets = queries.map { query ->
                     async { runCatching { youtubeSearchRepository.search(query) }.getOrDefault(emptyList()) }
                 }.awaitAll()
-                val blended = blend(resultSets)
-                // Only replace what's showing if the blend actually
-                // produced something — an all-queries-failed network
-                // blip should leave the previous/cached results visible
-                // rather than clearing them, same as the old catch-all
-                // behavior.
-                if (blended.isNotEmpty()) _quickPicks.value = blended
-            } finally {
-                _isLoadingQuickPicks.value = false
+                blend(resultSets)
             }
+            // Only replace what's showing if the blend actually
+            // produced something — an all-queries-failed network
+            // blip should leave the previous/cached results visible
+            // rather than clearing them, same as the old catch-all
+            // behavior.
+            if (blended.isNotEmpty()) _quickPicks.value = blended
+        } finally {
+            _isLoadingQuickPicks.value = false
         }
     }
 
