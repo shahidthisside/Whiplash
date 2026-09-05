@@ -13,6 +13,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -440,12 +443,49 @@ private fun WhiplashApp() {
                                 AnimatedContent(
                                     targetState = currentPlaylist != null,
                                     transitionSpec = {
-                                        val forward = targetState && !initialState
-                                        val enter = slideInHorizontally(animationSpec = tween(GlassTokens.animRegular)) { w -> if (forward) w / 3 else -w / 3 } +
-                                            fadeIn(animationSpec = tween(GlassTokens.animRegular))
-                                        val exit = slideOutHorizontally(animationSpec = tween(GlassTokens.animFast)) { w -> if (forward) -w / 3 else w / 3 } +
-                                            fadeOut(animationSpec = tween(GlassTokens.animFast))
-                                        enter.togetherWith(exit)
+                                        // No animation: the playlist list and the playlist
+                                        // detail swap instantly, in both directions.
+                                        //
+                                        // This is a deliberate choice, not an omission.
+                                        // Opening a playlist has to compose the whole
+                                        // detail screen for the first time, and that costs
+                                        // one long frame — measured on-device with a
+                                        // 250-track imported playlist, ~95-165ms depending
+                                        // on how cold the ViewModel and Room query are.
+                                        // Because tween is driven by the clock rather than
+                                        // by frames, that lost frame doesn't pause an
+                                        // animation; the animation advances up to 40-70% of
+                                        // its duration with nothing drawn and the next
+                                        // frame lands already that far through. Every
+                                        // animated property therefore jumps rather than
+                                        // moves, and each variant failed in its own way:
+                                        //
+                                        //  - a w/3 slide snapped ~148px across and then
+                                        //    slid the remainder ("racing")
+                                        //  - adding a scale made two transforms jump at
+                                        //    once ("shaking")
+                                        //  - a cross-fade dipped the total opacity, because
+                                        //    two partly transparent layers over a dark
+                                        //    background composite to roughly 75% coverage
+                                        //    at the midpoint, so the background flashed
+                                        //    through ("blinking")
+                                        //  - sliding both children by a third of the width
+                                        //    left a band that neither covered mid-slide,
+                                        //    flashing the background again
+                                        //
+                                        // An instant swap has no property to interpolate,
+                                        // so a dropped frame cannot show up as movement, a
+                                        // reflow or a flash. sizeTransform is still pinned
+                                        // to null: left at its default, AnimatedContent
+                                        // animates its container between the two children's
+                                        // measured heights and clips to that size each
+                                        // frame, which reflowed the content even with no
+                                        // enter/exit transition at all.
+                                        ContentTransform(
+                                            targetContentEnter = EnterTransition.None,
+                                            initialContentExit = ExitTransition.None,
+                                            sizeTransform = null,
+                                        )
                                     },
                                     label = "playlistDetailContent",
                                 ) { _ ->
