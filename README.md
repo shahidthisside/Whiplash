@@ -14,7 +14,7 @@
 - Multi-provider fallback architecture (`PlaybackManager` + `ProviderHealthTracker`) designed to add additional extraction providers without touching call sites
 - Gapless playback, adjustable playback speed, and a fade between tracks (the current song fades out and the next fades in — a genuine audible fade rather than an overlapping two-stream crossfade, since the player holds one resolved track at a time)
 - Sleep timer (fixed durations, end-of-song, end-of-queue)
-- Persistent queue with reordering, "play next," and "add to queue," plus an Autoplay on/off shortcut right in the Queue sheet
+- Queue with reordering, "play next," and "add to queue," plus an Autoplay on/off shortcut right in the Queue sheet — and it opens scrolled to the track that's playing rather than back at the top, which matters once autoplay has grown the queue past a screenful
 - YouTube-style autoplay: automatically extends the queue with related, music-only tracks when Autoplay is enabled (a video's YouTube category is checked so non-music results never sneak in)
 - Local/offline device music library (MediaStore-backed), including automatic library refresh via a `ContentObserver` when files change on disk
 - Offline downloads: save any YouTube track's audio for playback with no network at all, with its own Downloads tab, a per-row progress/checkmark/failed badge everywhere that track appears, and bulk "Download album/playlist" actions — download quality is configurable independently from streaming quality
@@ -22,7 +22,7 @@
 ### Library & Discovery
 - YouTube search across Songs, Albums, Artists and Playlists — each tab loads and fails independently, so one category erroring never blanks another and each shows its own retry — with YouTube-Music-style recent searches, live search suggestions while typing, and genuine infinite scroll on every result tab. On-device music has its own dedicated search inside the Library tab.
 - Album and Artist detail pages with real metadata, track listings, playback actions, and a Share button on search-result albums/playlists (shares the real YouTube link)
-- A full History screen (up to 200 recently played tracks, with per-item removal), Favorites, Playlists (create/rename/delete, plus importing a whole playlist by pasting a YouTube or YouTube Music playlist link), and a Speed Dial / Quick Picks home surface
+- A full History screen (up to 200 recently played tracks, with per-item removal), Favorites, Playlists (create/rename/delete, plus importing a whole playlist by pasting a YouTube or YouTube Music playlist link), and a Speed Dial / Quick Picks home surface with a one-tap Play-all for the whole Quick Picks set
 - Favorites and Playlists both offer one-tap Shuffle and Play-all actions
 - Copy or move a song between playlists directly from its own long-press menu
 - Advanced, per-category local backup and restore — choose exactly which of Playlists, Favorites, History, Pinned songs, Downloads, and Settings to back up (or restore all of them, the previous all-or-nothing default)
@@ -31,7 +31,8 @@
 ### Design & UX
 - App-wide toast feedback on every action that would otherwise complete silently (favoriting, pinning, playlist changes, queue actions, clearing history/cache/search, and more)
 - A custom dark, frosted-surface design system built on Jetpack Compose + Material 3 (translucent tinted surfaces, soft borders, layered elevation)
-- Smooth, directional transitions across navigation — tab switches crossfade, drilling into a detail screen slides in the direction you're actually moving
+- Smooth transitions across navigation — tab switches crossfade, and drilling into an album or artist detail screen slides in the direction you're moving. Opening a playlist is a deliberate exception: it swaps instantly, because that screen's first composition costs a long frame and any animation across it visibly jumped rather than moved
+- Back returns to Home from any other tab rather than closing the app, and Favorites carries a matching back button
 - Six selectable color themes with instant, persisted switching
 - Four full-player seek bar visual styles (Classic, Wavy, Waveform, Minimal), picked live with mini-previews in Settings
 - Local backup and restore: saves whichever categories you choose (or everything) to a single file via the system file picker, and can restore from it later
@@ -137,6 +138,7 @@ Being transparent about what isn't (yet) fully solved:
 - **OEM "island" / live-activity style notifications** (e.g., Vivo/iQOO OriginOS's "Origin Island") are a vendor-OS reskin of the standard Android media notification, not a public API third-party apps can opt into. Whiplash uses the correct, standard `MediaSessionService` + `MediaStyle` architecture; whether the OS elevates it to an island view is outside the app's control, and is a documented inconsistency affecting other third-party media apps as well.
 - **Vivo/iQOO OriginOS's "Origin Player" quick-switch audio-source picker** only lists a small, hardcoded set of partner apps (confirmed on-device: it shows the system Music app plus Spotify as "installable," with no public, documented way for a third-party app to be added). Whiplash's `MediaSession` is verified fully correct and active via `dumpsys media_session` (real live `PlaybackState`, correct session flags, Bluetooth/AVRCP routing all confirmed working) — this omission is a closed vendor allowlist, not a gap in the app's own media-session implementation.
 - The in-app notification's own Next/Previous buttons may not appear on every OEM skin, even though the underlying session correctly reports Next/Previous availability to the system (verified via the legacy `PlaybackState` bridge that Bluetooth/AVRCP and most lock screens read). This stems from ExoPlayer only ever holding one resolved track at a time — YouTube streams require an async network resolve before they can be loaded — rather than a real multi-item timeline.
+- The playback queue lives in memory for the lifetime of the process. It survives Activity recreation, screen rotation and backgrounding, but closing the app (or the system reclaiming it) clears it — there is no queue table in the database, so a queue built up over a long autoplay session isn't restored on next launch. Playlists, Favorites, History, Pinned songs and Downloads are all persisted; the queue is not.
 - YouTube/YouTube Music access relies on NewPipeExtractor's unofficial extraction. YouTube can change its internal APIs at any time, which may require an extractor library update.
 
 ---
