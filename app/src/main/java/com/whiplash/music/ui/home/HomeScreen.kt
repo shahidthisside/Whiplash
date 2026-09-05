@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -82,7 +83,11 @@ private const val QUICK_PICKS_SKELETON_ROW_COUNT = 5
 @androidx.compose.material3.ExperimentalMaterial3Api
 @ExperimentalFoundationApi
 @Composable
-fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
+fun HomeScreen(
+    onPlayTrack: (PlayableItem) -> Unit,
+    onOpenHistory: () -> Unit,
+    onPlayQueue: (queue: List<PlayableItem>, startIndex: Int) -> Unit = { _, _ -> },
+) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: HomeViewModel = viewModel(
@@ -161,6 +166,15 @@ fun HomeScreen(onPlayTrack: (PlayableItem) -> Unit, onOpenHistory: () -> Unit) {
             item {
                 SectionHeader(
                     title = "Quick Picks",
+                    // Only offered once there is something to play. The header
+                    // itself also renders during the initial load, when
+                    // quickPicks is still empty, and a Play all that silently
+                    // did nothing would be worse than no button.
+                    onPlayAll = if (quickPicks.isNotEmpty()) {
+                        { onPlayQueue(quickPicks, 0) }
+                    } else {
+                        null
+                    },
                     onRefresh = { viewModel.loadQuickPicks() },
                     isRefreshing = isLoadingQuickPicks,
                 )
@@ -566,6 +580,7 @@ private fun SpeedDialTile(
 private fun SectionHeader(
     title: String,
     onHistory: (() -> Unit)? = null,
+    onPlayAll: (() -> Unit)? = null,
     onRefresh: (() -> Unit)? = null,
     isRefreshing: Boolean = false,
     onClear: (() -> Unit)? = null,
@@ -585,6 +600,21 @@ private fun SectionHeader(
                 PlainIconButton(contentDescription = "See full history", onClick = onHistory, size = 48.dp) {
                     androidx.compose.material3.Icon(
                         Icons.Filled.History,
+                        contentDescription = null,
+                        tint = WhiplashColors.textSecondary,
+                    )
+                }
+            }
+            // Placed before refresh so the row reads play-then-reload, and
+            // tinted like the other section actions rather than accented —
+            // this is a convenience shortcut, not the screen's primary
+            // action. Only supplied by a section that actually has items to
+            // play (see the Quick Picks call site), so it never renders as a
+            // button that would do nothing.
+            if (onPlayAll != null) {
+                PlainIconButton(contentDescription = "Play all $title", onClick = onPlayAll, size = 48.dp) {
+                    androidx.compose.material3.Icon(
+                        Icons.Filled.PlayArrow,
                         contentDescription = null,
                         tint = WhiplashColors.textSecondary,
                     )

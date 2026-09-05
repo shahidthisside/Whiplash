@@ -368,6 +368,7 @@ private fun WhiplashApp() {
                                         HomeScreen(
                                             onPlayTrack = { track -> app.playbackController.playNow(track) },
                                             onOpenHistory = { showHistory = true },
+                                            onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
                                         )
                                     } else {
                                         com.whiplash.music.ui.home.HistoryScreen(
