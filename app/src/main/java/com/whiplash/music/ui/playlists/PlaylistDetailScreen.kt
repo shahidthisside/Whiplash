@@ -18,6 +18,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.whiplash.music.WhiplashApplication
@@ -67,10 +68,26 @@ fun PlaylistDetailScreen(
                 text = playlist.name,
                 style = MaterialTheme.typography.titleMedium,
                 color = WhiplashColors.textPrimary,
+                // Long names — common on imported playlists, whose titles come
+                // straight from YouTube and often run to a full sentence — used
+                // to wrap here and push this header to two or three lines,
+                // shoving the Shuffle/Play/Download buttons around with them.
+                // The weight below already constrains the width, so all that
+                // was missing was permission to clip.
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = GlassTokens.spaceSm).weight(1f),
             )
             if (tracks.isNotEmpty()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm), verticalAlignment = Alignment.CenterVertically) {
+                // No extra spacing between these. Each PlainIconButton is a
+                // 48dp box around a 24dp icon, so it already carries 12dp of
+                // padding on every side; adding 8dp on top pushed adjacent
+                // icons 32dp apart and left the row looking gappy and
+                // disconnected. Butting the boxes together gives the 24dp
+                // icon-to-icon gap that a standard app-bar action row uses,
+                // with the touch targets still a full 48dp and still not
+                // overlapping.
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     PlainIconButton(contentDescription = "Shuffle play", onClick = { onPlayQueue(tracks.shuffled(), 0) }) {
                         Icon(Icons.Filled.Shuffle, contentDescription = null, tint = WhiplashColors.textPrimary)
                     }

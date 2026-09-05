@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -199,6 +200,14 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                     text = toDelete.name,
                     style = MaterialTheme.typography.titleMedium,
                     color = WhiplashColors.textPrimary,
+                    // Two lines rather than one: this is the sheet's own title
+                    // with the full width to itself, so there is room to show
+                    // more of a long imported-playlist name than the detail
+                    // header can. It still has to stop somewhere — unbounded, a
+                    // sentence-length name pushed the actions below it down the
+                    // screen.
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(bottom = GlassTokens.spaceSm),
                 )
                 if (hasTracks) {

@@ -58,7 +58,12 @@ fun FavoritesScreen(onPlayQueue: (queue: List<PlayableItem>, startIndex: Int) ->
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+            // Same reasoning as the playlist detail header: a PlainIconButton
+            // is a 48dp box around a 24dp icon and already carries 12dp of
+            // padding per side, so extra spacing here pushed the icons 32dp
+            // apart. Butted together they sit the standard 24dp apart, and
+            // these two rows stay visually identical to each other.
+            Row {
                 PlainIconButton(contentDescription = "Shuffle play", onClick = { onPlayQueue(favorites.shuffled(), 0) }) {
                     Icon(Icons.Filled.Shuffle, contentDescription = null, tint = WhiplashColors.textPrimary)
                 }
