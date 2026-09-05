@@ -186,7 +186,18 @@ private fun ArtistDetailContent(
                     }
                 }
                 androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
-                Text(text = detail.name, style = MaterialTheme.typography.headlineSmall, color = WhiplashColors.textPrimary)
+                Text(
+                    text = detail.name,
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = WhiplashColors.textPrimary,
+                    // Same defect that affected playlist names: with no cap, a
+                    // long channel name wrapped down the page and pushed the
+                    // subscriber count and action row with it. Two lines rather
+                    // than one because this is the screen's own title at
+                    // headlineSmall and has the full width to itself.
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 detail.subscriberCount?.let {
                     Text(
                         text = "${com.whiplash.music.ui.common.formatCompactCount(it)} subscribers",
