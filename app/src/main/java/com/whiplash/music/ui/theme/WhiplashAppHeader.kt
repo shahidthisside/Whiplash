@@ -32,7 +32,14 @@ fun WhiplashAppHeader(title: String = "Whiplash", modifier: Modifier = Modifier)
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = GlassTokens.spaceLg, vertical = GlassTokens.spaceMd),
+            // Horizontal inset must match the screen content below it. Every
+            // screen — Home, Search, Library, Favorites, Playlists, Settings —
+            // insets its content by spaceMd, so the header using spaceLg left
+            // the title sitting 8dp further right than the first section label
+            // beneath it ("Whiplash" against "Quick Picks", "Settings" against
+            // "Playback"), which read as a misalignment rather than a
+            // deliberate indent.
+            .padding(horizontal = GlassTokens.spaceMd, vertical = GlassTokens.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AnimatedContent(
