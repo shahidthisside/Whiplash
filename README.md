@@ -23,6 +23,7 @@
 - YouTube search across Songs, Albums, Artists and Playlists — each tab loads and fails independently, so one category erroring never blanks another and each shows its own retry — with YouTube-Music-style recent searches, live search suggestions while typing, and genuine infinite scroll on every result tab. On-device music has its own dedicated search inside the Library tab.
 - Album and Artist detail pages with real metadata, track listings, playback actions, and a Share button on search-result albums/playlists (shares the real YouTube link)
 - A full History screen (up to 200 recently played tracks, with per-item removal), Favorites, Playlists (create/rename/delete, plus importing a whole playlist by pasting a YouTube or YouTube Music playlist link), and a Speed Dial / Quick Picks home surface with a one-tap Play-all for the whole Quick Picks set
+- Pull Home down to refresh the whole screen — Speed dial and Quick Picks together — with the spinner held until the work actually finishes rather than released on a timer. The refresh button in the Quick Picks header keeps its narrower meaning and refreshes only that section, since that's the section it sits in
 - Favorites and Playlists both offer one-tap Shuffle and Play-all actions
 - Copy or move a song between playlists directly from its own long-press menu
 - Advanced, per-category local backup and restore — choose exactly which of Playlists, Favorites, History, Pinned songs, Downloads, and Settings to back up (or restore all of them, the previous all-or-nothing default)

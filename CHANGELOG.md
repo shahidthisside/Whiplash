@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Pull Home down to refresh it. Both Speed dial and Quick Picks are refreshed together, and the spinner is held until the work genuinely finishes rather than released on a timer. The refresh button in the Quick Picks header is unchanged and still refreshes only Quick Picks, since that's the section it sits in — so a pull spins both the pull indicator and that button, while tapping the button spins only itself.
 - The Queue sheet now opens scrolled to the track that's playing instead of back at the top. Once autoplay has extended a queue to a few hundred entries, the current song was far below the fold and had to be hunted for, even though the sheet already highlighted it.
 - A one-tap Play all in the Quick Picks header, next to Refresh. Quick Picks rows could only be played one at a time — the shortcut Favorites and Playlists already had.
 - Back from any tab other than Home now returns to Home rather than closing the app, which is the standard behaviour for a bottom-navigation app. Favorites also gains a matching back button, present whether or not you have any favorites yet.
