@@ -280,6 +280,30 @@ private fun WhiplashApp() {
         searchDetailStack = searchDetailStack.dropLast(1)
     }
 
+    // Back from any non-Home tab returns to Home instead of leaving the app,
+    // which is the platform's recommended bottom-navigation behavior — only
+    // Home is a genuine exit point. Without this, back from Library, Search,
+    // Favorites, Playlists or Settings fell through to the Activity default
+    // and closed the app outright.
+    //
+    // The condition deliberately repeats every state the handlers above
+    // already intercept rather than relying on being declared last. Compose
+    // adds these callbacks to the dispatcher in composition order and the
+    // most recently added *enabled* one wins, so leaving them overlapping
+    // would make this handler quietly outrank them and swallow a detail
+    // screen's own back. Keeping them mutually exclusive means exactly one
+    // handler is ever enabled and the declaration order can't change the
+    // outcome.
+    BackHandler(
+        enabled = !isPlayerExpanded &&
+            selectedTab != AppTab.HOME &&
+            !showHistory &&
+            openPlaylist == null &&
+            searchDetailStack.isEmpty(),
+    ) {
+        selectedTab = AppTab.HOME
+    }
+
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { innerPadding ->
         // Single Box hosting every layer of the screen (tab content, mini
         // player, bottom nav, full player) so Compose's z-order-based hit
