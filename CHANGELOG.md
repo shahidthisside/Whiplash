@@ -4,6 +4,38 @@ All notable changes to Whiplash are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- Separate audio quality ceilings for Wi-Fi and mobile data, so streaming can stay at the highest quality on Wi-Fi without spending mobile data at the same rate. Both fall back to the existing single Audio Quality value, so nothing changes until you set them.
+- A Skip Silence toggle that removes silent stretches from playback, applied to the running player rather than only from the next track onward.
+- Downloaded files now carry embedded title, artist, album and cover art in the file itself, so a downloaded track shows up correctly in other music players and file managers rather than as an untitled audio file.
+
+### Fixed
+- **Audio caching never saved anything at all.** The cache directory stayed empty no matter how much was played, so every replay of a song re-downloaded it in full and playback in airplane mode was impossible. Audio is now fetched in explicit byte ranges, which both fixes the caching and stops YouTube pacing the download to real-time playback speed — the reason a stalled buffer never recovered.
+- **Music could stop dead in the middle of a session with no error, no retry and no skip.** Nothing in the app listened for player-level failures, so when a stream URL expired mid-playback ExoPlayer reported the failure into a void and simply went idle. A track now gets one automatic retry from where it stopped, which makes an expired URL recover on its own; anything else shows a real message instead of silence.
+- **A partly-downloaded song could be saved with a completed checkmark.** The download was marked finished as soon as the data stopped arriving, which is indistinguishable from a connection dropping halfway. The file size is now checked against what the server said to expect, so a cut-off transfer retries instead of leaving an unplayable track behind a checkmark.
+- **Downloading a whole album opened one connection per track simultaneously** — 50 tracks meant 50 parallel downloads, each holding a full copy of its file in memory to write metadata. Now capped at three at a time, with the rest queued and still cancellable.
+- **The wrong song's lyrics could be displayed**, scrolling in sync with nothing to indicate they were wrong. Lyrics were taken from the first fuzzy search result without checking it was even the same song. A candidate now has to match on title, on artist, and on duration within five seconds, or lyrics are honestly reported as unavailable.
+- **The lockscreen's elapsed/remaining time and progress bar now update reliably** while the screen is off, instead of sometimes sitting blank and frozen until a pause/play or skip. The first playback state was being published while the main thread was busy writing history, before the track duration was known, and the lockscreen widget cached that incomplete state.
+- **A song YouTube has taken down no longer leaves a permanently dead Speed dial tile.** A play was recorded the instant a song was tapped, before anything knew whether it could actually play, so an unavailable track earned a tile it could never honour — and a song with two uploads on YouTube showed two tiles, one of which never worked.
+- **The first song played after a fresh install now appears in History and Speed dial immediately**, instead of staying invisible until a second song was played or the app was restarted.
+- **The 200-entry History limit was only ever a display limit.** Nothing deleted old rows, so the table grew on every single play forever, getting slower the longer the app was used.
+- **A failed search category looked identical to having no results.** If Albums, Playlists or Artists failed to load, the tab simply showed nothing, with no indication anything had gone wrong and no way to retry. Each tab now reports its own error and offers a retry, and "No results" is only shown when every category genuinely came back empty.
+- **A restore that reported failure could still have overwritten half your library.** Restoring is now all-or-nothing, so a failure leaves everything exactly as it was. Backups from a newer version of the app are refused outright instead of being partly imported, and Skip Silence and the per-network quality settings are now included, having previously been lost silently on reinstall.
+- **Restoring a backup could fill the Downloads tab with unplayable songs** — download records were recreated even though the audio files themselves aren't part of a backup. Downloads whose file isn't present are now skipped, and download records whose file has since been deleted are cleaned up on startup.
+- **Duplicate results in a single search response could crash the results list.** YouTube legitimately returns the same video or playlist twice, and the first page of every search went on screen unchecked.
+- **Tapping the GitHub link in Settings could kill the app** on a device or work profile with no browser installed. It now shows a message instead.
+- Cancelling an in-flight download could delete a *different* download's file if the app happened to be starting up at the time.
+- The on-device music library could be left inconsistent — songs removed while their albums still counted them — if a rescan was interrupted partway. It now applies as a single all-or-nothing update, and a permission revoked mid-scan reports a scan error instead of crashing.
+- Turning off Audio Cache while a song was queued to play could leave that song unable to start.
+- The search cache and the in-memory lyrics cache both grew without limit for the lifetime of the app, as did the queue when Autoplay was left running for hours.
+- Icon buttons across the mini-player, queue and every song row were smaller than the 48dp minimum the app documents. The icons look the same; only the tappable area grew.
+- Deleting a playlist now asks for confirmation first, matching every other irreversible action in the app.
+- Adding a song to a playlist it's already in now says so, instead of claiming it was added.
+- Tapping the Home, Search or Playlists tab while already on it now backs out of an open History, search detail or playlist, matching the back gesture.
+- Shuffle and Repeat now confirm their new state, rather than only changing an icon tint — easy to miss on Repeat, where three states share one icon.
+
 ## [0.4.0] - 2026-09-03
 
 ### Added
