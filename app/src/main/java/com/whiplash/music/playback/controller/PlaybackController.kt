@@ -573,6 +573,29 @@ class PlaybackController(
                     startMediaItem(displayItem, resolvedStreamUrl = "cache://$mediaId")
                     maybeExtendQueueWithRecommendations(item)
                 } else {
+                    // Publish this track's metadata to the MediaSession right
+                    // now, before its stream has been resolved. This branch is
+                    // the only one that makes a network round-trip before
+                    // playback can start, so it's the only one where the
+                    // session would otherwise be left describing the previous
+                    // track.
+                    //
+                    // Reported and reproduced on-device: skipping from the
+                    // lock screen (or the notification, or a Bluetooth
+                    // control) left the old title, artist and artwork on
+                    // screen for the whole resolve — measured 3-4.5s — while
+                    // the state showed PAUSED, so a skip looked like the
+                    // current song had merely been paused. Skipping several
+                    // tracks quickly gave no feedback at all and made it
+                    // impossible to tell where you were in the queue. The
+                    // in-app UI never had this problem because [playIndex]
+                    // swaps currentItem in its own state immediately (see the
+                    // _state.update above, whose comment describes fixing
+                    // exactly this "half-updated transition" for the app's own
+                    // seek bar); that instant switch simply never reached the
+                    // session.
+                    publishPendingMetadata(displayItem)
+
                     // Real, on-device-confirmed problem: maybeExtendQueueWithRecommendations
                     // used to only be called AFTER playbackManager.resolveStream()
                     // succeeded — but these two operations are fully
@@ -915,6 +938,59 @@ class PlaybackController(
         if (removable <= 0) return
         repeat(removable) { queue.removeAt(0) }
         currentIndex -= removable
+    }
+
+    /**
+     * Pushes [item]'s metadata to the MediaSession before its stream has been
+     * resolved, so the lock screen, notification, Bluetooth/AVRCP and OEM
+     * surfaces switch to the new track at the moment the user asks for it
+     * rather than several seconds later.
+     *
+     * Deliberately calls `stop()` before `setMediaItem`, and never `prepare()`
+     * or `play()`.
+     *
+     * The `stop()` is load-bearing, not defensive tidying. `setMediaItem` on a
+     * player that is already prepared does not wait for another `prepare()` —
+     * ExoPlayer begins loading the new item immediately — so setting the
+     * placeholder on a live player made it genuinely try to open a URI that
+     * resolves to nothing. Confirmed on-device: the session went BUFFERING and
+     * then `STATE_ERROR / "Source error"`. Online that error usually lost a
+     * race to the real item arriving from [startMediaItem] a few seconds
+     * later, which is exactly what makes it unacceptable — on a slow resolve
+     * it would surface a spurious playback error, and it also tripped
+     * [handlePlayerError] into spending its one recovery attempt on a failure
+     * that was never real. `stop()` returns the player to IDLE first, where
+     * `setMediaItem` only records the item and publishes its metadata without
+     * loading anything. Stopping is also what a skip already did in effect —
+     * the previous behaviour left the session PAUSED for the whole resolve.
+     *
+     * The URI is a placeholder purely because it cannot be omitted:
+     * `DefaultMediaSourceFactory.createMediaSource` requires a non-null
+     * `localConfiguration`, so a metadata-only [MediaItem] would throw the
+     * moment it reached the player. A dedicated [PENDING_SCHEME] is used
+     * rather than reusing the existing `cache://` scheme, which
+     * [com.whiplash.music.playback.cache.TogglableCacheDataSourceFactory]
+     * treats as a real "this is already fully cached" claim and would try to
+     * dereference — this URI must never resolve to anything.
+     *
+     * Wrapped in runCatching because this is presentation only. Playback
+     * correctness must not depend on it: if any Media3 version rejects an
+     * unprepared item with an unknown scheme, the worst acceptable outcome is
+     * the old stale-metadata behaviour, never a failure to play.
+     */
+    private fun publishPendingMetadata(item: PlayableItem) {
+        val c = controller ?: return
+        runCatching {
+            // Order matters — see the doc comment. IDLE first, so the
+            // placeholder is recorded and published but never opened.
+            c.stop()
+            c.setMediaItem(
+                PlayableItemMediaItemMapper.toMediaItem(
+                    item,
+                    resolvedStreamUrl = "$PENDING_SCHEME://${PlayableItemMediaItemMapper.mediaIdOf(item)}",
+                ),
+            )
+        }
     }
 
     private fun startMediaItem(
@@ -1334,6 +1410,16 @@ class PlaybackController(
     }
 
     private companion object {
+        /**
+         * Scheme for the inert placeholder URI [publishPendingMetadata]
+         * attaches to a not-yet-resolved track. Kept distinct from the
+         * `cache://` fast-path scheme, which the data source layer treats as
+         * a real claim that the audio is already on disk and will try to
+         * dereference. Nothing ever opens this one: the item carrying it is
+         * never prepared.
+         */
+        const val PENDING_SCHEME = "pending"
+
         /**
          * [PlaybackException] error codes that mean "the network/stream was
          * the problem" rather than "this media is broken", used by
