@@ -1,5 +1,7 @@
 package com.whiplash.music.ui.theme
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -190,17 +192,32 @@ fun GlassChip(
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(WhiplashRadius.pill)
-    val tint = if (selected) WhiplashColors.accent else WhiplashColors.surfaceElevated
-    val opacity = if (selected) GlassTokens.opacityElevated else GlassTokens.opacityRegular
-    val contentColor = if (selected) WhiplashColors.onAccent else WhiplashColors.textPrimary
+
+    // Only the selected chip is filled. Previously every chip carried a
+    // translucent fill *and* a border, so a four-item row read as four
+    // equally-active buttons with no visual answer to "which one am I on" —
+    // the selected accent fill was competing with three other filled,
+    // outlined boxes rather than standing alone. Letting the unselected ones
+    // fall back to plain muted text is what the same control does in
+    // YouTube Music and Spotify, and it costs nothing to read.
+    val background by animateColorAsState(
+        targetValue = if (selected) WhiplashColors.accent.copy(alpha = GlassTokens.opacityElevated) else Color.Transparent,
+        animationSpec = tween(GlassTokens.animFast),
+        label = "chipBackground",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) WhiplashColors.onAccent else WhiplashColors.textSecondary,
+        animationSpec = tween(GlassTokens.animFast),
+        label = "chipContent",
+    )
 
     Box(
         modifier = modifier
+            .heightIn(min = CHIP_MIN_HEIGHT)
             .clip(shape)
-            .background(tint.copy(alpha = opacity))
-            .border(GlassTokens.borderWidth, WhiplashColors.glassBorder, shape)
+            .background(background)
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = GlassTokens.spaceMd, vertical = GlassTokens.spaceXs),
+            .padding(horizontal = CHIP_HORIZONTAL_PADDING),
         contentAlignment = Alignment.Center,
     ) {
         CompositionLocalProvider(LocalContentColor provides contentColor) {
@@ -213,6 +230,21 @@ fun GlassChip(
         }
     }
 }
+
+/**
+ * Visible size of a [GlassChip].
+ *
+ * Kept deliberately compact. These rows carry a result count in the label
+ * ("Playlists (20)"), so they are already wide, and a taller pill on top of
+ * that reads as heavy rather than substantial.
+ *
+ * This is only the *drawn* size — Compose expands the clickable area to the
+ * 48dp interactive minimum on its own, which the on-device hierarchy
+ * confirms (110dp-tall pill inside a 132px/48dp clickable node), so slimming
+ * the pill costs nothing in tappability.
+ */
+private val CHIP_MIN_HEIGHT = 32.dp
+private val CHIP_HORIZONTAL_PADDING = 12.dp
 
 /**
  * The primary play/pause button for the full player transport row.
