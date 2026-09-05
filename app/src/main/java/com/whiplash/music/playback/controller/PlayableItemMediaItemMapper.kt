@@ -46,6 +46,35 @@ object PlayableItemMediaItemMapper {
             .setArtist(item.artist)
             .setAlbumTitle(item.album)
             .setArtworkUri(artworkUri)
+            // Publish the duration we already know, which every PlayableItem
+            // carries before playback even starts.
+            //
+            // Media3's legacy bridge — LegacyConversions
+            // .convertToMediaMetadataCompat, which is what the lock screen,
+            // Bluetooth/AVRCP and OEM media surfaces actually read — takes
+            // the player's own duration when it has one, falls back to this
+            // field when it doesn't, and writes METADATA_KEY_DURATION = -1
+            // when neither is available. ExoPlayer only learns the duration
+            // once it has parsed enough of the container, so any metadata
+            // published before that point sent -1, leaving the lock screen
+            // with no scale to draw: blank elapsed/remaining and a progress
+            // bar that sat still until some later state change forced a
+            // refresh. Whether that race was won or lost varied with network
+            // speed, cache hits and main-thread load, which is why the
+            // symptom came and went and looked like a vendor rendering quirk.
+            //
+            // Setting it here removes the race without ever overriding the
+            // player: its duration still wins whenever it knows one, so this
+            // only ever replaces -1 with a real value. Nothing in the app
+            // reads this field — the in-app seek bar uses the player's
+            // duration directly — so this is confined to what external
+            // surfaces see.
+            //
+            // Guarded on a positive value: an unknown/zero duration must stay
+            // unset so the bridge keeps reporting -1 ("unknown") rather than
+            // asserting a zero-length track, which would peg a progress bar
+            // at its end instead of leaving it blank.
+            .apply { if (item.durationMs > 0) setDurationMs(item.durationMs) }
             .build()
 
         val builder = MediaItem.Builder()
