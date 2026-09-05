@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -100,7 +102,30 @@ fun QueueContent(
             }
         }
 
-        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+        // Open the queue positioned on the track that's actually playing.
+        //
+        // The list previously always started at the top, so with a queue that
+        // autoplay had extended — which can run to hundreds of entries — the
+        // current song was far below the fold and had to be hunted for by
+        // scrolling, even though the sheet already knew which row it was.
+        //
+        // Keyed on Unit rather than currentIndex deliberately: this runs once
+        // per opening of the sheet (the caller composes QueueContent only while
+        // it's open, so re-opening re-runs it), and never again while the sheet
+        // stays open. Keying on currentIndex instead would yank the list out
+        // from under the user the moment a track advanced mid-browse.
+        //
+        // scrollToItem, not animateScrollToItem: the correct row should already
+        // be there when the sheet settles, rather than the user watching it
+        // travel past several hundred entries.
+        val listState = rememberLazyListState()
+        LaunchedEffect(Unit) {
+            if (queue.isNotEmpty() && currentIndex > 0) {
+                listState.scrollToItem(currentIndex.coerceAtMost(queue.lastIndex))
+            }
+        }
+
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
             itemsIndexed(queue, key = { index, item -> "$index:${item.id}" }) { index, item ->
                 QueueRow(
                     item = item,
