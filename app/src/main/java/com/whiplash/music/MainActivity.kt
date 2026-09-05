@@ -438,6 +438,7 @@ private fun WhiplashApp() {
                             )
                             AppTab.FAVORITES -> FavoritesScreen(
                                 onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                                onBack = { selectedTab = AppTab.HOME },
                             )
                             AppTab.PLAYLISTS -> {
                                 val currentPlaylist = openPlaylist
