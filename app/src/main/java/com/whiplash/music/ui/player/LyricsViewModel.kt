@@ -26,8 +26,9 @@ import kotlinx.coroutines.flow.stateIn
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class LyricsViewModel(
-    controller: PlaybackController,
+    private val controller: PlaybackController,
     private val lrcLibProvider: LrcLibProvider,
+    private val lyricOffsetStore: com.whiplash.music.data.repository.LyricOffsetStore,
 ) : ViewModel() {
 
     /**
@@ -68,6 +69,31 @@ class LyricsViewModel(
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /**
+     * The listener's timing offset for the current track's synced lyrics
+     * (see [com.whiplash.music.domain.model.normalizeLyricOffsetMs] for the
+     * sign convention). Keyed on the bare track id rather than source+id, so
+     * a song keeps its correction after it is downloaded and plays from the
+     * device instead of the stream: the audio, and so the timing, is the same.
+     */
+    val lyricOffsetMs: StateFlow<Long> = kotlinx.coroutines.flow.combine(
+        controller.state.map { it.currentItem?.id }.distinctUntilChanged(),
+        lyricOffsetStore.offsets,
+    ) { id, offsets -> id?.let { offsets[it] } ?: 0L }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    /** Nudges the current track's offset by [deltaMs] (clamped and snapped). */
+    fun adjustLyricOffset(deltaMs: Long) {
+        val id = controller.state.value.currentItem?.id ?: return
+        lyricOffsetStore.setOffset(id, lyricOffsetStore.offsetFor(id) + deltaMs)
+    }
+
+    /** Clears the current track's offset back to the LRC file's own timing. */
+    fun resetLyricOffset() {
+        val id = controller.state.value.currentItem?.id ?: return
+        lyricOffsetStore.setOffset(id, 0L)
+    }
 
     private fun trackKey(item: PlayableItem?): String? = item?.let { "${it.source}:${it.id}" }
 

@@ -23,6 +23,8 @@ data class PlaybackState(
     val sleepTimer: SleepTimerMode? = null,
     /** Milliseconds remaining until the active duration-based sleep timer fires, or null for non-duration modes / no timer. */
     val sleepTimerRemainingMs: Long? = null,
+    /** Codec/sample rate/etc. of the audio track actually playing (Stats for nerds), or null while unknown. */
+    val audioInfo: AudioStreamInfo? = null,
 )
 
 enum class RepeatMode { OFF, ONE, ALL }

@@ -79,7 +79,7 @@ class WhiplashApplication : Application() {
     }
 
     val backupManager: com.whiplash.music.data.backup.BackupManager by lazy {
-        com.whiplash.music.data.backup.BackupManager(this, database, settingsRepository)
+        com.whiplash.music.data.backup.BackupManager(this, database, settingsRepository, lyricOffsetStore)
     }
 
     val libraryRepository: LibraryRepository by lazy {
@@ -115,6 +115,10 @@ class WhiplashApplication : Application() {
     }
 
     val lrcLibProvider: LrcLibProvider by lazy { LrcLibProvider(okHttpClient) }
+
+    val lyricOffsetStore: com.whiplash.music.data.repository.LyricOffsetStore by lazy {
+        com.whiplash.music.data.repository.LyricOffsetStore(this)
+    }
 
     /**
      * Provider priority list for automatic fallback (section 7/8). Provider

@@ -67,7 +67,9 @@ class NewPipePlaybackProvider(
             ResolvedStream(
                 streamUrl = url,
                 mimeType = selected.format?.mimeType,
-                bitrateBps = selected.averageBitrate.takeIf { it > 0 },
+                // NewPipe reports AudioStream.averageBitrate in kbps
+                // (e.g. 160), so convert to the bps this field promises.
+                bitrateBps = selected.averageBitrate.takeIf { it > 0 }?.let { it * 1000 },
                 // NewPipeExtractor does not expose an explicit expiry, but
                 // resolved googlevideo.com URLs are time-limited in
                 // practice; treat any URL as stale after this window so a

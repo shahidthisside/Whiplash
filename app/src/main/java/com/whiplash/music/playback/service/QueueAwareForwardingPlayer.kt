@@ -53,12 +53,15 @@ class QueueAwareForwardingPlayer(
             builder.remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
             builder.remove(Player.COMMAND_SEEK_TO_NEXT)
         }
-        if (controller.hasPrevious()) {
+        // Media3 draws a distinction the two commands below mirror:
+        // SEEK_TO_PREVIOUS is the user-facing Previous button (restart the
+        // track once a few seconds in, otherwise go back), while
+        // SEEK_TO_PREVIOUS_MEDIA_ITEM always means "the item before this one".
+        if (controller.hasPrevious()) builder.add(Player.COMMAND_SEEK_TO_PREVIOUS) else builder.remove(Player.COMMAND_SEEK_TO_PREVIOUS)
+        if (controller.hasPreviousItem()) {
             builder.add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-            builder.add(Player.COMMAND_SEEK_TO_PREVIOUS)
         } else {
             builder.remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-            builder.remove(Player.COMMAND_SEEK_TO_PREVIOUS)
         }
         return builder.build()
     }
@@ -68,14 +71,15 @@ class QueueAwareForwardingPlayer(
     override fun isCommandAvailable(command: Int): Boolean {
         return when (command) {
             Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, Player.COMMAND_SEEK_TO_NEXT -> controller.hasNext()
-            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM, Player.COMMAND_SEEK_TO_PREVIOUS -> controller.hasPrevious()
+            Player.COMMAND_SEEK_TO_PREVIOUS -> controller.hasPrevious()
+            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> controller.hasPreviousItem()
             else -> super.isCommandAvailable(command)
         }
     }
 
     override fun hasNextMediaItem(): Boolean = controller.hasNext()
 
-    override fun hasPreviousMediaItem(): Boolean = controller.hasPrevious()
+    override fun hasPreviousMediaItem(): Boolean = controller.hasPreviousItem()
 
     override fun seekToNext() = controller.seekToNext()
 
@@ -83,5 +87,5 @@ class QueueAwareForwardingPlayer(
 
     override fun seekToPrevious() = controller.seekToPrevious()
 
-    override fun seekToPreviousMediaItem() = controller.seekToPrevious()
+    override fun seekToPreviousMediaItem() = controller.seekToPreviousItem()
 }

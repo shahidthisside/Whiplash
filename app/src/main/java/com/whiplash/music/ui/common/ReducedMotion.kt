@@ -2,6 +2,7 @@ package com.whiplash.music.ui.common
 
 import android.provider.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.platform.LocalContext
 
 /**
@@ -17,8 +18,16 @@ import androidx.compose.ui.platform.LocalContext
  * can be skipped/frozen outright rather than relying on unconfirmed
  * platform behavior.
  */
+/**
+ * The in-app "Reduce animations" setting, provided once at the root of the
+ * composition (MainActivity) so every screen sees it without threading a
+ * parameter through. Defaults to false for previews and tests.
+ */
+val LocalAppReduceMotion = compositionLocalOf { false }
+
 @Composable
 fun isReducedMotionEnabled(): Boolean {
+    if (LocalAppReduceMotion.current) return true
     val context = LocalContext.current
     return try {
         Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f

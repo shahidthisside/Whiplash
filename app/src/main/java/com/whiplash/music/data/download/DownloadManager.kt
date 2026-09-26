@@ -14,7 +14,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -65,6 +67,34 @@ class DownloadManager(
 ) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Cached "Download on Wi-Fi only" preference, so the check in
+     * [startDownload] (called from the main thread by UI click handlers)
+     * never has to suspend. Null only until DataStore's first read lands,
+     * a few milliseconds after start-up; [isBlockedByWifiOnly] falls back to
+     * a direct read for that window so an early tap can't slip past the gate.
+     */
+    private val downloadWifiOnly: StateFlow<Boolean?> = settingsRepository?.downloadWifiOnly
+        ?.stateIn(scope, SharingStarted.Eagerly, null)
+        ?: MutableStateFlow(false)
+
+    /**
+     * Whether a new download must be refused right now: the listener
+     * turned on Wi-Fi only and the active network is metered. Downloads
+     * already running are left alone; cutting one off halfway would only
+     * waste the data it had already used.
+     */
+    private fun isBlockedByWifiOnly(): Boolean {
+        val repo = settingsRepository ?: return false
+        val wifiOnly = downloadWifiOnly.value
+            ?: kotlinx.coroutines.runBlocking { repo.downloadWifiOnly.first() }
+        return wifiOnly && repo.isActiveNetworkMetered()
+    }
+
+    private fun showWifiOnlyToast() {
+        com.whiplash.music.ui.common.ToastController.show("Wi-Fi only downloads is on. Connect to Wi-Fi to download.")
+    }
 
     /** Job + the track it's downloading, so a cancel can locate the exact partial file to delete without re-deriving it. */
     private data class ActiveDownload(val job: Job, val track: PlayableItem.YoutubeTrack)
@@ -124,6 +154,10 @@ class DownloadManager(
      * expected, not something that needs its own individual toast.
      */
     fun startDownload(track: PlayableItem.YoutubeTrack, showToast: Boolean = true) {
+        if (isBlockedByWifiOnly()) {
+            if (showToast) showWifiOnlyToast()
+            return
+        }
         if (activeDownloads[track.id]?.job?.isActive == true) {
             if (showToast) {
                 com.whiplash.music.ui.common.ToastController.show("Already downloading")
@@ -158,6 +192,12 @@ class DownloadManager(
      */
     fun downloadAll(tracks: List<PlayableItem.YoutubeTrack>) {
         if (tracks.isEmpty()) return
+        // Checked once for the whole batch so the listener gets one clear
+        // toast instead of a silent no-op per track.
+        if (isBlockedByWifiOnly()) {
+            showWifiOnlyToast()
+            return
+        }
         tracks.forEach { startDownload(it, showToast = false) }
         com.whiplash.music.ui.common.ToastController.show("Download started")
     }
@@ -281,7 +321,14 @@ class DownloadManager(
         // Downloads tab and checkmark badges render with zero network
         // access afterward. Never fails the whole download if this
         // one step fails — artwork is a nice-to-have, not the point.
-        val artworkPath = track.artworkUri?.let { url -> downloadArtwork(track.id, url) }
+        //
+        // Prefer the cover from the stream resolve that just ran: it is the
+        // same full-size artwork the player shows while streaming. The
+        // track's own artworkUri is often the small search thumbnail (as
+        // little as 120px), which made downloaded songs look visibly softer
+        // in the player than the same song streamed.
+        val artworkPath = (resolved.resolvedArtworkUrl?.takeIf { it.isNotBlank() } ?: track.artworkUri)
+            ?.let { url -> downloadArtwork(track.id, url) }
 
         // Embed title/artist/album/cover directly into the file's own
         // metadata (adapted from BitChord) so it shows correctly in any

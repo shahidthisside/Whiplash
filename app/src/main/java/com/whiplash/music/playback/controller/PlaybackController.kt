@@ -65,6 +65,10 @@ class PlaybackController(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var positionTickerJob: Job? = null
 
+    /** Origin/bitrate of the item most recently handed to the player (see [startMediaItem], [readAudioInfo]). */
+    private var currentAudioOrigin: AudioStreamInfo.Origin = AudioStreamInfo.Origin.STREAM
+    private var currentStreamBitrateBps: Int? = null
+
     /** Guards against double-handling the same STATE_ENDED event (see [handleTrackEnded]). Reset whenever a new playback attempt actually starts (see [startMediaItem]). */
     private var handledEnded: Boolean = false
 
@@ -85,7 +89,7 @@ class PlaybackController(
     private var prefetched: PrefetchedStream? = null
     private var prefetchJob: Job? = null
 
-    private data class PrefetchedStream(val forItemId: String, val streamUrl: String, val artworkUrl: String?)
+    private data class PrefetchedStream(val forItemId: String, val streamUrl: String, val artworkUrl: String?, val bitrateBps: Int? = null)
 
     private var sleepTimerJob: Job? = null
 
@@ -212,6 +216,41 @@ class PlaybackController(
         override fun onPlayerError(error: PlaybackException) {
             handlePlayerError(error)
         }
+
+        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            val info = readAudioInfo(tracks)
+            if (info != _state.value.audioInfo) _state.update { it.copy(audioInfo = info) }
+        }
+    }
+
+    /**
+     * Builds [AudioStreamInfo] from the selected audio track. Returns null
+     * while nothing is selected — including a pending placeholder item —
+     * so the UI shows nothing rather than stale or invented numbers.
+     */
+    private fun readAudioInfo(tracks: androidx.media3.common.Tracks): AudioStreamInfo? {
+        val format = tracks.groups
+            .firstOrNull { it.type == androidx.media3.common.C.TRACK_TYPE_AUDIO && it.isSelected }
+            ?.let { group -> (0 until group.length).firstOrNull { group.isTrackSelected(it) }?.let(group::getTrackFormat) }
+            ?: return null
+        val noValue = androidx.media3.common.Format.NO_VALUE
+        val bitDepth = when (format.pcmEncoding) {
+            androidx.media3.common.C.ENCODING_PCM_8BIT -> 8
+            androidx.media3.common.C.ENCODING_PCM_16BIT, androidx.media3.common.C.ENCODING_PCM_16BIT_BIG_ENDIAN -> 16
+            androidx.media3.common.C.ENCODING_PCM_24BIT, androidx.media3.common.C.ENCODING_PCM_24BIT_BIG_ENDIAN -> 24
+            androidx.media3.common.C.ENCODING_PCM_32BIT, androidx.media3.common.C.ENCODING_PCM_32BIT_BIG_ENDIAN,
+            androidx.media3.common.C.ENCODING_PCM_FLOAT -> 32
+            else -> null
+        }
+        val containerBitrate = listOf(format.averageBitrate, format.bitrate, format.peakBitrate).firstOrNull { it != noValue && it > 0 }
+        return AudioStreamInfo(
+            mimeType = format.sampleMimeType,
+            sampleRateHz = format.sampleRate.takeIf { it != noValue },
+            channelCount = format.channelCount.takeIf { it != noValue },
+            bitDepth = bitDepth,
+            bitrateBps = containerBitrate ?: currentStreamBitrateBps,
+            origin = currentAudioOrigin,
+        )
     }
 
     /**
@@ -265,7 +304,7 @@ class PlaybackController(
                 surfacePlayerError(track, error)
                 return@launch
             }
-            startMediaItem(track, resolvedStreamUrl = fresh.streamUrl, resumeAtMs = failedPositionMs, isErrorRecovery = true)
+            startMediaItem(track, resolvedStreamUrl = fresh.streamUrl, resumeAtMs = failedPositionMs, isErrorRecovery = true, streamBitrateBps = fresh.bitrateBps)
         }
     }
 
@@ -541,7 +580,7 @@ class PlaybackController(
                     // idempotent (an upsert), so calling it here has no
                     // downside beyond the one it already has in the slow path.
                     scope.launch { libraryRepository.cacheSong(item) }
-                    startMediaItem(displayItem, resolvedStreamUrl = cached.streamUrl)
+                    startMediaItem(displayItem, resolvedStreamUrl = cached.streamUrl, streamBitrateBps = cached.bitrateBps)
                     maybeExtendQueueWithRecommendations(item)
                 } else if (audioCacheManager.isFullyCached(mediaId)) {
                     // The track's audio is already fully present in the on-disk
@@ -572,6 +611,17 @@ class PlaybackController(
                     _state.update { it.copy(isResolvingStream = false) }
                     startMediaItem(displayItem, resolvedStreamUrl = "cache://$mediaId")
                     maybeExtendQueueWithRecommendations(item)
+                    // Skipping the resolve also skipped the artwork upgrade the
+                    // network path gets from the same response, so a cached
+                    // replay kept the small search thumbnail (often 120px) and
+                    // the cover looked visibly softer than on the first play;
+                    // cacheSong above then wrote that thumbnail back over the
+                    // better URL in the songs table. Fetch the same artwork the
+                    // network path would use (metadata only, no stream) after
+                    // playback has started, so the fast start is kept.
+                    if (cachedArtwork == null && item is PlayableItem.YoutubeTrack) {
+                        upgradeArtworkInBackground(item, generation)
+                    }
                 } else {
                     // Publish this track's metadata to the MediaSession right
                     // now, before its stream has been resolved. This branch is
@@ -650,7 +700,7 @@ class PlaybackController(
                             is FallbackResult.Success -> {
                                 val upgraded = upgradeArtworkIfCurrent(item, result.value.resolvedArtworkUrl)
                                 _state.update { it.copy(isResolvingStream = false, currentItem = upgraded ?: it.currentItem) }
-                                startMediaItem(upgraded ?: item, resolvedStreamUrl = result.value.streamUrl)
+                                startMediaItem(upgraded ?: item, resolvedStreamUrl = result.value.streamUrl, streamBitrateBps = result.value.bitrateBps)
                                 // maybeExtendQueueWithRecommendations(item) now
                                 // called upfront, in parallel with this resolve
                                 // (see the comment where this scope.launch
@@ -737,7 +787,7 @@ class PlaybackController(
                         playbackManager.resolveStream(nextItem, quality)
                     }
                     if (result is FallbackResult.Success) {
-                        prefetched = PrefetchedStream(nextItem.id, result.value.streamUrl, result.value.resolvedArtworkUrl)
+                        prefetched = PrefetchedStream(nextItem.id, result.value.streamUrl, result.value.resolvedArtworkUrl, result.value.bitrateBps)
                         result.value.resolvedArtworkUrl?.let { url ->
                             artworkPreloadCache[PlayableItemMediaItemMapper.mediaIdOf(nextItem)] = url
                             preloadArtworkBitmap(url)
@@ -898,6 +948,29 @@ class PlaybackController(
     }
 
     /**
+     * Fetches [item]'s full-size artwork from its player metadata and applies
+     * it if [item] is still playing, then persists it so History, Favorites
+     * and Playlists get it too. Used by the fully-cached replay path, which
+     * never makes the stream resolve that normally supplies this URL. Any
+     * failure (offline, for instance) just leaves the current artwork.
+     */
+    private fun upgradeArtworkInBackground(item: PlayableItem.YoutubeTrack, generation: Int) {
+        scope.launch {
+            val artworkUrl = try {
+                newPipePlaybackProvider.getPlayerInfo(item.id).artworkUrl
+            } catch (_: Exception) {
+                null
+            } ?: return@launch
+            if (generation != resolveGeneration || artworkUrl == _state.value.currentItem?.artworkUri) return@launch
+            val upgraded = upgradeArtworkIfCurrent(item, artworkUrl)
+            if (upgraded is PlayableItem.YoutubeTrack && upgraded.id == item.id) {
+                _state.update { it.copy(currentItem = upgraded) }
+                libraryRepository.cacheSong(upgraded)
+            }
+        }
+    }
+
+    /**
      * Returns an updated [PlayableItem.YoutubeTrack] with [betterArtworkUrl]
      * applied, but only if [resolvedFor] is still the item currently
      * playing (avoids clobbering a newer track's artwork with a stale
@@ -998,8 +1071,21 @@ class PlaybackController(
         resolvedStreamUrl: String?,
         resumeAtMs: Long = 0L,
         isErrorRecovery: Boolean = false,
+        streamBitrateBps: Int? = null,
     ) {
         handledEnded = false
+        // Where this audio comes from and the bitrate the provider reported,
+        // for Stats for nerds. The container's own track format is read later
+        // in onTracksChanged; the provider bitrate fills the gap for formats
+        // (YouTube's WebM/Opus) whose track format carries none.
+        currentAudioOrigin = when {
+            item is PlayableItem.LocalTrack -> AudioStreamInfo.Origin.LOCAL
+            item is PlayableItem.DownloadedTrack -> AudioStreamInfo.Origin.DOWNLOAD
+            resolvedStreamUrl?.startsWith("cache://") == true -> AudioStreamInfo.Origin.CACHED
+            else -> AudioStreamInfo.Origin.STREAM
+        }
+        currentStreamBitrateBps = streamBitrateBps
+        _state.update { it.copy(audioInfo = null) }
         // Any genuinely new playback attempt re-arms the single automatic
         // error re-resolve (see [handlePlayerError]); a recovery restart
         // deliberately does not, so one bad track can't retry forever.
@@ -1062,8 +1148,9 @@ class PlaybackController(
 
     /** Sets playback speed (section 18), applied immediately to the live player. */
     fun setPlaybackSpeed(speed: Float) {
-        controller?.setPlaybackParameters(androidx.media3.common.PlaybackParameters(speed))
-        scope.launch { settingsRepository.setPlaybackSpeed(speed) }
+        val safe = com.whiplash.music.domain.model.PlaybackTuning.normalizeSpeed(speed)
+        controller?.setPlaybackParameters(androidx.media3.common.PlaybackParameters(safe))
+        scope.launch { settingsRepository.setPlaybackSpeed(safe) }
     }
 
     private suspend fun maybeFadeIn() {
@@ -1162,10 +1249,43 @@ class PlaybackController(
         playIndex(next)
     }
 
-    /** Returns to the previous queue item (section 21). */
+    /**
+     * Previous, with the standard music-player behaviour: more than
+     * [RESTART_THRESHOLD_MS] into a track it restarts that track; within
+     * the first few seconds it goes to the previous queue item. This
+     * applies everywhere Previous can be pressed — in-app, notification,
+     * lock screen, Bluetooth — because [QueueAwareForwardingPlayer] routes
+     * all of them here.
+     *
+     * The position is read from the live controller rather than
+     * [PlaybackState.positionMs], which is polled every 500ms and can lag
+     * behind a seek the user just made.
+     */
     fun seekToPrevious() {
+        if (shouldRestartOnPrevious()) {
+            seekTo(0L)
+            return
+        }
         val prev = previousIndex() ?: return
         playIndex(prev)
+    }
+
+    /** Goes to the previous queue item unconditionally, never restarting (Media3's seekToPreviousMediaItem). */
+    fun seekToPreviousItem() {
+        val prev = previousIndex() ?: return
+        playIndex(prev)
+    }
+
+    /** Whether [seekToPreviousItem] has an item to go to. */
+    fun hasPreviousItem(): Boolean = previousIndex() != null
+
+    private fun shouldRestartOnPrevious(): Boolean {
+        val c = controller ?: return false
+        // Only a track that is genuinely loaded can be restarted. While a
+        // YouTube stream is still resolving, the player holds nothing (or a
+        // pending placeholder), so a seek would do nothing visible.
+        if (_state.value.isResolvingStream || _state.value.currentItem == null) return false
+        return c.currentPosition > RESTART_THRESHOLD_MS
     }
 
     private fun nextIndex(): Int? {
@@ -1212,8 +1332,12 @@ class PlaybackController(
      */
     fun audioSessionId(): Int = controller?.audioSessionId ?: androidx.media3.common.C.AUDIO_SESSION_ID_UNSET
 
-    /** Whether [seekToPrevious] would actually do anything right now (see [hasNext]). */
-    fun hasPrevious(): Boolean = previousIndex() != null
+    /**
+     * Whether [seekToPrevious] would actually do anything right now (see
+     * [hasNext]). True for the first queue item too once it is past the
+     * restart threshold, since Previous then restarts it.
+     */
+    fun hasPrevious(): Boolean = previousIndex() != null || shouldRestartOnPrevious()
 
     fun setShuffleEnabled(enabled: Boolean) {
         _state.update { it.copy(shuffleEnabled = enabled) }
@@ -1482,6 +1606,9 @@ class PlaybackController(
 
         /** See [seekTo]'s doc — never let a manual seek land within this margin of the live player's real duration. */
         const val END_OF_TRACK_SEEK_MARGIN_MS = 1000L
+
+        /** Past this point in a track, Previous restarts it instead of going back (see [seekToPrevious]). */
+        const val RESTART_THRESHOLD_MS = 3_000L
 
         /** Volume-ramp step interval for fade in/out (section 18). */
         const val FADE_STEP_MS = 40L
