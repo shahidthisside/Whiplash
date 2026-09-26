@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.selection.toggleable
@@ -92,7 +93,7 @@ private const val EQUALIZER_REQUEST_CODE = 4242
 fun SettingsScreen() {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
-    val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository, app.audioCacheManager, app.backupManager))
+    val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository, app.audioCacheManager, app.backupManager, app.lyricsCache, app.lyricsProviderChain))
 
     val audioQuality by viewModel.audioQuality.collectAsState()
     val downloadQuality by viewModel.downloadQuality.collectAsState()
@@ -109,6 +110,9 @@ fun SettingsScreen() {
     val reduceAnimations by viewModel.reduceAnimations.collectAsState()
     val playerArtworkColors by viewModel.playerArtworkColors.collectAsState()
     val playerLyricStrip by viewModel.playerLyricStrip.collectAsState()
+    val lyricsSource by viewModel.lyricsSource.collectAsState()
+    val lyricsBlurUnfocused by viewModel.lyricsBlurUnfocused.collectAsState()
+    val lyricsProviderHealth by viewModel.lyricsProviderHealth.collectAsState()
     val playerHeroArtwork by viewModel.playerHeroArtwork.collectAsState()
     val perNetworkQualityEnabled by viewModel.perNetworkQualityEnabled.collectAsState()
     val audioQualityWifi by viewModel.audioQualityWifi.collectAsState()
@@ -576,6 +580,26 @@ fun SettingsScreen() {
                 )
 
                 SettingToggleRow(
+                    title = "Blur other lyric lines",
+                    icon = Icons.Filled.Lyrics,
+                    subtitle = if (android.os.Build.VERSION.SDK_INT >= 31) {
+                        "Softly blur the lines around the one being sung. Clears while you scroll."
+                    } else {
+                        "Needs Android 12 or newer; other lines are dimmed instead."
+                    },
+                    checked = lyricsBlurUnfocused,
+                    onCheckedChange = viewModel::setLyricsBlurUnfocused,
+                )
+
+                SettingRow(
+                    title = "Lyrics source",
+                    icon = Icons.Filled.Lyrics,
+                    subtitle = "Automatic tries LRCLIB (synced) first, then lyrics.ovh (plain text).",
+                )
+                LyricsSourceSelector(selected = lyricsSource, onSelect = viewModel::setLyricsSource)
+                LyricsProviderHealthLine(lyricsProviderHealth)
+
+                SettingToggleRow(
                     title = "Full-bleed artwork",
                     icon = Icons.Filled.Fullscreen,
                     subtitle = "Show the album art edge to edge across the top of the full player.",
@@ -1036,6 +1060,70 @@ private fun AudioQualitySelector(selected: AudioQuality, onSelect: (AudioQuality
             }
         }
     }
+}
+
+@Composable
+private fun LyricsSourceSelector(
+    selected: com.whiplash.music.data.lyrics.LyricsSourcePreference,
+    onSelect: (com.whiplash.music.data.lyrics.LyricsSourcePreference) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(WhiplashRadius.pill))
+            .background(WhiplashColors.surfaceGlass)
+            .padding(3.dp),
+    ) {
+        com.whiplash.music.data.lyrics.LyricsSourcePreference.entries.forEach { option ->
+            val isSelected = option == selected
+            val bg by androidx.compose.animation.animateColorAsState(
+                targetValue = if (isSelected) WhiplashColors.accent else Color.Transparent,
+                label = "lyricsSourceBg",
+            )
+            val fg by androidx.compose.animation.animateColorAsState(
+                targetValue = if (isSelected) WhiplashColors.onAccent else WhiplashColors.textSecondary,
+                label = "lyricsSourceFg",
+            )
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(WhiplashRadius.pill))
+                    .background(bg)
+                    .semantics { this.selected = isSelected }
+                    .clickable(role = androidx.compose.ui.semantics.Role.Button) { onSelect(option) }
+                    .padding(vertical = GlassTokens.spaceSm),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Text(text = option.label, style = MaterialTheme.typography.labelMedium, color = fg, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** One line per provider: working / failing (skipped for a few minutes) / not used yet. */
+@Composable
+private fun LyricsProviderHealthLine(health: Map<String, com.whiplash.music.data.lyrics.ProviderHealth>) {
+    val names = mapOf("LRCLIB" to "LRCLIB", "LYRICS_OVH" to "lyrics.ovh")
+    val now = System.currentTimeMillis()
+    val text = names.entries.joinToString("  ·  ") { (id, name) ->
+        val h = health[id] ?: com.whiplash.music.data.lyrics.ProviderHealth()
+        val status = when (h.state) {
+            com.whiplash.music.data.lyrics.ProviderHealth.State.UNKNOWN -> "not used yet"
+            com.whiplash.music.data.lyrics.ProviderHealth.State.WORKING -> "working"
+            com.whiplash.music.data.lyrics.ProviderHealth.State.FAILING ->
+                if (h.cooldownUntilMs > now) "failing, paused" else "failing"
+        }
+        "$name: $status"
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = WhiplashColors.textSecondary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = GlassTokens.spaceXs, start = GlassTokens.spaceSm)
+            .semantics { contentDescription = "Lyrics provider status: $text" },
+    )
 }
 
 private fun AudioQuality.shortLabel(): String = when (this) {

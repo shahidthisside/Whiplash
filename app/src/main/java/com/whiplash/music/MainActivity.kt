@@ -207,10 +207,11 @@ private fun WhiplashApp() {
     )
     val playbackState by playerViewModel.state.collectAsState()
     val lyricsViewModel: com.whiplash.music.ui.player.LyricsViewModel = viewModel(
-        factory = com.whiplash.music.ui.player.LyricsViewModelFactory(app.playbackController, app.lrcLibProvider, app.lyricOffsetStore),
+        factory = com.whiplash.music.ui.player.LyricsViewModelFactory(app.playbackController, app.lyricsProviderChain, app.settingsRepository, app.lyricOffsetStore, app.lyricsCache),
     )
     val lyrics by lyricsViewModel.lyrics.collectAsState()
     val lyricOffsetMs by lyricsViewModel.lyricOffsetMs.collectAsState()
+    val lyricsSourceName by lyricsViewModel.lyricsProviderName.collectAsState()
 
     var isPlayerExpanded by rememberSaveable { mutableStateOf(false) }
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.HOME) }
@@ -661,6 +662,7 @@ private fun WhiplashApp() {
                     val playerArtworkColors by playerViewModel.playerArtworkColors.collectAsState()
                     val playerLyricStrip by playerViewModel.playerLyricStrip.collectAsState()
                     val playerHeroArtwork by playerViewModel.playerHeroArtwork.collectAsState()
+                    val lyricsBlurUnfocused by playerViewModel.lyricsBlurUnfocused.collectAsState()
                     val playlistsForPlayer by playerViewModel.playlists.collectAsState()
                     val downloadedIds by app.libraryRepository.observeDownloadedIds().collectAsState(initial = emptySet())
                     val currentItemForDownload = playbackState.currentItem
@@ -684,6 +686,7 @@ private fun WhiplashApp() {
                         onSetSleepTimer = playerViewModel::setSleepTimer,
                         lyrics = lyrics,
                         lyricOffsetMs = lyricOffsetMs,
+                        lyricsSourceName = lyricsSourceName,
                         onAdjustLyricOffset = lyricsViewModel::adjustLyricOffset,
                         onResetLyricOffset = lyricsViewModel::resetLyricOffset,
                         playbackSpeed = playbackSpeed,
@@ -692,6 +695,7 @@ private fun WhiplashApp() {
                         artworkColorsEnabled = playerArtworkColors,
                         showLyricStrip = playerLyricStrip,
                         heroArtwork = playerHeroArtwork,
+                        lyricsBlurUnfocused = lyricsBlurUnfocused,
                         playlists = playlistsForPlayer,
                         onAddToPlaylist = playerViewModel::addCurrentToPlaylist,
                         onCreatePlaylistAndAdd = playerViewModel::createPlaylistAndAddCurrent,

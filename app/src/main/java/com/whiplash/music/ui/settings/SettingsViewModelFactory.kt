@@ -11,9 +11,11 @@ class SettingsViewModelFactory(
     private val repository: SettingsRepository,
     private val cacheManager: AudioCacheManager,
     private val backupManager: BackupManager,
+    private val lyricsCache: com.whiplash.music.data.lyrics.LyricsCache,
+    private val lyricsProviderChain: com.whiplash.music.data.lyrics.LyricsProviderChain,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
         @Suppress("UNCHECKED_CAST")
-        return SettingsViewModel(repository, cacheManager, backupManager) as T
+        return SettingsViewModel(repository, cacheManager, backupManager, lyricsCache, lyricsProviderChain) as T
     }
 }

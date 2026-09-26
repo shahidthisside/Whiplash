@@ -217,6 +217,23 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[PLAYER_LYRIC_STRIP_KEY] = enabled }
     }
 
+    /** Soft blur on lyric lines away from the one being sung (API 31+; ignored on older Android). */
+    val lyricsBlurUnfocused: Flow<Boolean> = dataStore.data.map { prefs -> prefs[LYRICS_BLUR_KEY] ?: false }
+
+    suspend fun setLyricsBlurUnfocused(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[LYRICS_BLUR_KEY] = enabled }
+    }
+
+    /** Where lyrics come from: Automatic (LRCLIB, then lyrics.ovh) or one provider only. */
+    val lyricsSource: Flow<com.whiplash.music.data.lyrics.LyricsSourcePreference> = dataStore.data.map { prefs ->
+        prefs[LYRICS_SOURCE_KEY]?.let { runCatching { com.whiplash.music.data.lyrics.LyricsSourcePreference.valueOf(it) }.getOrNull() }
+            ?: com.whiplash.music.data.lyrics.LyricsSourcePreference.AUTO
+    }
+
+    suspend fun setLyricsSource(source: com.whiplash.music.data.lyrics.LyricsSourcePreference) {
+        dataStore.edit { prefs -> prefs[LYRICS_SOURCE_KEY] = source.name }
+    }
+
     /** Full-bleed "hero" artwork across the top of the full player. Off by default. */
     val playerHeroArtwork: Flow<Boolean> = dataStore.data.map { prefs -> prefs[PLAYER_HERO_ARTWORK_KEY] ?: false }
 
@@ -322,6 +339,8 @@ class SettingsRepository(context: Context) {
         val REDUCE_ANIMATIONS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("reduce_animations")
         val PLAYER_ARTWORK_COLORS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_artwork_colors")
         val PLAYER_LYRIC_STRIP_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_lyric_strip")
+        val LYRICS_BLUR_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("lyrics_blur_unfocused")
+        val LYRICS_SOURCE_KEY: Preferences.Key<String> = stringPreferencesKey("lyrics_source")
         val PLAYER_HERO_ARTWORK_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_hero_artwork")
         val STATS_FOR_NERDS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("stats_for_nerds_enabled")
         val AUDIO_QUALITY_WIFI_KEY: Preferences.Key<String> = stringPreferencesKey("audio_quality_wifi")

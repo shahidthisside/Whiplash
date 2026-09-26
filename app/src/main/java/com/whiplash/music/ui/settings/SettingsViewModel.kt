@@ -19,6 +19,8 @@ class SettingsViewModel(
     private val repository: SettingsRepository,
     private val cacheManager: AudioCacheManager,
     private val backupManager: com.whiplash.music.data.backup.BackupManager,
+    private val lyricsCache: com.whiplash.music.data.lyrics.LyricsCache,
+    private val lyricsProviderChain: com.whiplash.music.data.lyrics.LyricsProviderChain,
 ) : ViewModel() {
 
     /**
@@ -97,6 +99,24 @@ class SettingsViewModel(
     fun setPlayerLyricStrip(enabled: Boolean) {
         viewModelScope.launch { repository.setPlayerLyricStrip(enabled) }
     }
+
+    val lyricsBlurUnfocused: StateFlow<Boolean> = repository.lyricsBlurUnfocused
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setLyricsBlurUnfocused(enabled: Boolean) {
+        viewModelScope.launch { repository.setLyricsBlurUnfocused(enabled) }
+    }
+
+    val lyricsSource: StateFlow<com.whiplash.music.data.lyrics.LyricsSourcePreference> = repository.lyricsSource
+        .stateIn(viewModelScope, SharingStarted.Eagerly, com.whiplash.music.data.lyrics.LyricsSourcePreference.AUTO)
+
+    fun setLyricsSource(source: com.whiplash.music.data.lyrics.LyricsSourcePreference) {
+        viewModelScope.launch { repository.setLyricsSource(source) }
+    }
+
+    /** Live health of each lyrics provider this session (keyed by provider id). */
+    val lyricsProviderHealth: StateFlow<Map<String, com.whiplash.music.data.lyrics.ProviderHealth>> =
+        lyricsProviderChain.health
 
     val playerHeroArtwork: StateFlow<Boolean> = repository.playerHeroArtwork
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -216,7 +236,7 @@ class SettingsViewModel(
 
     fun refreshCacheSize() {
         viewModelScope.launch {
-            _cacheSizeBytes.value = withContext(Dispatchers.IO) { cacheManager.currentCacheSizeBytes() }
+            _cacheSizeBytes.value = withContext(Dispatchers.IO) { cacheManager.currentCacheSizeBytes() + lyricsCache.diskSizeBytes() }
         }
     }
 
@@ -227,7 +247,10 @@ class SettingsViewModel(
     /** Real "Clear cache" action (same as Spotify's Storage settings) — deletes every cached byte on disk. */
     fun clearCache() {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { cacheManager.clearCache() }
+            withContext(Dispatchers.IO) {
+                cacheManager.clearCache()
+                lyricsCache.clear()
+            }
             refreshCacheSize()
             com.whiplash.music.ui.common.ToastController.show("Cache cleared")
         }

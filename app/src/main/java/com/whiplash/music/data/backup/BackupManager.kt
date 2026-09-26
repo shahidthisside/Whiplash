@@ -296,6 +296,8 @@ class BackupManager(
                         put("reduceAnimations", settingsRepository.reduceAnimations.first())
                         put("playerArtworkColors", settingsRepository.playerArtworkColors.first())
                         put("playerLyricStrip", settingsRepository.playerLyricStrip.first())
+                        put("lyricsSource", settingsRepository.lyricsSource.first().name)
+                        put("lyricsBlurUnfocused", settingsRepository.lyricsBlurUnfocused.first())
                         put("playerHeroArtwork", settingsRepository.playerHeroArtwork.first())
                         put("perNetworkQualityEnabled", settingsRepository.perNetworkQualityEnabled.first())
                         put("audioQualityWifi", settingsRepository.audioQualityWifi.first().name)
@@ -436,6 +438,16 @@ class BackupManager(
                     }
                     if (s.has("playerHeroArtwork")) {
                         runCatching { settingsRepository.setPlayerHeroArtwork(s.getBoolean("playerHeroArtwork")) }
+                    }
+                    if (s.has("lyricsBlurUnfocused")) {
+                        runCatching { settingsRepository.setLyricsBlurUnfocused(s.getBoolean("lyricsBlurUnfocused")) }
+                    }
+                    if (s.has("lyricsSource")) {
+                        runCatching {
+                            settingsRepository.setLyricsSource(
+                                com.whiplash.music.data.lyrics.LyricsSourcePreference.valueOf(s.getString("lyricsSource")),
+                            )
+                        }
                     }
                     if (s.has("playerLyricStrip")) {
                         runCatching { settingsRepository.setPlayerLyricStrip(s.getBoolean("playerLyricStrip")) }
