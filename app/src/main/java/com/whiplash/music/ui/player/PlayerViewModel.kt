@@ -59,6 +59,9 @@ class PlayerViewModel(
     val playerLyricStrip: StateFlow<Boolean> = settingsRepository.playerLyricStrip
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    val lyricsBlurUnfocused: StateFlow<Boolean> = settingsRepository.lyricsBlurUnfocused
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     val playerHeroArtwork: StateFlow<Boolean> = settingsRepository.playerHeroArtwork
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 

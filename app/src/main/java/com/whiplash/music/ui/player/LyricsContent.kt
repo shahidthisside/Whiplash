@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +41,12 @@ import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.input.pointer.pointerInput
+import com.whiplash.music.domain.model.wordHighlights
+import com.whiplash.music.domain.model.lineEmphasis
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -71,6 +78,8 @@ fun LyricsContent(
     isPlaying: Boolean,
     onSeekTo: (Long) -> Unit,
     offsetMs: Long = 0L,
+    sourceName: String? = null,
+    blurUnfocused: Boolean = false,
     onAdjustOffset: (Long) -> Unit = {},
     onResetOffset: () -> Unit = {},
 ) {
@@ -84,11 +93,47 @@ fun LyricsContent(
         onDispose { view.keepScreenOn = false }
     }
 
+    // 3.8: while synced lyrics play, the header controls (timing adjuster and
+    // source label) fade out after a few seconds without a touch, leaving just
+    // the lyrics. Any touch in the sheet brings them straight back. They only
+    // fade (their space is kept), so the lyrics never jump. Never hidden while
+    // TalkBack / touch exploration is on, or while paused.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val touchExploration = remember(context) {
+        (context.getSystemService(android.content.Context.ACCESSIBILITY_SERVICE) as? android.view.accessibility.AccessibilityManager)
+            ?.isTouchExplorationEnabled == true
+    }
+    val autoHide = isPlaying && result is LyricsResult.Synced && !touchExploration
+    var touchTick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var controlsVisible by remember { mutableStateOf(true) }
+    LaunchedEffect(touchTick, autoHide) {
+        controlsVisible = true
+        if (autoHide) {
+            kotlinx.coroutines.delay(CONTROLS_AUTO_HIDE_MS)
+            controlsVisible = false
+        }
+    }
+    val reduceMotion = com.whiplash.music.ui.common.isReducedMotionEnabled()
+    val controlsAlpha by animateFloatAsState(
+        targetValue = if (controlsVisible) 1f else 0f,
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else tween(GlassTokens.animRegular),
+        label = "lyricsControlsAlpha",
+    )
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(max = 560.dp)
-            .padding(top = GlassTokens.spaceMd),
+            .padding(top = GlassTokens.spaceMd)
+            // Observe (never consume) every touch in the sheet.
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                        touchTick++
+                    }
+                }
+            },
     ) {
         Row(
             modifier = Modifier
@@ -96,24 +141,39 @@ fun LyricsContent(
                 .padding(horizontal = GlassTokens.spaceMd),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "Lyrics",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = WhiplashColors.textPrimary,
-                modifier = Modifier.weight(1f),
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Lyrics",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = WhiplashColors.textPrimary,
+                )
+                // Attribution: which open database these lyrics came from.
+                if (sourceName != null && (result is LyricsResult.Synced || result is LyricsResult.Plain)) {
+                    Text(
+                        text = "from $sourceName",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = WhiplashColors.textSecondary,
+                        maxLines = 1,
+                        modifier = Modifier.graphicsLayer { alpha = controlsAlpha },
+                    )
+                }
+            }
             // Timing only means something for synced lyrics; plain text has
             // no timestamps to shift, so the control is hidden there.
             if (result is LyricsResult.Synced) {
-                LyricOffsetControl(offsetMs, onAdjustOffset, onResetOffset)
+                // While faded out the buttons are disabled, so the touch that
+                // brings them back can't also nudge the timing by accident.
+                Box(modifier = Modifier.graphicsLayer { alpha = controlsAlpha }) {
+                    LyricOffsetControl(offsetMs, onAdjustOffset, onResetOffset, enabled = controlsVisible)
+                }
             }
         }
         androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
 
         when (result) {
             null -> LoadingState()
-            is LyricsResult.Synced -> SyncedLyricsView(result.lines, positionMs, isPlaying, offsetMs, onSeekTo)
+            is LyricsResult.Synced -> SyncedLyricsView(result.lines, positionMs, isPlaying, offsetMs, onSeekTo, blurUnfocused)
             is LyricsResult.Plain -> PlainLyricsView(result.text)
             is LyricsResult.Error -> MessageState(
                 icon = Icons.Filled.MusicOff,
@@ -222,13 +282,21 @@ private fun SyncedLyricsView(
     isPlaying: Boolean,
     offsetMs: Long,
     onSeekTo: (Long) -> Unit,
+    blurUnfocused: Boolean,
 ) {
     // The per-track offset shifts the position the lines are matched
     // against, not the lines themselves, so the list keeps stable keys and
     // does not recompose every row when the listener nudges the timing.
     val smoothedMs = lyricPositionWithOffset(rememberSmoothedPositionMs(positionMs, isPlaying), offsetMs)
+    // Rows read the live position through this holder, so only the active
+    // row (the one drawing a word highlight) redraws every frame.
+    val positionHolder = androidx.compose.runtime.rememberUpdatedState(smoothedMs)
     val listState = rememberLazyListState()
     var userScrollSuspendUntilMs by remember { mutableLongStateOf(0L) }
+    // True while the listener is scrolling through the lyrics themselves:
+    // blur is lifted so every line is readable.
+    var userBrowsing by remember { mutableStateOf(false) }
+    val reduceMotion = com.whiplash.music.ui.common.isReducedMotionEnabled()
 
     // -1 (no active line yet) is a real, distinct state from "line 0 is
     // active" — e.g. during a song's instrumental intro before the first
@@ -238,16 +306,30 @@ private fun SyncedLyricsView(
         lines.indexOfLast { it.timestampMs <= smoothedMs }
     }
 
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress) {
+    // Only a real finger drag counts as the listener browsing. (Watching
+    // isScrollInProgress also caught this view's own auto-scroll, so every
+    // automatic jump paused auto-scroll for the next few seconds and lifted
+    // the blur.)
+    val dragged by listState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(dragged) {
+        if (dragged) {
+            userBrowsing = true
+            userScrollSuspendUntilMs = Long.MAX_VALUE
+        } else if (userBrowsing) {
+            // Keep the listener's place for a few seconds after they let go.
             userScrollSuspendUntilMs = System.currentTimeMillis() + MANUAL_SCROLL_SUSPEND_MS
+            kotlinx.coroutines.delay(MANUAL_SCROLL_SUSPEND_MS)
+            userBrowsing = false
         }
     }
 
-    LaunchedEffect(activeIndex) {
+    // Also re-runs when browsing ends, so the view returns to the sung line.
+    LaunchedEffect(activeIndex, userBrowsing) {
+        if (userBrowsing) return@LaunchedEffect
         val suspended = System.currentTimeMillis() < userScrollSuspendUntilMs
         if (!suspended) {
-            listState.animateScrollToItem(index = (activeIndex - 2).coerceAtLeast(0))
+            val target = (activeIndex - 2).coerceAtLeast(0)
+            if (reduceMotion) listState.scrollToItem(target) else listState.animateScrollToItem(target)
         }
     }
 
@@ -263,59 +345,137 @@ private fun SyncedLyricsView(
         verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceLg),
     ) {
         itemsIndexed(lines, key = { index, line -> "$index:${line.timestampMs}" }) { index, line ->
+            // During the intro (no active line) everything counts as upcoming.
+            val distance = if (activeIndex < 0) index + 1 else index - activeIndex
             LyricLineRow(
-                text = line.text,
-                isActive = index == activeIndex,
+                line = line,
+                distance = distance,
+                positionMs = positionHolder,
+                blur = blurUnfocused && !userBrowsing,
+                reduceMotion = reduceMotion,
                 onClick = { onSeekTo(seekTargetForLyricLine(line.timestampMs, offsetMs)) },
             )
         }
     }
 }
 
+/**
+ * One lyric line.
+ *
+ * - Kinetic transition: the line springs up to full size as it becomes
+ *   active (a slight overshoot), and its neighbours fade by distance.
+ * - Word highlight: on word-synced lyrics the active line fills word by
+ *   word; a held word glows ("bloom") while it is sung.
+ * - Optional blur on lines away from the active one (Android 12+).
+ * Reduce animations turns every transition into an instant change.
+ */
 @Composable
-private fun LyricLineRow(text: String, isActive: Boolean, onClick: () -> Unit) {
-    // Premium lyrics convention (YouTube Music/Spotify/Apple Music): the
-    // active line is visually dominant — larger, bold, fully opaque —
-    // while every other line recedes (smaller, dimmed). The transition
-    // between states is an animated scale + color crossfade rather than
-    // an instant style swap, which is what makes the highlight feel like
-    // it's genuinely "following" the vocals instead of just ticking a
-    // label on and off.
+private fun LyricLineRow(
+    line: LyricLine,
+    distance: Int,
+    positionMs: androidx.compose.runtime.State<Long>,
+    blur: Boolean,
+    reduceMotion: Boolean,
+    onClick: () -> Unit,
+) {
+    val isActive = distance == 0
+    val emphasis = lineEmphasis(distance)
     val scale by animateFloatAsState(
         targetValue = if (isActive) 1f else 0.94f,
-        animationSpec = tween(GlassTokens.animRegular),
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap()
+        else androidx.compose.animation.core.spring(dampingRatio = 0.55f, stiffness = 320f),
         label = "lyricLineScale",
     )
-    val color by animateColorAsState(
-        targetValue = if (isActive) WhiplashColors.textPrimary else WhiplashColors.textSecondary.copy(alpha = 0.55f),
-        animationSpec = tween(GlassTokens.animRegular),
-        label = "lyricLineColor",
+    val alpha by animateFloatAsState(
+        targetValue = emphasis.alpha,
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else tween(GlassTokens.animRegular),
+        label = "lyricLineAlpha",
+    )
+    val blurDp by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (blur) (emphasis.blurSteps * BLUR_STEP_DP).dp else 0.dp,
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else tween(GlassTokens.animRegular),
+        label = "lyricLineBlur",
     )
     val interactionSource = remember { MutableInteractionSource() }
 
-    if (text.isBlank()) {
+    if (line.text.isBlank()) {
         // An empty LRC line marks an instrumental gap — a small breathing
         // space rather than an empty, confusing row.
         Box(modifier = Modifier.fillMaxWidth().heightIn(min = 12.dp))
         return
     }
 
-    Text(
-        text = text,
-        style = MaterialTheme.typography.headlineSmall,
-        fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.SemiBold,
-        color = color,
-        lineHeight = 32.sp,
-        modifier = Modifier
-            .fillMaxWidth()
-            .scale(scale)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick,
-            ),
-    )
+    val baseColor = WhiplashColors.textPrimary
+    val dimColor = WhiplashColors.textSecondary
+    val wordSynced = isActive && line.words.isNotEmpty()
+    val isRtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+    val modifier = Modifier
+        .fillMaxWidth()
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            this.alpha = alpha
+            // Scale from the start edge so wrapped lines don't drift sideways.
+            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(
+                if (isRtl) 1f else 0f, 0.5f,
+            )
+        }
+        .then(
+            if (blurDp > 0.dp) Modifier.blur(blurDp, androidx.compose.ui.draw.BlurredEdgeTreatment.Unbounded)
+            else Modifier,
+        )
+        .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+
+    if (wordSynced) {
+        val text = wordHighlightText(line, positionMs.value, baseColor, dimColor.copy(alpha = 0.7f))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.ExtraBold,
+            lineHeight = 32.sp,
+            modifier = modifier,
+        )
+    } else {
+        Text(
+            text = line.text,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.SemiBold,
+            color = if (isActive) baseColor else dimColor,
+            lineHeight = 32.sp,
+            modifier = modifier,
+        )
+    }
 }
+
+/** Builds the active line with each word coloured by how far it has been sung, plus the held-word glow. */
+private fun wordHighlightText(
+    line: LyricLine,
+    positionMs: Long,
+    sung: androidx.compose.ui.graphics.Color,
+    unsung: androidx.compose.ui.graphics.Color,
+): androidx.compose.ui.text.AnnotatedString {
+    val states = wordHighlights(line, positionMs)
+    return androidx.compose.ui.text.buildAnnotatedString {
+        line.words.forEachIndexed { i, word ->
+            val h = states[i]
+            val color = androidx.compose.ui.graphics.lerp(unsung, sung, h.fill)
+            val shadow = if (h.bloom > 0f) {
+                androidx.compose.ui.graphics.Shadow(
+                    color = sung.copy(alpha = 0.75f * h.bloom),
+                    blurRadius = 24f * h.bloom,
+                )
+            } else {
+                null
+            }
+            withStyle(androidx.compose.ui.text.SpanStyle(color = color, shadow = shadow)) {
+                append(word.text)
+            }
+        }
+    }
+}
+
+/** Blur per line of distance from the active one, in dp. */
+private const val BLUR_STEP_DP = 1.2f
 
 /**
  * Compact "− +0.5s +" timing adjuster in the lyrics header. Each button
@@ -328,10 +488,11 @@ private fun LyricOffsetControl(
     offsetMs: Long,
     onAdjust: (Long) -> Unit,
     onReset: () -> Unit,
+    enabled: Boolean = true,
 ) {
     val label = formatLyricOffset(offsetMs)
     Row(verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = { onAdjust(-LYRIC_OFFSET_STEP_MS) }) {
+        IconButton(onClick = { onAdjust(-LYRIC_OFFSET_STEP_MS) }, enabled = enabled) {
             Icon(
                 imageVector = Icons.Filled.Remove,
                 contentDescription = "Show lyrics later",
@@ -346,7 +507,7 @@ private fun LyricOffsetControl(
             modifier = Modifier
                 .widthIn(min = 52.dp)
                 .clickable(
-                    enabled = offsetMs != 0L,
+                    enabled = enabled && offsetMs != 0L,
                     onClickLabel = "Reset lyrics timing",
                     onClick = onReset,
                 )
@@ -354,7 +515,7 @@ private fun LyricOffsetControl(
                 .padding(vertical = 12.dp),
             textAlign = TextAlign.Center,
         )
-        IconButton(onClick = { onAdjust(LYRIC_OFFSET_STEP_MS) }) {
+        IconButton(onClick = { onAdjust(LYRIC_OFFSET_STEP_MS) }, enabled = enabled) {
             Icon(
                 imageVector = Icons.Filled.Add,
                 contentDescription = "Show lyrics earlier",
@@ -365,6 +526,9 @@ private fun LyricOffsetControl(
 }
 
 private const val MANUAL_SCROLL_SUSPEND_MS = 4_000L
+
+/** 3.8: how long the lyrics header controls stay up without a touch. */
+private const val CONTROLS_AUTO_HIDE_MS = 5_000L
 
 /**
  * One-line "current lyric" strip shown above the full player's scrubber
