@@ -7,6 +7,9 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import com.whiplash.music.ui.player.playerDragToDismiss
+import com.whiplash.music.ui.player.playerDismissTransform
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -91,8 +94,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         requestHighestRefreshRate()
         setContent {
+            // In-app "Reduce animations", provided at the root so
+            // isReducedMotionEnabled() sees it everywhere.
+            val reduceAnimations by (application as WhiplashApplication).settingsRepository
+                .reduceAnimations.collectAsState(initial = false)
             WhiplashTheme {
-                WhiplashApp()
+                androidx.compose.runtime.CompositionLocalProvider(
+                    com.whiplash.music.ui.common.LocalAppReduceMotion provides reduceAnimations,
+                ) {
+                    WhiplashApp()
+                }
             }
         }
     }
@@ -188,14 +199,18 @@ private fun WhiplashApp() {
     val context = LocalContext.current
     val mainScope = androidx.compose.runtime.rememberCoroutineScope()
     val app = context.applicationContext as WhiplashApplication
+    // Reduce animations (in-app setting or system "Remove animations"):
+    // navigation swaps instantly instead of sliding/fading.
+    val reduceMotion = com.whiplash.music.ui.common.isReducedMotionEnabled()
     val playerViewModel: PlayerViewModel = viewModel(
         factory = PlayerViewModelFactory(app.playbackController, app.libraryRepository, app.settingsRepository),
     )
     val playbackState by playerViewModel.state.collectAsState()
     val lyricsViewModel: com.whiplash.music.ui.player.LyricsViewModel = viewModel(
-        factory = com.whiplash.music.ui.player.LyricsViewModelFactory(app.playbackController, app.lrcLibProvider),
+        factory = com.whiplash.music.ui.player.LyricsViewModelFactory(app.playbackController, app.lrcLibProvider, app.lyricOffsetStore),
     )
     val lyrics by lyricsViewModel.lyrics.collectAsState()
+    val lyricOffsetMs by lyricsViewModel.lyricOffsetMs.collectAsState()
 
     var isPlayerExpanded by rememberSaveable { mutableStateOf(false) }
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.HOME) }
@@ -261,8 +276,19 @@ private fun WhiplashApp() {
     // Activity behavior (exiting the app). Only intercepts back while the
     // full player is actually open, so normal back navigation elsewhere is
     // unaffected.
-    BackHandler(enabled = isPlayerExpanded) {
-        isPlayerExpanded = false
+    // 2.11: predictive back previews the player's exit (shrink) and only
+    // collapses on commit; a plain back press still collapses immediately.
+    val playerDismiss = com.whiplash.music.ui.player.rememberPlayerDismissState()
+    var playerBackGestureActive by remember { mutableStateOf(false) }
+    com.whiplash.music.ui.player.PlayerPredictiveBack(
+        enabled = isPlayerExpanded,
+        state = playerDismiss,
+        onBackGestureActive = { playerBackGestureActive = it },
+        onDismiss = { isPlayerExpanded = false },
+    )
+    // Reopening the player always starts from fully open, never half-dragged.
+    LaunchedEffect(isPlayerExpanded) {
+        if (isPlayerExpanded) playerDismiss.reset()
     }
 
     // Same collapse-not-exit pattern for the Playlists tab's detail view:
@@ -315,7 +341,12 @@ private fun WhiplashApp() {
         // touch input over its full bounds rather than only over its
         // individual buttons, which is what let taps reach the content
         // underneath before this fix.
-        Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+        //
+        // The full player is drawn edge to edge (under the status and
+        // navigation bars, with its own insets), so only the tab content,
+        // mini player and bottom nav get the Scaffold's system-bar padding.
+        Box(modifier = Modifier.fillMaxSize()) {
+          Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
                 com.whiplash.music.ui.theme.WhiplashAppHeader(
                     title = if (selectedTab == AppTab.HOME) "Whiplash" else selectedTab.label,
@@ -335,8 +366,12 @@ private fun WhiplashApp() {
                     AnimatedContent(
                         targetState = selectedTab,
                         transitionSpec = {
-                            fadeIn(animationSpec = tween(GlassTokens.animRegular))
-                                .togetherWith(fadeOut(animationSpec = tween(GlassTokens.animFast)))
+                            if (reduceMotion) {
+                                instantContentTransform()
+                            } else {
+                                fadeIn(animationSpec = tween(GlassTokens.animRegular))
+                                    .togetherWith(fadeOut(animationSpec = tween(GlassTokens.animFast)))
+                            }
                         },
                         label = "tabContent",
                     ) { tab ->
@@ -360,7 +395,7 @@ private fun WhiplashApp() {
                                             fadeIn(animationSpec = tween(GlassTokens.animRegular))
                                         val exit = slideOutHorizontally(animationSpec = tween(GlassTokens.animFast)) { w -> if (forward) -w / 3 else w / 3 } +
                                             fadeOut(animationSpec = tween(GlassTokens.animFast))
-                                        enter.togetherWith(exit)
+                                        if (reduceMotion) instantContentTransform() else enter.togetherWith(exit)
                                     },
                                     label = "homeHistoryContent",
                                 ) { isHistory ->
@@ -401,7 +436,7 @@ private fun WhiplashApp() {
                                             fadeIn(animationSpec = tween(GlassTokens.animRegular))
                                         val exit = slideOutHorizontally(animationSpec = tween(GlassTokens.animFast)) { w -> if (forward) -w / 3 else w / 3 } +
                                             fadeOut(animationSpec = tween(GlassTokens.animFast))
-                                        enter.togetherWith(exit)
+                                        if (reduceMotion) instantContentTransform() else enter.togetherWith(exit)
                                     },
                                     label = "searchDetailContent",
                                 ) { _ ->
@@ -576,6 +611,8 @@ private fun WhiplashApp() {
                 )
             }
 
+          }
+
             // Full player, animated in/out (section 47: smooth transformation,
             // no abrupt visual jump). Drawn last in this Box so it is on top
             // in both z-order and hit-testing. Slide-only (no fade) since a
@@ -588,13 +625,28 @@ private fun WhiplashApp() {
             // what previously let taps pass through to content underneath.
             AnimatedVisibility(
                 visible = isPlayerExpanded && playbackState.currentItem != null,
-                enter = slideInVertically(animationSpec = tween(GlassTokens.animSlow)) { it },
-                exit = slideOutVertically(animationSpec = tween(GlassTokens.animSlow)) { it },
+                enter = if (reduceMotion) EnterTransition.None else slideInVertically(animationSpec = tween(GlassTokens.animSlow)) { it },
+                exit = if (reduceMotion) ExitTransition.None else slideOutVertically(animationSpec = tween(GlassTokens.animSlow)) { it },
             ) {
                 val scrimInteractionSource = remember { MutableInteractionSource() }
+                var playerHeightPx by remember { mutableStateOf(0f) }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .onSizeChanged { playerHeightPx = it.height.toFloat() }
+                        // 2.11: drag down anywhere on the player to dismiss;
+                        // it follows the finger and springs back if released early.
+                        .playerDismissTransform(
+                            state = playerDismiss,
+                            heightPx = { playerHeightPx },
+                            isBackGesture = { playerBackGestureActive },
+                        )
+                        .playerDragToDismiss(
+                            state = playerDismiss,
+                            heightPx = { playerHeightPx },
+                            enabled = !playerBackGestureActive,
+                            onDismiss = { isPlayerExpanded = false },
+                        )
                         .background(MaterialTheme.colorScheme.background)
                         .clickable(
                             interactionSource = scrimInteractionSource,
@@ -605,6 +657,10 @@ private fun WhiplashApp() {
                     val isFavorite by playerViewModel.isCurrentFavorite.collectAsState()
                     val autoplayEnabled by playerViewModel.autoplayEnabled.collectAsState()
                     val playbackSpeed by playerViewModel.playbackSpeed.collectAsState()
+                    val statsForNerdsEnabled by playerViewModel.statsForNerdsEnabled.collectAsState()
+                    val playerArtworkColors by playerViewModel.playerArtworkColors.collectAsState()
+                    val playerLyricStrip by playerViewModel.playerLyricStrip.collectAsState()
+                    val playerHeroArtwork by playerViewModel.playerHeroArtwork.collectAsState()
                     val playlistsForPlayer by playerViewModel.playlists.collectAsState()
                     val downloadedIds by app.libraryRepository.observeDownloadedIds().collectAsState(initial = emptySet())
                     val currentItemForDownload = playbackState.currentItem
@@ -627,8 +683,15 @@ private fun WhiplashApp() {
                         onToggleAutoplay = playerViewModel::setAutoplayEnabled,
                         onSetSleepTimer = playerViewModel::setSleepTimer,
                         lyrics = lyrics,
+                        lyricOffsetMs = lyricOffsetMs,
+                        onAdjustLyricOffset = lyricsViewModel::adjustLyricOffset,
+                        onResetLyricOffset = lyricsViewModel::resetLyricOffset,
                         playbackSpeed = playbackSpeed,
                         onSetPlaybackSpeed = playerViewModel::setPlaybackSpeed,
+                        showStatsForNerds = statsForNerdsEnabled,
+                        artworkColorsEnabled = playerArtworkColors,
+                        showLyricStrip = playerLyricStrip,
+                        heroArtwork = playerHeroArtwork,
                         playlists = playlistsForPlayer,
                         onAddToPlaylist = playerViewModel::addCurrentToPlaylist,
                         onCreatePlaylistAndAdd = playerViewModel::createPlaylistAndAddCurrent,
@@ -654,8 +717,20 @@ private fun WhiplashApp() {
             com.whiplash.music.ui.theme.GlassToastHost(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
+                    .padding(innerPadding)
                     .padding(bottom = GlassTokens.spaceXl + GlassTokens.miniPlayerReservedHeight),
             )
         }
     }
 }
+
+/**
+ * An AnimatedContent transition with no motion at all, used when reduced
+ * motion is on. sizeTransform is null for the same reason as the playlist
+ * swap above: the default would still animate the container's height.
+ */
+private fun instantContentTransform(): ContentTransform = ContentTransform(
+    targetContentEnter = EnterTransition.None,
+    initialContentExit = ExitTransition.None,
+    sizeTransform = null,
+)

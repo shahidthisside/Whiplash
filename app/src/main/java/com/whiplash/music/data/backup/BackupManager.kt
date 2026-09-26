@@ -66,6 +66,7 @@ class BackupManager(
     private val context: Context,
     private val database: WhiplashDatabase,
     private val settingsRepository: com.whiplash.music.data.repository.SettingsRepository,
+    private val lyricOffsetStore: com.whiplash.music.data.repository.LyricOffsetStore? = null,
 ) {
 
     /**
@@ -290,9 +291,20 @@ class BackupManager(
                         // keys still restores exactly as before, because the
                         // restore side reads each one only if present.
                         put("skipSilenceEnabled", settingsRepository.skipSilenceEnabled.first())
+                        put("statsForNerdsEnabled", settingsRepository.statsForNerdsEnabled.first())
+                        put("downloadWifiOnly", settingsRepository.downloadWifiOnly.first())
+                        put("reduceAnimations", settingsRepository.reduceAnimations.first())
+                        put("playerArtworkColors", settingsRepository.playerArtworkColors.first())
+                        put("playerLyricStrip", settingsRepository.playerLyricStrip.first())
+                        put("playerHeroArtwork", settingsRepository.playerHeroArtwork.first())
                         put("perNetworkQualityEnabled", settingsRepository.perNetworkQualityEnabled.first())
                         put("audioQualityWifi", settingsRepository.audioQualityWifi.first().name)
                         put("audioQualityCellular", settingsRepository.audioQualityCellular.first().name)
+                        // Per-track lyrics timing corrections, as a trackId -> ms
+                        // object. Only non-zero offsets exist, so this stays small.
+                        lyricOffsetStore?.let { store ->
+                            put("lyricOffsets", JSONObject(store.offsets.value.mapValues { it.value }))
+                        }
                     }
                 )
             }
@@ -417,6 +429,29 @@ class BackupManager(
                     // own comment). Each is guarded on the key being present
                     // so a backup taken before this fix restores unchanged
                     // rather than resetting these to their defaults.
+                    s.optJSONObject("lyricOffsets")?.let { offsets ->
+                        offsets.keys().forEach { trackId ->
+                            runCatching { lyricOffsetStore?.setOffset(trackId, offsets.getLong(trackId)) }
+                        }
+                    }
+                    if (s.has("playerHeroArtwork")) {
+                        runCatching { settingsRepository.setPlayerHeroArtwork(s.getBoolean("playerHeroArtwork")) }
+                    }
+                    if (s.has("playerLyricStrip")) {
+                        runCatching { settingsRepository.setPlayerLyricStrip(s.getBoolean("playerLyricStrip")) }
+                    }
+                    if (s.has("playerArtworkColors")) {
+                        runCatching { settingsRepository.setPlayerArtworkColors(s.getBoolean("playerArtworkColors")) }
+                    }
+                    if (s.has("reduceAnimations")) {
+                        runCatching { settingsRepository.setReduceAnimations(s.getBoolean("reduceAnimations")) }
+                    }
+                    if (s.has("downloadWifiOnly")) {
+                        runCatching { settingsRepository.setDownloadWifiOnly(s.getBoolean("downloadWifiOnly")) }
+                    }
+                    if (s.has("statsForNerdsEnabled")) {
+                        runCatching { settingsRepository.setStatsForNerdsEnabled(s.getBoolean("statsForNerdsEnabled")) }
+                    }
                     if (s.has("skipSilenceEnabled")) {
                         runCatching { settingsRepository.setSkipSilenceEnabled(s.getBoolean("skipSilenceEnabled")) }
                     }

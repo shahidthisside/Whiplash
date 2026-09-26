@@ -96,10 +96,17 @@ class SettingsRepository(context: Context) {
     }
 
     /** Crossfade duration between tracks, 0 = off (section 18). Defaults off. */
-    val crossfadeDurationMs: Flow<Int> = dataStore.data.map { prefs -> prefs[CROSSFADE_KEY] ?: 0 }
+    /**
+     * Fade length between tracks, 0 (off) to 12s (see PlaybackTuning). Clamped on
+     * read as well as write so a value from an older or hand-edited backup
+     * can never drive the fade logic outside the range the UI offers.
+     */
+    val crossfadeDurationMs: Flow<Int> = dataStore.data.map { prefs ->
+        com.whiplash.music.domain.model.PlaybackTuning.normalizeCrossfadeMs(prefs[CROSSFADE_KEY] ?: 0)
+    }
 
     suspend fun setCrossfadeDurationMs(ms: Int) {
-        dataStore.edit { prefs -> prefs[CROSSFADE_KEY] = ms }
+        dataStore.edit { prefs -> prefs[CROSSFADE_KEY] = com.whiplash.music.domain.model.PlaybackTuning.normalizeCrossfadeMs(ms) }
     }
 
     /** Gapless playback between consecutive tracks (section 18). Defaults on. */
@@ -110,10 +117,13 @@ class SettingsRepository(context: Context) {
     }
 
     /** Persisted playback speed multiplier (section 18). Defaults 1.0x (normal speed). */
-    val playbackSpeed: Flow<Float> = dataStore.data.map { prefs -> prefs[SPEED_KEY] ?: 1.0f }
+    /** Playback speed, 0.5x..2.0x (see PlaybackTuning); clamped on read and write (see [crossfadeDurationMs]). */
+    val playbackSpeed: Flow<Float> = dataStore.data.map { prefs ->
+        com.whiplash.music.domain.model.PlaybackTuning.normalizeSpeed(prefs[SPEED_KEY] ?: 1.0f)
+    }
 
     suspend fun setPlaybackSpeed(speed: Float) {
-        dataStore.edit { prefs -> prefs[SPEED_KEY] = speed }
+        dataStore.edit { prefs -> prefs[SPEED_KEY] = com.whiplash.music.domain.model.PlaybackTuning.normalizeSpeed(speed) }
     }
 
     /**
@@ -149,6 +159,75 @@ class SettingsRepository(context: Context) {
 
     suspend fun setSkipSilenceEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[SKIP_SILENCE_KEY] = enabled }
+    }
+
+    /**
+     * Only start downloads on an unmetered connection (Wi-Fi/Ethernet),
+     * so a bulk "Download album" on mobile data can't quietly burn through
+     * a data plan. Off by default so existing behaviour is unchanged.
+     * Streaming is not affected: that is what per-network quality is for.
+     */
+    val downloadWifiOnly: Flow<Boolean> = dataStore.data.map { prefs -> prefs[DOWNLOAD_WIFI_ONLY_KEY] ?: false }
+
+    suspend fun setDownloadWifiOnly(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[DOWNLOAD_WIFI_ONLY_KEY] = enabled }
+    }
+
+    /**
+     * True when the active network is metered (mobile data, a metered
+     * hotspot) or there is no network at all. Uses the system's own
+     * metered flag rather than checking for the Wi-Fi transport, so a
+     * phone tethered to another phone's hotspot counts as metered, which
+     * is what the listener actually cares about.
+     */
+    fun isActiveNetworkMetered(): Boolean {
+        val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            ?: return false
+        return cm.isActiveNetworkMetered
+    }
+
+    /** Shows the codec / sample rate / bitrate line under the full player's artwork. Off by default. */
+    /**
+     * In-app "Reduce animations". Combined with the system's own
+     * animator-duration setting in isReducedMotionEnabled(), so either one
+     * switches off the app's nonessential motion. Off by default.
+     */
+    val reduceAnimations: Flow<Boolean> = dataStore.data.map { prefs -> prefs[REDUCE_ANIMATIONS_KEY] ?: false }
+
+    suspend fun setReduceAnimations(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[REDUCE_ANIMATIONS_KEY] = enabled }
+    }
+
+    /**
+     * Colours the full player from the current cover: a mesh-gradient
+     * backdrop sampled from the artwork and an accent for the play button
+     * and active toggles. On by default as part of the Now Playing
+     * redesign; turning it off restores the plain theme-coloured player.
+     */
+    val playerArtworkColors: Flow<Boolean> = dataStore.data.map { prefs -> prefs[PLAYER_ARTWORK_COLORS_KEY] ?: true }
+
+    suspend fun setPlayerArtworkColors(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[PLAYER_ARTWORK_COLORS_KEY] = enabled }
+    }
+
+    /** Shows the current lyric line above the full player's seek bar. On by default. */
+    val playerLyricStrip: Flow<Boolean> = dataStore.data.map { prefs -> prefs[PLAYER_LYRIC_STRIP_KEY] ?: true }
+
+    suspend fun setPlayerLyricStrip(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[PLAYER_LYRIC_STRIP_KEY] = enabled }
+    }
+
+    /** Full-bleed "hero" artwork across the top of the full player. Off by default. */
+    val playerHeroArtwork: Flow<Boolean> = dataStore.data.map { prefs -> prefs[PLAYER_HERO_ARTWORK_KEY] ?: false }
+
+    suspend fun setPlayerHeroArtwork(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[PLAYER_HERO_ARTWORK_KEY] = enabled }
+    }
+
+    val statsForNerdsEnabled: Flow<Boolean> = dataStore.data.map { prefs -> prefs[STATS_FOR_NERDS_KEY] ?: false }
+
+    suspend fun setStatsForNerdsEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[STATS_FOR_NERDS_KEY] = enabled }
     }
 
     /**
@@ -239,6 +318,12 @@ class SettingsRepository(context: Context) {
         val AUDIO_CACHE_ENABLED_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("audio_cache_enabled")
         val LAST_BACKUP_TIME_KEY: Preferences.Key<Long> = androidx.datastore.preferences.core.longPreferencesKey("last_backup_time_ms")
         val SKIP_SILENCE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("skip_silence_enabled")
+        val DOWNLOAD_WIFI_ONLY_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("download_wifi_only")
+        val REDUCE_ANIMATIONS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("reduce_animations")
+        val PLAYER_ARTWORK_COLORS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_artwork_colors")
+        val PLAYER_LYRIC_STRIP_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_lyric_strip")
+        val PLAYER_HERO_ARTWORK_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_hero_artwork")
+        val STATS_FOR_NERDS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("stats_for_nerds_enabled")
         val AUDIO_QUALITY_WIFI_KEY: Preferences.Key<String> = stringPreferencesKey("audio_quality_wifi")
         val AUDIO_QUALITY_CELLULAR_KEY: Preferences.Key<String> = stringPreferencesKey("audio_quality_cellular")
         val PER_NETWORK_QUALITY_ENABLED_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("per_network_quality_enabled")

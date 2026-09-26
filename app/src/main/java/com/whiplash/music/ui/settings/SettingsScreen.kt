@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +37,11 @@ import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Animation
+import androidx.compose.material.icons.filled.ColorLens
+import androidx.compose.material.icons.filled.Lyrics
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -98,6 +104,12 @@ fun SettingsScreen() {
     val seekBarStyle by viewModel.seekBarStyle.collectAsState()
     val audioCacheEnabled by viewModel.audioCacheEnabled.collectAsState()
     val skipSilenceEnabled by viewModel.skipSilenceEnabled.collectAsState()
+    val downloadWifiOnly by viewModel.downloadWifiOnly.collectAsState()
+    val statsForNerdsEnabled by viewModel.statsForNerdsEnabled.collectAsState()
+    val reduceAnimations by viewModel.reduceAnimations.collectAsState()
+    val playerArtworkColors by viewModel.playerArtworkColors.collectAsState()
+    val playerLyricStrip by viewModel.playerLyricStrip.collectAsState()
+    val playerHeroArtwork by viewModel.playerHeroArtwork.collectAsState()
     val perNetworkQualityEnabled by viewModel.perNetworkQualityEnabled.collectAsState()
     val audioQualityWifi by viewModel.audioQualityWifi.collectAsState()
     val audioQualityCellular by viewModel.audioQualityCellular.collectAsState()
@@ -284,6 +296,17 @@ fun SettingsScreen() {
                     )
                 }
 
+                // --- Download on Wi-Fi only ---
+                // Sits with Download Quality because both decide what a
+                // download costs; streaming has its own per-network quality.
+                SettingToggleRow(
+                    title = "Download on Wi-Fi only",
+                    icon = Icons.Filled.Wifi,
+                    subtitle = "Don't start downloads on mobile data or metered networks.",
+                    checked = downloadWifiOnly,
+                    onCheckedChange = viewModel::setDownloadWifiOnly,
+                )
+
 
                 // --- Autoplay ---
                 SettingToggleRow(
@@ -330,7 +353,7 @@ fun SettingsScreen() {
                         "Fades out the current song and fades in the next over ${crossfadeDurationMs / 1000}s."
                     },
                 )
-                CrossfadeSelector(
+                com.whiplash.music.ui.common.CrossfadeSlider(
                     selectedMs = crossfadeDurationMs,
                     onSelect = viewModel::setCrossfadeDurationMs,
                 )
@@ -342,7 +365,7 @@ fun SettingsScreen() {
                     icon = Icons.Filled.Speed,
                     subtitle = "Applies to the currently playing track immediately.",
                 )
-                PlaybackSpeedSelector(
+                com.whiplash.music.ui.common.PlaybackSpeedControl(
                     selected = playbackSpeed,
                     onSelect = { speed ->
                         viewModel.setPlaybackSpeed(speed)
@@ -535,6 +558,50 @@ fun SettingsScreen() {
                     Spacer(Modifier.height(GlassTokens.spaceMd))
                     SeekBarStylePicker(selected = seekBarStyle, onSelect = viewModel::setSeekBarStyle)
                 }
+
+                SettingToggleRow(
+                    title = "Artwork colours in player",
+                    icon = Icons.Filled.ColorLens,
+                    subtitle = "Tint the Now Playing screen with colours from the album art.",
+                    checked = playerArtworkColors,
+                    onCheckedChange = viewModel::setPlayerArtworkColors,
+                )
+
+                SettingToggleRow(
+                    title = "Lyric line in player",
+                    icon = Icons.Filled.Lyrics,
+                    subtitle = "Show the current lyric above the seek bar in the full player.",
+                    checked = playerLyricStrip,
+                    onCheckedChange = viewModel::setPlayerLyricStrip,
+                )
+
+                SettingToggleRow(
+                    title = "Full-bleed artwork",
+                    icon = Icons.Filled.Fullscreen,
+                    subtitle = "Show the album art edge to edge across the top of the full player.",
+                    checked = playerHeroArtwork,
+                    onCheckedChange = viewModel::setPlayerHeroArtwork,
+                )
+
+                SettingToggleRow(
+                    title = "Stats for Nerds",
+                    icon = Icons.Filled.Info,
+                    subtitle = "Show the codec, sample rate and bitrate of what's playing under the artwork.",
+                    checked = statsForNerdsEnabled,
+                    onCheckedChange = viewModel::setStatsForNerdsEnabled,
+                )
+
+                // --- Reduce animations ---
+                // Same effect as the system's "Remove animations", but just
+                // for this app: screen transitions become instant and
+                // decorative motion (shimmer, artwork shrink) stops.
+                SettingToggleRow(
+                    title = "Reduce animations",
+                    icon = Icons.Filled.Animation,
+                    subtitle = "Turn off screen transitions and decorative motion in the app.",
+                    checked = reduceAnimations,
+                    onCheckedChange = viewModel::setReduceAnimations,
+                )
             }
         }
 
@@ -624,7 +691,7 @@ private fun GithubFooter() {
     }
 }
 
-/** Swatch grid for picking the full player's seek bar style — 4 real, distinct styles, each with a small live preview matching its actual on-screen look. */
+/** Swatch grid for picking the full player's seek bar style — 5 real, distinct styles, each with a small live preview matching its actual on-screen look. */
 @Composable
 private fun SeekBarStylePicker(selected: com.whiplash.music.ui.theme.SeekBarStyle, onSelect: (com.whiplash.music.ui.theme.SeekBarStyle) -> Unit) {
     val options = com.whiplash.music.ui.theme.SeekBarStyle.entries.toList()
@@ -750,6 +817,12 @@ private fun SeekBarStylePreview(style: com.whiplash.music.ui.theme.SeekBarStyle,
                 val splitX = size.width * previewFraction
                 drawLine(inactiveColor, androidx.compose.ui.geometry.Offset(0f, midY), androidx.compose.ui.geometry.Offset(size.width, midY), strokeWidth = 1.5.dp.toPx())
                 drawLine(activeColor, androidx.compose.ui.geometry.Offset(0f, midY), androidx.compose.ui.geometry.Offset(splitX, midY), strokeWidth = 1.5.dp.toPx())
+            }
+            com.whiplash.music.ui.theme.SeekBarStyle.HAIRLINE -> {
+                val splitX = size.width * previewFraction
+                drawLine(inactiveColor, androidx.compose.ui.geometry.Offset(0f, midY), androidx.compose.ui.geometry.Offset(size.width, midY), strokeWidth = 1.dp.toPx())
+                drawLine(activeColor, androidx.compose.ui.geometry.Offset(0f, midY), androidx.compose.ui.geometry.Offset(splitX, midY), strokeWidth = 1.dp.toPx())
+                drawCircle(color = activeColor, radius = 3.dp.toPx(), center = androidx.compose.ui.geometry.Offset(splitX, midY))
             }
         }
     }
@@ -883,8 +956,19 @@ private fun SettingToggleRow(
     icon: ImageVector? = null,
 ) {
     val haptic = LocalHapticFeedback.current
+    // The whole row toggles, not just the switch: a far bigger target, and
+    // TalkBack reads the title, subtitle and state as one control.
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(
+                value = checked,
+                role = androidx.compose.ui.semantics.Role.Switch,
+                onValueChange = { newValue ->
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onCheckedChange(newValue)
+                },
+            ),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -897,11 +981,9 @@ private fun SettingToggleRow(
         Spacer(Modifier.width(GlassTokens.spaceSm))
         Switch(
             checked = checked,
-            onCheckedChange = { newValue ->
-                // Section 57: subtle haptic feedback on toggles.
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onCheckedChange(newValue)
-            },
+            // Null: the row above owns the click (and the section 57 haptic),
+            // so a tap on the switch itself toggles exactly once.
+            onCheckedChange = null,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = WhiplashColors.onAccent,
                 checkedTrackColor = WhiplashColors.accent,
@@ -951,84 +1033,6 @@ private fun AudioQualitySelector(selected: AudioQuality, onSelect: (AudioQuality
                 horizontalArrangement = Arrangement.Center,
             ) {
                 Text(text = quality.shortLabel(), style = MaterialTheme.typography.labelMedium, color = fg)
-            }
-        }
-    }
-}
-
-private val CROSSFADE_OPTIONS = listOf(0, 3_000, 6_000, 10_000)
-
-@Composable
-private fun CrossfadeSelector(selectedMs: Int, onSelect: (Int) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(WhiplashRadius.pill))
-            .background(WhiplashColors.surfaceGlass)
-            .padding(3.dp),
-    ) {
-        CROSSFADE_OPTIONS.forEach { ms ->
-            val isSelected = ms == selectedMs
-            val bg by androidx.compose.animation.animateColorAsState(
-                targetValue = if (isSelected) WhiplashColors.accent else Color.Transparent,
-                label = "crossfadeSegmentBg",
-            )
-            val fg by androidx.compose.animation.animateColorAsState(
-                targetValue = if (isSelected) WhiplashColors.onAccent else WhiplashColors.textSecondary,
-                label = "crossfadeSegmentFg",
-            )
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(WhiplashRadius.pill))
-                    .background(bg)
-                    .clickable(role = androidx.compose.ui.semantics.Role.Button) { onSelect(ms) }
-                    .semantics { this.selected = isSelected }
-                    .padding(vertical = GlassTokens.spaceSm),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                Text(
-                    text = if (ms == 0) "Off" else "${ms / 1000}s",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = fg,
-                )
-            }
-        }
-    }
-}
-
-private val SPEED_OPTIONS = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-
-@Composable
-private fun PlaybackSpeedSelector(selected: Float, onSelect: (Float) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(WhiplashRadius.pill))
-            .background(WhiplashColors.surfaceGlass)
-            .padding(3.dp),
-    ) {
-        SPEED_OPTIONS.forEach { speed ->
-            val isSelected = speed == selected
-            val bg by androidx.compose.animation.animateColorAsState(
-                targetValue = if (isSelected) WhiplashColors.accent else Color.Transparent,
-                label = "speedSegmentBg",
-            )
-            val fg by androidx.compose.animation.animateColorAsState(
-                targetValue = if (isSelected) WhiplashColors.onAccent else WhiplashColors.textSecondary,
-                label = "speedSegmentFg",
-            )
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(WhiplashRadius.pill))
-                    .background(bg)
-                    .clickable(role = androidx.compose.ui.semantics.Role.Button) { onSelect(speed) }
-                    .semantics { this.selected = isSelected }
-                    .padding(vertical = GlassTokens.spaceSm),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                Text(text = "${speed}x", style = MaterialTheme.typography.labelMedium, color = fg)
             }
         }
     }

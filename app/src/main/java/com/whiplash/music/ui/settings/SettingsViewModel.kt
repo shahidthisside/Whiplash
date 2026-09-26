@@ -76,6 +76,49 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setSkipSilenceEnabled(enabled) }
     }
 
+    /** Whether downloads only start on an unmetered connection (see SettingsRepository.downloadWifiOnly). */
+    val downloadWifiOnly: StateFlow<Boolean> = repository.downloadWifiOnly
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setDownloadWifiOnly(enabled: Boolean) {
+        viewModelScope.launch { repository.setDownloadWifiOnly(enabled) }
+    }
+
+    val playerArtworkColors: StateFlow<Boolean> = repository.playerArtworkColors
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    fun setPlayerArtworkColors(enabled: Boolean) {
+        viewModelScope.launch { repository.setPlayerArtworkColors(enabled) }
+    }
+
+    val playerLyricStrip: StateFlow<Boolean> = repository.playerLyricStrip
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    fun setPlayerLyricStrip(enabled: Boolean) {
+        viewModelScope.launch { repository.setPlayerLyricStrip(enabled) }
+    }
+
+    val playerHeroArtwork: StateFlow<Boolean> = repository.playerHeroArtwork
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setPlayerHeroArtwork(enabled: Boolean) {
+        viewModelScope.launch { repository.setPlayerHeroArtwork(enabled) }
+    }
+
+    val reduceAnimations: StateFlow<Boolean> = repository.reduceAnimations
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setReduceAnimations(enabled: Boolean) {
+        viewModelScope.launch { repository.setReduceAnimations(enabled) }
+    }
+
+    val statsForNerdsEnabled: StateFlow<Boolean> = repository.statsForNerdsEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setStatsForNerdsEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setStatsForNerdsEnabled(enabled) }
+    }
+
     /** Whether Wi-Fi/cellular each have their own audio quality ceiling (see SettingsRepository.perNetworkQualityEnabled doc). */
     val perNetworkQualityEnabled: StateFlow<Boolean> = repository.perNetworkQualityEnabled
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
