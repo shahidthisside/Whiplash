@@ -53,6 +53,19 @@ class PlayerViewModel(
         viewModelScope.launch { settingsRepository.setAutoplayEnabled(enabled) }
     }
 
+    val statsForNerdsEnabled: StateFlow<Boolean> = settingsRepository.statsForNerdsEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val playerLyricStrip: StateFlow<Boolean> = settingsRepository.playerLyricStrip
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    val playerHeroArtwork: StateFlow<Boolean> = settingsRepository.playerHeroArtwork
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** Colour the full player from the cover art (see SettingsRepository.playerArtworkColors). */
+    val playerArtworkColors: StateFlow<Boolean> = settingsRepository.playerArtworkColors
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     /**
      * Playback speed shortcut in the full player (mirrors Settings'
      * own selector exactly, same as [autoplayEnabled] above): both read/

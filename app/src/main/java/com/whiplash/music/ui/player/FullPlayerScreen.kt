@@ -1,6 +1,14 @@
 package com.whiplash.music.ui.player
 
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -21,7 +29,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -38,6 +52,8 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -50,6 +66,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -95,9 +112,16 @@ fun FullPlayerScreen(
     onToggleAutoplay: (Boolean) -> Unit = {},
     onSetSleepTimer: (SleepTimerMode?) -> Unit = {},
     lyrics: com.whiplash.music.domain.model.LyricsResult? = null,
+    lyricOffsetMs: Long = 0L,
+    onAdjustLyricOffset: (Long) -> Unit = {},
+    onResetLyricOffset: () -> Unit = {},
     onLyricsSheetOpened: () -> Unit = {},
     playbackSpeed: Float = 1.0f,
     onSetPlaybackSpeed: (Float) -> Unit = {},
+    showStatsForNerds: Boolean = false,
+    artworkColorsEnabled: Boolean = true,
+    showLyricStrip: Boolean = true,
+    heroArtwork: Boolean = false,
     playlists: List<com.whiplash.music.domain.model.Playlist> = emptyList(),
     onAddToPlaylist: (playlistId: Long, playlistName: String) -> Unit = { _, _ -> },
     onCreatePlaylistAndAdd: (name: String) -> Unit = {},
@@ -108,6 +132,16 @@ fun FullPlayerScreen(
     onRemoveDownloadCurrent: (() -> Unit)? = null,
 ) {
     val item = state.currentItem
+    val artworkScale = rememberPausedArtworkScale(state)
+    // 2.3: swipe the artwork sideways to skip. State sits outside the
+    // track-change AnimatedContent so the spring back isn't cut off.
+    val artworkSwipe = rememberArtworkSwipeState()
+    val skipHaptic = rememberSkipHaptic()
+    val reducedMotion = com.whiplash.music.ui.common.isReducedMotionEnabled()
+    // Artwork-derived colours (2.1/2.2). Read from a separate tiny decode
+    // of the cover, so the displayed artwork itself is untouched.
+    val artworkPalette by rememberArtworkPalette(item?.artworkUri, enabled = artworkColorsEnabled)
+    val playerColors = animatedPlayerColors(artworkPalette)
     var isQueueSheetOpen by remember { mutableStateOf(false) }
     var isSleepTimerSheetOpen by remember { mutableStateOf(false) }
     var isLyricsSheetOpen by remember { mutableStateOf(false) }
@@ -161,188 +195,429 @@ fun FullPlayerScreen(
         )
     }
 
-    Column(
+    // 2.8 hero mode: the in-flow artwork slot takes all spare height, and
+    // the hero behind it is sized to reach just past the slot's bottom, so
+    // the controls stay at the bottom and the title sits on the faded edge.
+    var rootTopPx by remember { mutableStateOf(0f) }
+    // 2.9: one shared value drives the whole collapse when the lyrics or
+    // queue sheet opens: the big artwork block fades back and a compact
+    // header (thumb + title) settles in under the top bar, in the strip
+    // the sheet leaves visible. 0 = normal player, 1 = collapsed.
+    var topBarBottomPx by remember { mutableStateOf(0f) }
+    var heroSlotBottomPx by remember { mutableStateOf(0f) }
+    val collapse by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isLyricsSheetOpen || isQueueSheetOpen) 1f else 0f,
+        animationSpec = tween(if (reducedMotion) 0 else COLLAPSE_ANIM_MS),
+        label = "playerCollapse",
+    )
+    val density = androidx.compose.ui.platform.LocalDensity.current
+
+    androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(WhiplashColors.background)
+            .onGloballyPositioned { rootTopPx = it.positionInRoot().y },
+    ) {
+    // Capped at 1.15x the width so a square cover never loses more than a
+    // sliver of each side on tall phones; below the cap the fade simply
+    // ends a little above the title.
+    // The hero reaches down to just past the title (which, with the seek
+    // bar and controls, stays grouped at the bottom), so its faded edge
+    // always sits right behind the title with no empty band between.
+    val heroHeight = if (heroSlotBottomPx > 0f) {
+        minOf(
+            with(density) { (heroSlotBottomPx - rootTopPx).coerceAtLeast(0f).toDp() } + HERO_TITLE_OVERLAP,
+            maxWidth * HERO_MAX_ASPECT,
+        )
+    } else {
+        minOf(maxWidth * HERO_MAX_ASPECT, maxHeight * 0.6f)
+    }
+    val wideWindow = maxWidth >= TWO_PANE_MIN_WIDTH
+    val twoPane = wideWindow && maxWidth > maxHeight
+    val useHero = heroArtwork && !twoPane
+    PlayerMeshBackdrop(
+        colors = playerColors,
+        animate = state.isPlaying && !reducedMotion,
+    )
+    if (useHero) {
+        HeroArtwork(
+            artworkUri = item?.artworkUri,
+            translationPx = { artworkSwipe.translationPx },
+            animate = !reducedMotion,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(heroHeight)
+                .graphicsLayer { alpha = 1f - collapse * (1f - COLLAPSED_BODY_ALPHA) },
+        )
+    }
+    val TopBar: @Composable () -> Unit = {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { topBarBottomPx = it.positionInRoot().y + it.size.height },
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        GlassIconButton(contentDescription = "Collapse player", onClick = onCollapse) {
+            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = WhiplashColors.textPrimary)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+            GlassIconButton(
+                contentDescription = "Lyrics",
+                onClick = {
+                    isLyricsSheetOpen = true
+                    onLyricsSheetOpened()
+                },
+            ) {
+                Icon(Icons.Filled.Lyrics, contentDescription = null, tint = WhiplashColors.textPrimary)
+            }
+            GlassIconButton(
+                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                onClick = hapticToggleFavorite,
+            ) {
+                // Section 52's own example: favorite -> small scale
+                // transition -> new state. A brief overshoot-then-
+                // settle scale pulse on toggle, rather than an instant
+                // icon swap, makes the state change feel deliberate.
+                val favoriteScale by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (isFavorite) 1.15f else 1f,
+                    animationSpec = androidx.compose.animation.core.spring(
+                        dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                        stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
+                    ),
+                    label = "favoriteScale",
+                )
+                Icon(
+                    imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    contentDescription = null,
+                    tint = if (isFavorite) WhiplashColors.accent else WhiplashColors.textPrimary,
+                    modifier = Modifier.scale(favoriteScale),
+                )
+            }
+            GlassIconButton(contentDescription = "Queue", onClick = { isQueueSheetOpen = true }) {
+                Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null, tint = WhiplashColors.textPrimary)
+            }
+            GlassIconButton(
+                contentDescription = "More",
+                onClick = { isOverflowSheetOpen = true },
+            ) {
+                Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textPrimary)
+            }
+        }
+    }
+
+    }
+    // Shared by the portrait and two-pane layouts.
+    val ArtworkCard: @Composable (PlayableItem?, Modifier) -> Unit = { currentTrack, sizeModifier ->
+    Box(
+        modifier = sizeModifier
+            .artworkSwipeToSkip(
+                state = artworkSwipe,
+                enabled = currentTrack != null,
+                onNext = onNext,
+                onPrevious = onPrevious,
+                onSkipFeedback = skipHaptic,
+            )
+            // Scale in the draw layer only: layout (title,
+            // seek bar, controls) stays exactly where it is,
+            // so the shrink never shifts anything else.
+            .graphicsLayer {
+                scaleX = artworkScale
+                scaleY = artworkScale
+            }
+            .clip(RoundedCornerShape(WhiplashRadius.extraLarge))
+            .background(WhiplashColors.surfaceElevated),
+    ) {
+        if (currentTrack?.artworkUri != null) {
+            val context = LocalContext.current
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(currentTrack.artworkUri)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        ArtworkSwipeHint(artworkSwipe)
+    }
+    }
+    val TitleBlock: @Composable (PlayableItem?) -> Unit = { currentTrack ->
+    // 2.4: long titles scroll instead of being cut off. The
+    // artist line starts a beat later than the title so the two
+    // never move in lockstep. The whole block already crossfades
+    // on track change (the AnimatedContent above). Under reduced
+    // motion the lines stay static and ellipsize as before.
+    MarqueeText(
+        text = currentTrack?.title ?: "Nothing playing",
+        style = MaterialTheme.typography.headlineMedium,
+        color = WhiplashColors.textPrimary,
+        initialDelayMillis = TITLE_MARQUEE_DELAY_MS,
+        animate = !reducedMotion,
+    )
+    MarqueeText(
+        text = currentTrack?.artist ?: "",
+        style = MaterialTheme.typography.bodyLarge,
+        color = WhiplashColors.textSecondary,
+        initialDelayMillis = ARTIST_MARQUEE_DELAY_MS,
+        animate = !reducedMotion,
+    )
+    }
+    val PlayerControls: @Composable (Boolean) -> Unit = { lyricStripFits ->
+    if (showStatsForNerds) {
+        StatsForNerdsLine(info = state.audioInfo)
+    }
+
+    androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceLg))
+
+    if (showLyricStrip && lyricStripFits) {
+        CurrentLyricStrip(
+            result = lyrics,
+            positionMs = state.positionMs,
+            offsetMs = lyricOffsetMs,
+            onClick = {
+                isLyricsSheetOpen = true
+                onLyricsSheetOpened()
+            },
+        )
+    }
+
+    SeekBar(
+        positionMs = state.positionMs,
+        durationMs = state.durationMs,
+        onSeekTo = onSeekTo,
+    )
+
+    androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        GlassIconButton(
+            contentDescription = if (state.shuffleEnabled) "Shuffle: ON" else "Shuffle: OFF",
+            onClick = hapticToggleShuffle,
+        ) {
+            Icon(
+                Icons.Filled.Shuffle,
+                contentDescription = null,
+                tint = if (state.shuffleEnabled) playerColors.accent else WhiplashColors.textSecondary,
+            )
+        }
+        GlassIconButton(contentDescription = "Previous", onClick = onPrevious, size = 56.dp) {
+            Icon(Icons.Filled.SkipPrevious, contentDescription = null, tint = WhiplashColors.textPrimary)
+        }
+        GlassPrimaryPlayButton(
+            isPlaying = state.isPlaying,
+            onClick = hapticTogglePlayPause,
+            size = 84.dp,
+            containerColor = playerColors.accent,
+            contentColor = playerColors.onAccent,
+        ) {
+            Icon(
+                imageVector = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = null,
+                tint = playerColors.onAccent,
+                modifier = Modifier.size(38.dp),
+            )
+        }
+        GlassIconButton(contentDescription = "Next", onClick = onNext, size = 56.dp) {
+            Icon(Icons.Filled.SkipNext, contentDescription = null, tint = WhiplashColors.textPrimary)
+        }
+        GlassIconButton(
+            contentDescription = "Repeat mode: ${state.repeatMode.name}",
+            onClick = hapticCycleRepeat,
+        ) {
+            Icon(
+                imageVector = if (state.repeatMode == RepeatMode.ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
+                contentDescription = null,
+                tint = if (state.repeatMode != RepeatMode.OFF) playerColors.accent else WhiplashColors.textSecondary,
+            )
+        }
+    }
+    }
+    if (!twoPane) {
+    Column(
+        modifier = Modifier
+            // Tablets / unfolded: keep the column at phone-like width
+            // (widthIn before fillMaxSize, or the fill wins).
+            .align(Alignment.TopCenter)
+            .widthIn(max = PLAYER_MAX_CONTENT_WIDTH)
+            .fillMaxSize()
             // The screen is drawn edge-to-edge (enableEdgeToEdge in
             // MainActivity), so without this the collapse button and
             // artwork draw underneath the system status bar / notification
             // shade swipe area. Only the top inset is needed here — the
             // bottom is left alone since this screen has no bottom nav.
             .windowInsetsPadding(WindowInsets.statusBars)
+            // The layout was designed (and every screen tuned) with one extra
+            // status-bar height of space above the top bar: the player used
+            // to sit inside the Scaffold's inset padding as well as applying
+            // its own. Now that the backdrop runs edge to edge, keep that
+            // same gap explicitly so every element stays where it was.
+            // Full-bleed mode drops that gap: the top buttons sit right under
+            // the status bar, over the artwork, giving the cover more room.
+            .padding(top = if (useHero) 0.dp else WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
+            // The player now draws under the navigation bar too, so keep
+            // the transport controls clear of the gesture handle.
+            .windowInsetsPadding(WindowInsets.navigationBars)
             .padding(GlassTokens.spaceLg),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+        TopBar()
+        // Wide portrait windows (tablets) have spare height once the width is
+        // capped; centre the body under the top bar instead of leaving it all
+        // below the controls. Phones keep the original top-down layout.
+        Column(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = if (wideWindow) Arrangement.Center else Arrangement.Top,
         ) {
-            GlassIconButton(contentDescription = "Collapse player", onClick = onCollapse) {
-                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = WhiplashColors.textPrimary)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
-                GlassIconButton(
-                    contentDescription = "Lyrics",
-                    onClick = {
-                        isLyricsSheetOpen = true
-                        onLyricsSheetOpened()
-                    },
-                ) {
-                    Icon(Icons.Filled.Lyrics, contentDescription = null, tint = WhiplashColors.textPrimary)
-                }
-                GlassIconButton(
-                    contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
-                    onClick = hapticToggleFavorite,
-                ) {
-                    // Section 52's own example: favorite -> small scale
-                    // transition -> new state. A brief overshoot-then-
-                    // settle scale pulse on toggle, rather than an instant
-                    // icon swap, makes the state change feel deliberate.
-                    val favoriteScale by androidx.compose.animation.core.animateFloatAsState(
-                        targetValue = if (isFavorite) 1.15f else 1f,
-                        animationSpec = androidx.compose.animation.core.spring(
-                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                            stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
-                        ),
-                        label = "favoriteScale",
-                    )
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        contentDescription = null,
-                        tint = if (isFavorite) WhiplashColors.accent else WhiplashColors.textPrimary,
-                        modifier = Modifier.scale(favoriteScale),
-                    )
-                }
-                GlassIconButton(contentDescription = "Queue", onClick = { isQueueSheetOpen = true }) {
-                    Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null, tint = WhiplashColors.textPrimary)
-                }
-                GlassIconButton(
-                    contentDescription = "More",
-                    onClick = { isOverflowSheetOpen = true },
-                ) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textPrimary)
-                }
-            }
-        }
-
         androidx.compose.animation.AnimatedContent(
             targetState = item,
             contentKey = { it?.let { track -> "${track.source}:${track.id}" } },
-            transitionSpec = {
-                // Smooth crossfade + slight scale on the whole artwork/title/
-                // artist block together, rather than each piece snapping
-                // independently (artwork via Coil's own crossfade, text with
-                // no transition at all, position bar jumping) which is what
-                // made track changes look "rough" rather than one cohesive
-                // transition. Keyed on track id+source (not the whole item)
-                // so an artwork-only update — e.g. the low-res search
-                // thumbnail being swapped for the higher-res one resolved
-                // moments later from the stream's own metadata — doesn't
-                // retrigger this transition a second time for what is
-                // still the same track (this was the cause of the artwork
-                // visibly "blinking" twice on every track change).
-                (androidx.compose.animation.fadeIn(animationSpec = tween(GlassTokens.animRegular)) +
-                    androidx.compose.animation.scaleIn(initialScale = 0.96f, animationSpec = tween(GlassTokens.animRegular)))
-                    .togetherWith(androidx.compose.animation.fadeOut(animationSpec = tween(GlassTokens.animFast)))
-            },
+            transitionSpec = { trackChangeTransition() },
             label = "nowPlayingContent",
+            // The artwork gives up height first: on shorter screens, or once
+            // the lyric strip appears, it shrinks rather than pushing the
+            // transport controls off the bottom.
+            modifier = Modifier
+                .weight(1f, fill = useHero)
+                .graphicsLayer {
+                    alpha = 1f - collapse * (1f - COLLAPSED_BODY_ALPHA)
+                    val scale = 1f - collapse * COLLAPSED_BODY_SHRINK
+                    scaleX = scale
+                    scaleY = scale
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+                },
         ) { currentTrack ->
-            Column {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = GlassTokens.spaceXl),
-                ) {
+            Column(modifier = if (useHero) Modifier.fillMaxHeight() else Modifier) {
+                if (useHero) {
+                    // The artwork itself is drawn full-bleed behind this
+                    // column (HeroArtwork). This slot has exactly the same
+                    // size as the normal artwork box below, so the title,
+                    // seek bar and controls stay in the same place with the
+                    // setting on or off. It keeps swipe-to-skip working; the
+                    // title sits over the hero's faded bottom edge.
+                    // Takes all the spare height, pushing the title down onto
+                    // the seek bar; the hero behind is sized to this slot.
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .clip(RoundedCornerShape(WhiplashRadius.extraLarge))
-                            .background(WhiplashColors.surfaceElevated),
+                            .weight(1f)
+                            .onGloballyPositioned { heroSlotBottomPx = it.positionInRoot().y + it.size.height }
+                            .artworkSwipeToSkip(
+                                state = artworkSwipe,
+                                enabled = currentTrack != null,
+                                onNext = onNext,
+                                onPrevious = onPrevious,
+                                onSkipFeedback = skipHaptic,
+                            ),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        if (currentTrack?.artworkUri != null) {
-                            val context = LocalContext.current
-                            AsyncImage(
-                                model = ImageRequest.Builder(context)
-                                    .data(currentTrack.artworkUri)
-                                    .crossfade(true)
-                                    .build(),
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
+                        ArtworkSwipeHint(artworkSwipe)
                     }
+                } else
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .padding(vertical = GlassTokens.spaceXl),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ArtworkCard(currentTrack, Modifier.aspectRatio(1f))
                 }
 
-                Text(
-                    text = currentTrack?.title ?: "Nothing playing",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = WhiplashColors.textPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = currentTrack?.artist ?: "",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = WhiplashColors.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                TitleBlock(currentTrack)
+                // Hero mode: this block fills the spare height, so the title
+                // stays on the artwork's edge and the seek bar + transport
+                // (outside this block) sit at the bottom of the screen.
             }
         }
 
-        androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceLg))
-
-        SeekBar(
-            positionMs = state.positionMs,
-            durationMs = state.durationMs,
-            onSeekTo = onSeekTo,
-        )
-
-        androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
+        PlayerControls(true)
+        }
+    }
+    } else {
+    // 2.10: landscape / large screens. Artwork fills the left half at the
+    // largest square the height allows; the right half holds the top bar,
+    // title and controls, centred vertically and capped in width.
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(horizontal = GlassTokens.spaceLg, vertical = GlassTokens.spaceMd),
+        horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceXl),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+            contentAlignment = Alignment.Center,
         ) {
-            GlassIconButton(
-                contentDescription = if (state.shuffleEnabled) "Shuffle: ON" else "Shuffle: OFF",
-                onClick = hapticToggleShuffle,
-            ) {
-                Icon(
-                    Icons.Filled.Shuffle,
-                    contentDescription = null,
-                    tint = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary else WhiplashColors.textSecondary,
-                )
-            }
-            GlassIconButton(contentDescription = "Previous", onClick = onPrevious, size = 56.dp) {
-                Icon(Icons.Filled.SkipPrevious, contentDescription = null, tint = WhiplashColors.textPrimary)
-            }
-            GlassPrimaryPlayButton(isPlaying = state.isPlaying, onClick = hapticTogglePlayPause, size = 84.dp) {
-                Icon(
-                    imageVector = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = null,
-                    tint = WhiplashColors.onAccent,
-                    modifier = Modifier.size(38.dp),
-                )
-            }
-            GlassIconButton(contentDescription = "Next", onClick = onNext, size = 56.dp) {
-                Icon(Icons.Filled.SkipNext, contentDescription = null, tint = WhiplashColors.textPrimary)
-            }
-            GlassIconButton(
-                contentDescription = "Repeat mode: ${state.repeatMode.name}",
-                onClick = hapticCycleRepeat,
-            ) {
-                Icon(
-                    imageVector = if (state.repeatMode == RepeatMode.ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
-                    contentDescription = null,
-                    tint = if (state.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else WhiplashColors.textSecondary,
-                )
+            androidx.compose.animation.AnimatedContent(
+                targetState = item,
+                contentKey = { it?.let { track -> "${track.source}:${track.id}" } },
+                transitionSpec = { trackChangeTransition() },
+                label = "nowPlayingArtworkTwoPane",
+                contentAlignment = Alignment.Center,
+            ) { currentTrack ->
+                ArtworkCard(currentTrack, Modifier.fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true))
             }
         }
+        // weight() hands its child a fixed width, so the cap has to live on
+        // an inner Column; the Box centres it in the right half.
+        Box(
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+            contentAlignment = Alignment.Center,
+        ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = PLAYER_MAX_CONTENT_WIDTH)
+                .fillMaxWidth()
+                .fillMaxHeight(),
+        ) {
+            TopBar()
+            // Scrolls only if the controls can't fit (very short windows or
+            // large font), otherwise centred in the remaining height.
+            androidx.compose.foundation.layout.BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                val controlsHeight = maxHeight
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                        .heightIn(min = controlsHeight),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    androidx.compose.animation.AnimatedContent(
+                        targetState = item,
+                        contentKey = { it?.let { track -> "${track.source}:${track.id}" } },
+                        transitionSpec = { trackChangeTransition() },
+                        label = "nowPlayingTitleTwoPane",
+                    ) { currentTrack ->
+                        Column { TitleBlock(currentTrack) }
+                    }
+                    // Phone landscape is too short for the strip as well as
+                    // the transport; lyrics stay one tap away in the top bar.
+                    PlayerControls(controlsHeight >= TWO_PANE_STRIP_MIN_HEIGHT)
+                }
+            }
+        }
+        }
+    }
+    }
+    if (!twoPane && collapse > 0f && item != null) {
+        CollapsedPlayerHeader(
+            item = item,
+            progress = { collapse },
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .graphicsLayer {
+                    translationY = (topBarBottomPx - rootTopPx).coerceAtLeast(0f)
+                }
+                .padding(horizontal = GlassTokens.spaceLg, vertical = GlassTokens.spaceMd),
+        )
+    }
     }
 
     if (isQueueSheetOpen) {
@@ -378,6 +653,7 @@ fun FullPlayerScreen(
 
     if (isOverflowSheetOpen) {
         GlassSheet(onDismissRequest = { isOverflowSheetOpen = false }) {
+            val overflowContext = androidx.compose.ui.platform.LocalContext.current
             PlayerOverflowContent(
                 sleepTimerActive = state.sleepTimer != null,
                 playbackSpeed = playbackSpeed,
@@ -392,6 +668,10 @@ fun FullPlayerScreen(
                 onOpenAddToPlaylist = {
                     isOverflowSheetOpen = false
                     if (item != null) isAddToPlaylistSheetOpen = true
+                },
+                onOpenAudioOutput = {
+                    isOverflowSheetOpen = false
+                    openOutputSwitcher(overflowContext)
                 },
                 isDownloaded = isCurrentDownloaded,
                 onDownload = if (onDownloadCurrent != null && item is PlayableItem.YoutubeTrack && !isCurrentDownloaded) {
@@ -436,6 +716,9 @@ fun FullPlayerScreen(
                 positionMs = state.positionMs,
                 isPlaying = state.isPlaying,
                 onSeekTo = onSeekTo,
+                offsetMs = lyricOffsetMs,
+                onAdjustOffset = onAdjustLyricOffset,
+                onResetOffset = onResetLyricOffset,
             )
         }
     }
@@ -444,10 +727,7 @@ fun FullPlayerScreen(
         GlassSheet(onDismissRequest = { isSpeedSheetOpen = false }) {
             PlaybackSpeedContent(
                 selected = playbackSpeed,
-                onSelect = { speed ->
-                    onSetPlaybackSpeed(speed)
-                    isSpeedSheetOpen = false
-                },
+                onSelect = { speed -> onSetPlaybackSpeed(speed) },
             )
         }
     }
@@ -589,20 +869,24 @@ private fun SeekBar(
         ) {
             SeekBarTrack(style = style, fraction = fraction, isDragging = isDragging)
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                text = formatMs(displayedPositionMs),
-                style = MaterialTheme.typography.labelSmall,
-                color = WhiplashColors.textTertiary,
-            )
-            Text(
-                text = formatMs(durationMs),
-                style = MaterialTheme.typography.labelSmall,
-                color = WhiplashColors.textTertiary,
-            )
+        if (style == com.whiplash.music.ui.theme.SeekBarStyle.HAIRLINE) {
+            HairlineTimes(positionMs = displayedPositionMs, durationMs = durationMs)
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = formatMs(displayedPositionMs),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = WhiplashColors.textTertiary,
+                )
+                Text(
+                    text = formatMs(durationMs),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = WhiplashColors.textTertiary,
+                )
+            }
         }
     }
 }
@@ -623,6 +907,57 @@ private fun SeekBarTrack(style: com.whiplash.music.ui.theme.SeekBarStyle, fracti
         com.whiplash.music.ui.theme.SeekBarStyle.WAVY -> WavyTrack(fraction, isDragging)
         com.whiplash.music.ui.theme.SeekBarStyle.WAVEFORM -> WaveformTrack(fraction)
         com.whiplash.music.ui.theme.SeekBarStyle.MINIMAL -> MinimalTrack(fraction, isDragging)
+        com.whiplash.music.ui.theme.SeekBarStyle.HAIRLINE -> HairlineTrack(fraction, isDragging)
+    }
+}
+
+/**
+ * Hairline style: a 1.5dp line with a small dot that grows while dragging.
+ * The fill eases between position ticks so the line glides instead of
+ * stepping every 500ms.
+ */
+@Composable
+private fun HairlineTrack(fraction: Float, isDragging: Boolean) {
+    val animatedFraction by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = fraction,
+        animationSpec = if (isDragging) androidx.compose.animation.core.snap() else androidx.compose.animation.core.tween(450, easing = androidx.compose.animation.core.LinearEasing),
+        label = "hairlineFraction",
+    )
+    val thumbRadius by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (isDragging) 7.dp else 4.dp,
+        label = "hairlineThumb",
+    )
+    val activeColor = WhiplashColors.textPrimary
+    val inactiveColor = WhiplashColors.glassBorderStrong
+    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxWidth().height(28.dp)) {
+        val midY = size.height / 2f
+        val stroke = 1.5.dp.toPx()
+        val splitX = size.width * animatedFraction
+        drawLine(inactiveColor, androidx.compose.ui.geometry.Offset(0f, midY), androidx.compose.ui.geometry.Offset(size.width, midY), strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(activeColor, androidx.compose.ui.geometry.Offset(0f, midY), androidx.compose.ui.geometry.Offset(splitX, midY), strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawCircle(color = activeColor, radius = thumbRadius.toPx(), center = androidx.compose.ui.geometry.Offset(splitX, midY))
+    }
+}
+
+/** Time row for the Hairline style: elapsed on the left, remaining (as "-m:ss") on the right. */
+@Composable
+private fun HairlineTimes(positionMs: Long, durationMs: Long) {
+    val remainingMs = (durationMs - positionMs).coerceAtLeast(0L)
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = formatMs(positionMs),
+            style = MaterialTheme.typography.labelSmall,
+            color = WhiplashColors.textTertiary,
+            modifier = Modifier.align(Alignment.CenterStart),
+        )
+        Text(
+            text = if (durationMs > 0) "-" + formatMs(remainingMs) else formatMs(0),
+            style = MaterialTheme.typography.labelSmall,
+            color = WhiplashColors.textTertiary,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .semantics { contentDescription = "${formatMs(remainingMs)} remaining" },
+        )
     }
 }
 
@@ -851,3 +1186,280 @@ private fun formatMs(ms: Long): String {
     val seconds = totalSeconds % 60
     return "%d:%02d".format(minutes, seconds)
 }
+
+/** How far the title block rides up over the hero artwork's faded edge. */
+private val HERO_TITLE_OVERLAP = 40.dp
+
+/** Tallest the hero may be relative to its width. Tall enough to reach the title on tall phones (no empty band); covers crop a little at the sides. */
+private const val HERO_MAX_ASPECT = 1.6f
+
+
+/** 2.10: windows at least this wide and wider than tall get the two-pane layout. */
+private val TWO_PANE_MIN_WIDTH = 600.dp
+/** 2.10: max width of the player content column on tablets. */
+private val PLAYER_MAX_CONTENT_WIDTH = 560.dp
+/** 2.10: two-pane controls area needs at least this height to also show the lyric strip. */
+private val TWO_PANE_STRIP_MIN_HEIGHT = 320.dp
+
+/**
+ * Crossfade + slight scale used when the track changes (both layouts), so
+ * artwork, title and artist move as one cohesive transition. Callers key
+ * the AnimatedContent on track id+source, not the whole item, so an
+ * artwork-only update (low-res search thumbnail swapped for the resolved
+ * higher-res cover) doesn't retrigger it and make the artwork "blink" twice.
+ */
+private fun androidx.compose.animation.AnimatedContentTransitionScope<PlayableItem?>.trackChangeTransition() =
+    (androidx.compose.animation.fadeIn(animationSpec = tween(GlassTokens.animRegular)) +
+        androidx.compose.animation.scaleIn(initialScale = 0.96f, animationSpec = tween(GlassTokens.animRegular)))
+        .togetherWith(androidx.compose.animation.fadeOut(animationSpec = tween(GlassTokens.animFast)))
+
+/** 2.9: length of the collapse-to-header transition. */
+private const val COLLAPSE_ANIM_MS = 320
+/** The big artwork block fades out fully so it never shows behind the header. */
+private const val COLLAPSED_BODY_ALPHA = 0f
+/** How much the big artwork block shrinks (from its top edge) while collapsed. */
+private const val COLLAPSED_BODY_SHRINK = 0.08f
+
+/**
+ * Compact now-playing header shown under the top bar while the lyrics or
+ * queue sheet is open, so the track stays identifiable above the sheet.
+ * [progress] is the shared collapse value (0..1); it is read in the draw
+ * layer only, so the animation doesn't recompose this row every frame.
+ */
+@Composable
+private fun CollapsedPlayerHeader(
+    item: PlayableItem,
+    progress: () -> Float,
+    modifier: Modifier = Modifier,
+) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val slidePx = with(density) { 16.dp.toPx() }
+    Row(
+        modifier = modifier.graphicsLayer {
+            val p = progress()
+            alpha = p
+            translationY = (1f - p) * slidePx
+        },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(WhiplashRadius.small))
+                .background(WhiplashColors.surfaceElevated),
+        ) {
+            if (item.artworkUri != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(item.artworkUri)
+                        .build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = WhiplashColors.textPrimary,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            Text(
+                text = item.artist,
+                style = MaterialTheme.typography.bodyMedium,
+                color = WhiplashColors.textSecondary,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * Full-bleed "hero" cover (2.8): edge to edge across the top, running under
+ * the status bar, fading out at the bottom into the player backdrop. A top
+ * scrim keeps the status bar and top buttons readable on bright covers.
+ * It follows the swipe-to-skip drag like the normal artwork does.
+ */
+@Composable
+private fun HeroArtwork(
+    artworkUri: String?,
+    translationPx: () -> Float,
+    animate: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                translationX = translationPx()
+                // Offscreen so the DstIn mask below fades the image itself
+                // rather than punching through to the window.
+                compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+            }
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        0f to androidx.compose.ui.graphics.Color.Black,
+                        0.55f to androidx.compose.ui.graphics.Color.Black,
+                        1f to androidx.compose.ui.graphics.Color.Transparent,
+                    ),
+                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                )
+            },
+    ) {
+        androidx.compose.animation.Crossfade(
+            targetState = artworkUri,
+            animationSpec = tween(if (animate) 450 else 0),
+            label = "heroArtwork",
+            modifier = Modifier.fillMaxSize(),
+        ) { uri ->
+            if (uri != null) {
+                // Never draw the cover shorter than it is wide. YouTube's
+                // large thumbnails are often 16:9 frames with the square
+                // cover centred between plain side bars; a wide, short hero
+                // (short screens, big font) would Crop into those bars and
+                // show hard vertical edges. A full-width square (or taller)
+                // centred and clipped keeps only real artwork visible.
+                androidx.compose.foundation.layout.BoxWithConstraints(
+                    modifier = Modifier.fillMaxSize().clipToBounds(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current).data(uri).build(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .requiredWidth(maxWidth)
+                            .requiredHeight(maxOf(maxWidth, maxHeight)),
+                    )
+                }
+            }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.3f)
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        listOf(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f), androidx.compose.ui.graphics.Color.Transparent),
+                    ),
+                ),
+        )
+    }
+}
+
+/** Artwork scale while paused (the "sleeve shrinks when paused" cue). */
+private const val PAUSED_ARTWORK_SCALE = 0.86f
+
+/**
+ * How long a not-playing state must last before it counts as a pause.
+ * Every track change passes through isPlaying=false for a moment (see
+ * PlaybackController.playIndex); without this the artwork would dip on
+ * every skip, which reads as a glitch rather than a pause.
+ */
+private const val PAUSE_SETTLE_MS = 250L
+
+/**
+ * Animated artwork scale for the full player: full size while playing or
+ * loading, [PAUSED_ARTWORK_SCALE] when the user has genuinely paused.
+ *
+ * "Paused" deliberately excludes buffering, stream resolution and errors —
+ * those are not something the user chose, and shrinking would suggest
+ * they had. Uses a gentle low-bounce spring, which is what gives the
+ * spring-back on play its physical feel. With reduced motion on, the
+ * scale is left at full size, since it is purely decorative.
+ */
+@Composable
+private fun rememberPausedArtworkScale(state: PlaybackState): Float {
+    val reducedMotion = com.whiplash.music.ui.common.isReducedMotionEnabled()
+    val pausedNow = state.currentItem != null &&
+        !state.isPlaying &&
+        !state.isBuffering &&
+        !state.isResolvingStream &&
+        state.playbackError == null
+    var settledPaused by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(pausedNow) }
+    androidx.compose.runtime.LaunchedEffect(pausedNow) {
+        if (pausedNow) kotlinx.coroutines.delay(PAUSE_SETTLE_MS)
+        settledPaused = pausedNow
+    }
+    val target = if (settledPaused && !reducedMotion) PAUSED_ARTWORK_SCALE else 1f
+    val scale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = target,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioLowBouncy,
+            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
+        ),
+        label = "pausedArtworkScale",
+    )
+    return scale
+}
+
+/**
+ * One muted line of technical detail under the title (Settings > Stats for
+ * Nerds). Space is always reserved while the setting is on, so the seek bar
+ * doesn't jump when the details arrive a moment after a track starts; the
+ * text itself fades in and out with each track.
+ */
+@Composable
+private fun StatsForNerdsLine(info: com.whiplash.music.playback.controller.AudioStreamInfo?) {
+    val text = info?.summary()
+    androidx.compose.animation.Crossfade(
+        targetState = text,
+        animationSpec = tween(GlassTokens.animRegular),
+        label = "statsForNerds",
+    ) { shown ->
+        Text(
+            text = shown ?: " ",
+            style = MaterialTheme.typography.labelMedium,
+            color = WhiplashColors.textSecondary.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .padding(top = GlassTokens.spaceSm)
+                .semantics { contentDescription = shown?.let { "Audio format: " + it.replace(" · ", ", ") } ?: "" },
+        )
+    }
+}
+
+/**
+ * Single-line text that scrolls when it doesn't fit (Compose's own
+ * basicMarquee, which does nothing for text that already fits). Pauses
+ * [initialDelayMillis] before the first pass and between passes, so the
+ * start of the title is readable before it moves.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun MarqueeText(
+    text: String,
+    style: androidx.compose.ui.text.TextStyle,
+    color: androidx.compose.ui.graphics.Color,
+    initialDelayMillis: Int,
+    animate: Boolean,
+) {
+    Text(
+        text = text,
+        style = style,
+        color = color,
+        maxLines = 1,
+        overflow = if (animate) TextOverflow.Clip else TextOverflow.Ellipsis,
+        modifier = if (animate) {
+            Modifier.fillMaxWidth().basicMarquee(
+                iterations = Int.MAX_VALUE,
+                initialDelayMillis = initialDelayMillis,
+                repeatDelayMillis = MARQUEE_REPEAT_DELAY_MS,
+                velocity = 40.dp,
+            )
+        } else {
+            Modifier.fillMaxWidth()
+        },
+    )
+}
+
+private const val TITLE_MARQUEE_DELAY_MS = 1_500
+private const val ARTIST_MARQUEE_DELAY_MS = 2_700
+private const val MARQUEE_REPEAT_DELAY_MS = 2_500

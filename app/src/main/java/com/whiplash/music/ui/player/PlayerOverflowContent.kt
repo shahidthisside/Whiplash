@@ -42,6 +42,7 @@ fun PlayerOverflowContent(
     onOpenSleepTimer: () -> Unit,
     onOpenPlaybackSpeed: () -> Unit,
     onOpenAddToPlaylist: () -> Unit,
+    onOpenAudioOutput: () -> Unit = {},
     // Offline download (Library > Downloads, YouTube-Music-style) for
     // whatever is currently playing — null when there's nothing
     // meaningful to download (a LocalTrack, or no current item at all).
@@ -68,8 +69,22 @@ fun PlayerOverflowContent(
                 tint = if (playbackSpeed != 1.0f) WhiplashColors.accent else WhiplashColors.textPrimary,
             )
         },
-        label = if (playbackSpeed != 1.0f) "Playback speed: ${playbackSpeed}x" else "Playback speed",
+        label = if (playbackSpeed != 1.0f) "Playback speed: ${com.whiplash.music.domain.model.PlaybackTuning.formatSpeed(playbackSpeed)}" else "Playback speed",
         onClick = onOpenPlaybackSpeed,
+    )
+    // Where the audio is going right now (updates live as devices connect);
+    // tapping opens the system output picker.
+    val output = rememberAudioOutput()
+    OverflowRow(
+        icon = {
+            Icon(
+                output.icon(),
+                contentDescription = null,
+                tint = if (output.kind != com.whiplash.music.domain.model.AudioOutput.Kind.SPEAKER) WhiplashColors.accent else WhiplashColors.textPrimary,
+            )
+        },
+        label = "Audio output: ${output.name}",
+        onClick = onOpenAudioOutput,
     )
     OverflowRow(
         icon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null, tint = WhiplashColors.textPrimary) },

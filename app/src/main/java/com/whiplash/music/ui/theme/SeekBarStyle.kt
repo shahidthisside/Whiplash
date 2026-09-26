@@ -20,10 +20,13 @@ package com.whiplash.music.ui.theme
  *   or Waveform players' seek bars.
  * - [MINIMAL]: an ultra-thin 2dp line with no visible thumb until touched
  *   — an intentionally understated, Apple Music-esque style.
+ * - [HAIRLINE]: a 1.5dp line with a small dot, elapsed time on the left
+ *   and remaining time on the right.
  */
 enum class SeekBarStyle(val displayName: String) {
     CLASSIC("Classic"),
     WAVY("Wavy"),
     WAVEFORM("Waveform"),
     MINIMAL("Minimal"),
+    HAIRLINE("Hairline"),
 }

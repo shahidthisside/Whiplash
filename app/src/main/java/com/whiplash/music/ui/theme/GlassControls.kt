@@ -264,6 +264,10 @@ fun GlassPrimaryPlayButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     size: androidx.compose.ui.unit.Dp = 84.dp,
+    // Defaults keep the theme look; the full player passes artwork-derived
+    // colours here when dynamic colour is on.
+    containerColor: androidx.compose.ui.graphics.Color = WhiplashColors.accent,
+    contentColor: androidx.compose.ui.graphics.Color = WhiplashColors.onAccent,
     content: @Composable () -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -280,7 +284,7 @@ fun GlassPrimaryPlayButton(
             .graphicsLayer(scaleX = scale, scaleY = scale)
             .shadow(elevation = GlassTokens.elevationElevated, shape = CircleShape, clip = false)
             .clip(CircleShape)
-            .background(WhiplashColors.accent)
+            .background(containerColor)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -293,7 +297,7 @@ fun GlassPrimaryPlayButton(
             },
         contentAlignment = Alignment.Center,
     ) {
-        CompositionLocalProvider(LocalContentColor provides WhiplashColors.onAccent) {
+        CompositionLocalProvider(LocalContentColor provides contentColor) {
             content()
         }
     }

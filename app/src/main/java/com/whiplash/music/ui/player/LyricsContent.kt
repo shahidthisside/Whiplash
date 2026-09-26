@@ -3,11 +3,14 @@ package com.whiplash.music.ui.player
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -18,9 +21,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MusicOff
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,11 +41,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.whiplash.music.domain.model.LyricLine
 import com.whiplash.music.domain.model.LyricsResult
+import com.whiplash.music.domain.model.LYRIC_OFFSET_STEP_MS
+import com.whiplash.music.domain.model.formatLyricOffset
+import com.whiplash.music.domain.model.lyricPositionWithOffset
+import com.whiplash.music.domain.model.seekTargetForLyricLine
 import com.whiplash.music.ui.theme.GlassTokens
 import com.whiplash.music.ui.theme.WhiplashColors
 
@@ -57,25 +70,50 @@ fun LyricsContent(
     positionMs: Long,
     isPlaying: Boolean,
     onSeekTo: (Long) -> Unit,
+    offsetMs: Long = 0L,
+    onAdjustOffset: (Long) -> Unit = {},
+    onResetOffset: () -> Unit = {},
 ) {
+    // Keep the screen on only while lyrics are on screen and the song is
+    // playing: the display otherwise times out mid-verse while someone is
+    // reading along. Tied to this composable, so closing the sheet (or
+    // pausing) hands screen timeout back to the system immediately.
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(view, isPlaying) {
+        view.keepScreenOn = isPlaying
+        onDispose { view.keepScreenOn = false }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(max = 560.dp)
             .padding(top = GlassTokens.spaceMd),
     ) {
-        Text(
-            text = "Lyrics",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = WhiplashColors.textPrimary,
-            modifier = Modifier.padding(horizontal = GlassTokens.spaceMd),
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = GlassTokens.spaceMd),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Lyrics",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = WhiplashColors.textPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            // Timing only means something for synced lyrics; plain text has
+            // no timestamps to shift, so the control is hidden there.
+            if (result is LyricsResult.Synced) {
+                LyricOffsetControl(offsetMs, onAdjustOffset, onResetOffset)
+            }
+        }
         androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
 
         when (result) {
             null -> LoadingState()
-            is LyricsResult.Synced -> SyncedLyricsView(result.lines, positionMs, isPlaying, onSeekTo)
+            is LyricsResult.Synced -> SyncedLyricsView(result.lines, positionMs, isPlaying, offsetMs, onSeekTo)
             is LyricsResult.Plain -> PlainLyricsView(result.text)
             is LyricsResult.Error -> MessageState(
                 icon = Icons.Filled.MusicOff,
@@ -182,9 +220,13 @@ private fun SyncedLyricsView(
     lines: List<LyricLine>,
     positionMs: Long,
     isPlaying: Boolean,
+    offsetMs: Long,
     onSeekTo: (Long) -> Unit,
 ) {
-    val smoothedMs = rememberSmoothedPositionMs(positionMs, isPlaying)
+    // The per-track offset shifts the position the lines are matched
+    // against, not the lines themselves, so the list keeps stable keys and
+    // does not recompose every row when the listener nudges the timing.
+    val smoothedMs = lyricPositionWithOffset(rememberSmoothedPositionMs(positionMs, isPlaying), offsetMs)
     val listState = rememberLazyListState()
     var userScrollSuspendUntilMs by remember { mutableLongStateOf(0L) }
 
@@ -224,7 +266,7 @@ private fun SyncedLyricsView(
             LyricLineRow(
                 text = line.text,
                 isActive = index == activeIndex,
-                onClick = { onSeekTo(line.timestampMs) },
+                onClick = { onSeekTo(seekTargetForLyricLine(line.timestampMs, offsetMs)) },
             )
         }
     }
@@ -275,4 +317,100 @@ private fun LyricLineRow(text: String, isActive: Boolean, onClick: () -> Unit) {
     )
 }
 
+/**
+ * Compact "− +0.5s +" timing adjuster in the lyrics header. Each button
+ * moves the current track's lyrics by [LYRIC_OFFSET_STEP_MS]; tapping the
+ * value resets it. "+" makes lyrics appear earlier, which is the fix for
+ * the common case of an LRC file that lags behind the vocals.
+ */
+@Composable
+private fun LyricOffsetControl(
+    offsetMs: Long,
+    onAdjust: (Long) -> Unit,
+    onReset: () -> Unit,
+) {
+    val label = formatLyricOffset(offsetMs)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = { onAdjust(-LYRIC_OFFSET_STEP_MS) }) {
+            Icon(
+                imageVector = Icons.Filled.Remove,
+                contentDescription = "Show lyrics later",
+                tint = WhiplashColors.textSecondary,
+            )
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = if (offsetMs == 0L) WhiplashColors.textSecondary else WhiplashColors.textPrimary,
+            modifier = Modifier
+                .widthIn(min = 52.dp)
+                .clickable(
+                    enabled = offsetMs != 0L,
+                    onClickLabel = "Reset lyrics timing",
+                    onClick = onReset,
+                )
+                .semantics { contentDescription = "Lyrics timing $label" }
+                .padding(vertical = 12.dp),
+            textAlign = TextAlign.Center,
+        )
+        IconButton(onClick = { onAdjust(LYRIC_OFFSET_STEP_MS) }) {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = "Show lyrics earlier",
+                tint = WhiplashColors.textSecondary,
+            )
+        }
+    }
+}
+
 private const val MANUAL_SCROLL_SUSPEND_MS = 4_000L
+
+/**
+ * One-line "current lyric" strip shown above the full player's scrubber
+ * (2.5). Only appears for synced lyrics, since plain text has no timing to
+ * follow. The line uses the same per-track offset as the lyrics sheet and
+ * crossfades as it changes; tapping it opens the full lyrics sheet.
+ *
+ * Its height is reserved as soon as synced lyrics exist (a "♪" during
+ * instrumental parts), so the controls below never jump as lines come
+ * and go.
+ */
+@Composable
+internal fun CurrentLyricStrip(
+    result: LyricsResult?,
+    positionMs: Long,
+    offsetMs: Long,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val lines = (result as? LyricsResult.Synced)?.lines ?: return
+    val position = lyricPositionWithOffset(positionMs, offsetMs)
+    val text = remember(lines, position) {
+        lines.lastOrNull { it.timestampMs <= position }?.text?.takeIf { it.isNotBlank() } ?: "\u266A"
+    }
+    androidx.compose.animation.AnimatedContent(
+        targetState = text,
+        transitionSpec = {
+            (androidx.compose.animation.fadeIn(tween(GlassTokens.animRegular)) +
+                androidx.compose.animation.slideInVertically(tween(GlassTokens.animRegular)) { it / 3 })
+                .togetherWith(androidx.compose.animation.fadeOut(tween(GlassTokens.animFast)))
+        },
+        label = "currentLyricStrip",
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(onClickLabel = "Open lyrics", onClick = onClick)
+            .semantics { contentDescription = "Current lyric: $text. Opens lyrics" },
+        contentAlignment = Alignment.CenterStart,
+    ) { line ->
+        Text(
+            text = line,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = WhiplashColors.textPrimary.copy(alpha = 0.85f),
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
+    }
+}
