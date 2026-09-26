@@ -22,5 +22,16 @@ sealed interface LyricsResult {
     data class Error(val message: String) : LyricsResult
 }
 
-/** A single synced lyrics line with its start timestamp, in milliseconds. */
-data class LyricLine(val timestampMs: Long, val text: String)
+/**
+ * A single synced lyrics line with its start timestamp, in milliseconds.
+ * [words] carries per-word timing when the source is enhanced (word-synced)
+ * LRC; it is empty for ordinary line-synced lyrics.
+ */
+data class LyricLine(
+    val timestampMs: Long,
+    val text: String,
+    val words: List<LyricWord> = emptyList(),
+)
+
+/** One timed word of a word-synced line. [endMs] is null only while parsing. */
+data class LyricWord(val startMs: Long, val endMs: Long?, val text: String)
