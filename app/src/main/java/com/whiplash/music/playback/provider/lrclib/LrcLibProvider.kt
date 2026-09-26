@@ -1,6 +1,9 @@
 package com.whiplash.music.playback.provider.lrclib
 
 import android.util.Log
+import com.whiplash.music.data.lyrics.LyricsProvider
+import com.whiplash.music.data.lyrics.LyricsSourcePreference
+import com.whiplash.music.domain.model.LrcParser
 import com.whiplash.music.domain.model.LyricLine
 import com.whiplash.music.domain.model.LyricsResult
 import kotlinx.coroutines.Dispatchers
@@ -27,9 +30,13 @@ import java.net.URLEncoder
  */
 class LrcLibProvider(
     private val client: OkHttpClient,
-) {
+) : LyricsProvider {
 
-    suspend fun getLyrics(title: String, artist: String, durationMs: Long): LyricsResult =
+    override val id = LyricsSourcePreference.LRCLIB.name
+    override val displayName = "LRCLIB"
+    override val supportsSync = true
+
+    override suspend fun getLyrics(title: String, artist: String, durationMs: Long): LyricsResult =
         withContext(Dispatchers.IO) {
             try {
                 fetchByExactMatch(title, artist, durationMs)
@@ -242,19 +249,8 @@ class LrcLibProvider(
         }
     }
 
-    /** Parses standard `[mm:ss.xx] text` LRC lines into ordered, timestamped [LyricLine]s. */
-    private fun parseLrc(lrc: String): List<LyricLine> {
-        val lines = mutableListOf<LyricLine>()
-        for (rawLine in lrc.lineSequence()) {
-            val match = LRC_LINE_REGEX.find(rawLine) ?: continue
-            val minutes = match.groupValues[1].toLongOrNull() ?: continue
-            val seconds = match.groupValues[2].toDoubleOrNull() ?: continue
-            val text = match.groupValues[3].trim()
-            val timestampMs = (minutes * 60_000L) + (seconds * 1000L).toLong()
-            lines += LyricLine(timestampMs, text)
-        }
-        return lines.sortedBy { it.timestampMs }
-    }
+    /** Standard and enhanced (word-timed) LRC, via the shared [LrcParser]. */
+    private fun parseLrc(lrc: String): List<LyricLine> = LrcParser.parse(lrc)
 
     private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
 
@@ -262,9 +258,6 @@ class LrcLibProvider(
         private const val TAG = "LrcLibProvider"
         private const val BASE_URL = "https://lrclib.net"
         private const val USER_AGENT = "Whiplash Android Music Player (https://github.com)"
-
-        // Matches "[00:13.18] Some lyric text" — LRCLIB's syncedLyrics format.
-        private val LRC_LINE_REGEX = Regex("""^\[(\d+):(\d+(?:\.\d+)?)]\s*(.*)$""")
 
         /**
          * How far a candidate's duration may differ from the track being

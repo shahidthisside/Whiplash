@@ -2,10 +2,13 @@ package com.whiplash.music.ui.player
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.whiplash.music.data.lyrics.LyricsCache
+import com.whiplash.music.data.lyrics.LyricsLookup
+import com.whiplash.music.data.lyrics.LyricsProviderChain
 import com.whiplash.music.domain.model.LyricsResult
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.playback.controller.PlaybackController
-import com.whiplash.music.playback.provider.lrclib.LrcLibProvider
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -15,59 +18,61 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.withContext
 
 /**
  * Drives the lyrics sheet (CLAUDE.md section 20). Reactively re-fetches
  * whenever the currently playing track changes (keyed on source+id, not
  * the whole [PlayableItem], so an artwork-only metadata refresh doesn't
- * needlessly re-hit the network) and caches per-track results in memory
- * for the lifetime of this ViewModel so reopening the sheet for the same
- * track during one playback session doesn't refetch.
+ * needlessly re-hit the network). Results go through [LyricsCache] (memory
+ * LRU + GZIP disk), so replays — even after a restart or offline — don't refetch.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class LyricsViewModel(
     private val controller: PlaybackController,
-    private val lrcLibProvider: LrcLibProvider,
+    private val providerChain: LyricsProviderChain,
+    private val settingsRepository: com.whiplash.music.data.repository.SettingsRepository,
     private val lyricOffsetStore: com.whiplash.music.data.repository.LyricOffsetStore,
+    private val lyricsCache: LyricsCache,
 ) : ViewModel() {
 
-    /**
-     * Already-fetched lyrics, so re-opening the sheet for a track doesn't
-     * re-hit the network.
-     *
-     * Bounded by an LRU. This used to be a plain [mutableMapOf] that was only
-     * ever written to and never trimmed, while this ViewModel lives for the
-     * whole Activity lifetime — so a long session across hundreds of distinct
-     * tracks retained a fully-parsed synced-lyrics line list for every one of
-     * them, growing without limit. [MAX_CACHED_TRACKS] keeps the benefit for
-     * realistic back-and-forth listening while giving the map a hard ceiling.
-     */
-    private val cache = object : LinkedHashMap<String, LyricsResult>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: Map.Entry<String, LyricsResult>?): Boolean =
-            size > MAX_CACHED_TRACKS
-    }
-
-    val lyrics: StateFlow<LyricsResult?> = controller.state
-        .map { it.currentItem }
-        .distinctUntilChanged { old, new -> trackKey(old) == trackKey(new) }
-        .flatMapLatest { item ->
+    /** Current lookup (result + which provider found it); null while loading or with nothing playing. */
+    private val lookup: StateFlow<LyricsLookup?> = kotlinx.coroutines.flow.combine(
+        controller.state
+            .map { it.currentItem }
+            .distinctUntilChanged { old, new -> trackKey(old) == trackKey(new) },
+        settingsRepository.lyricsSource.distinctUntilChanged(),
+    ) { item, source -> item to source }
+        .flatMapLatest { (item, source) ->
             if (item == null) {
-                flowOf(null)
+                flowOf<LyricsLookup?>(null)
             } else {
-                val key = "${item.source}:${item.id}"
-                val cached = cache[key]
-                if (cached != null) {
-                    flowOf(cached)
-                } else {
-                    kotlinx.coroutines.flow.flow {
+                // The source preference is part of the key, so switching providers
+                // shows that provider's answer rather than a cached one from another.
+                val key = "${source.name}:${item.source}:${item.id}"
+                kotlinx.coroutines.flow.flow<LyricsLookup?> {
+                    // Memory hit is instant; a disk hit is a small GZIP read, off the main thread.
+                    val cached = withContext(Dispatchers.IO) { lyricsCache.get(key) }
+                    if (cached != null) {
+                        emit(cached)
+                    } else {
                         emit(null) // Loading — represented as null, distinct from a real Unavailable result.
-                        val result = lrcLibProvider.getLyrics(item.title, item.artist, item.durationMs)
-                        cache[key] = result
+                        val result = providerChain.lookup(source, item.title, item.artist, item.durationMs)
+                        withContext(Dispatchers.IO) { lyricsCache.put(key, result) }
                         emit(result)
                     }
                 }
             }
         }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val lyrics: StateFlow<LyricsResult?> = lookup
+        .map { it?.result }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /** Display name of the provider that supplied the current lyrics (for attribution). */
+    val lyricsProviderName: StateFlow<String?> = lookup
+        .map { l -> l?.providerId?.let { id -> providerChain.providers.firstOrNull { it.id == id }?.displayName } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     /**
@@ -97,8 +102,4 @@ class LyricsViewModel(
 
     private fun trackKey(item: PlayableItem?): String? = item?.let { "${it.source}:${it.id}" }
 
-    private companion object {
-        /** Hard ceiling on how many tracks' lyrics stay in memory — see [cache]. */
-        const val MAX_CACHED_TRACKS = 50
-    }
 }

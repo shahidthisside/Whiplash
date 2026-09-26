@@ -116,6 +116,18 @@ class WhiplashApplication : Application() {
 
     val lrcLibProvider: LrcLibProvider by lazy { LrcLibProvider(okHttpClient) }
 
+    /** Lyrics providers in fallback order, with health tracking (Settings → Lyrics source). */
+    val lyricsProviderChain: com.whiplash.music.data.lyrics.LyricsProviderChain by lazy {
+        com.whiplash.music.data.lyrics.LyricsProviderChain(
+            listOf(lrcLibProvider, com.whiplash.music.data.lyrics.LyricsOvhProvider(okHttpClient)),
+        )
+    }
+
+    /** Memory + GZIP disk cache for fetched lyrics (cleared by Settings → Clear cache). */
+    val lyricsCache: com.whiplash.music.data.lyrics.LyricsCache by lazy {
+        com.whiplash.music.data.lyrics.LyricsCache(java.io.File(cacheDir, "lyrics"))
+    }
+
     val lyricOffsetStore: com.whiplash.music.data.repository.LyricOffsetStore by lazy {
         com.whiplash.music.data.repository.LyricOffsetStore(this)
     }
