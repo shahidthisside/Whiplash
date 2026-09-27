@@ -698,25 +698,13 @@ class PlaybackController(
 
                         when (result) {
                             is FallbackResult.Success -> {
-                                val upgraded = upgradeArtworkIfCurrent(item, result.value.resolvedArtworkUrl)
-                                _state.update { it.copy(isResolvingStream = false, currentItem = upgraded ?: it.currentItem) }
-                                startMediaItem(upgraded ?: item, resolvedStreamUrl = result.value.streamUrl, streamBitrateBps = result.value.bitrateBps)
-                                // maybeExtendQueueWithRecommendations(item) now
-                                // called upfront, in parallel with this resolve
-                                // (see the comment where this scope.launch
-                                // starts) — removed the duplicate call that used
-                                // to be here.
-                                // Persist the upgraded (higher-res) artwork
-                                // over the earlier cacheSong() call's
-                                // search-time thumbnail, so History/
-                                // Favorites/Playlists reconstructing this
-                                // track later via LibraryRepository also
-                                // get the better artwork instead of always
-                                // falling back to the lower-res one that
-                                // was cached before this resolve completed.
-                                if (upgraded is PlayableItem.YoutubeTrack) {
-                                    scope.launch { libraryRepository.cacheSong(upgraded) }
-                                }
+                                // Playback starts straight away with the artwork already
+                                // showing; the sharper cover is swapped in afterwards, and
+                                // only once it has actually loaded (see applyBestArtwork).
+                                val current = _state.value.currentItem?.takeIf { it.id == item.id } ?: item
+                                _state.update { it.copy(isResolvingStream = false) }
+                                startMediaItem(current, resolvedStreamUrl = result.value.streamUrl, streamBitrateBps = result.value.bitrateBps)
+                                applyBestArtwork(item, result.value.resolvedArtworkCandidates, generation)
                             }
                             is FallbackResult.Failure -> {
                                 _state.update {
@@ -787,11 +775,10 @@ class PlaybackController(
                         playbackManager.resolveStream(nextItem, quality)
                     }
                     if (result is FallbackResult.Success) {
-                        prefetched = PrefetchedStream(nextItem.id, result.value.streamUrl, result.value.resolvedArtworkUrl, result.value.bitrateBps)
-                        result.value.resolvedArtworkUrl?.let { url ->
-                            artworkPreloadCache[PlayableItemMediaItemMapper.mediaIdOf(nextItem)] = url
-                            preloadArtworkBitmap(url)
-                        }
+                        val art = firstLoadableArtwork(result.value.resolvedArtworkCandidates)
+                        prefetched = PrefetchedStream(nextItem.id, result.value.streamUrl, art, result.value.bitrateBps)
+                        // firstLoadableArtwork already loaded it into Coil's cache.
+                        art?.let { url -> artworkPreloadCache[PlayableItemMediaItemMapper.mediaIdOf(nextItem)] = url }
                     }
                 } catch (_: Exception) {
                     // Prefetch is a latency optimization only; a failure here just
@@ -810,10 +797,9 @@ class PlaybackController(
                     // re-resolves a fresh stream at that time anyway (a
                     // stream resolved now could expire before the user
                     // actually goes back to it).
-                    val artworkUrl = newPipePlaybackProvider.getPlayerInfo(prevItem.id).artworkUrl
+                    val artworkUrl = firstLoadableArtwork(newPipePlaybackProvider.getPlayerInfo(prevItem.id).artworkCandidates)
                     if (artworkUrl != null) {
                         artworkPreloadCache[PlayableItemMediaItemMapper.mediaIdOf(prevItem)] = artworkUrl
-                        preloadArtworkBitmap(artworkUrl)
                     }
                 } catch (_: Exception) {
                     // Same as above: artwork prefetch is a nice-to-have only.
@@ -956,18 +942,54 @@ class PlaybackController(
      */
     private fun upgradeArtworkInBackground(item: PlayableItem.YoutubeTrack, generation: Int) {
         scope.launch {
-            val artworkUrl = try {
-                newPipePlaybackProvider.getPlayerInfo(item.id).artworkUrl
+            val candidates = try {
+                newPipePlaybackProvider.getPlayerInfo(item.id).artworkCandidates
             } catch (_: Exception) {
-                null
-            } ?: return@launch
-            if (generation != resolveGeneration || artworkUrl == _state.value.currentItem?.artworkUri) return@launch
-            val upgraded = upgradeArtworkIfCurrent(item, artworkUrl)
+                emptyList()
+            }
+            applyBestArtwork(item, candidates, generation)
+        }
+    }
+
+    /**
+     * Swaps [item]'s artwork for the sharpest of [candidates] that actually
+     * loads, if [item] is still playing, and saves it for History/Favorites.
+     *
+     * Real bug this fixes: the player used to take the largest listed
+     * thumbnail (maxresdefault) on trust. YouTube doesn't have that size for
+     * every video and answers 404, so the list showed the song's cover while
+     * the mini player and full player went black. Now each size is tried,
+     * largest first, and the first that loads wins — quality is never lower
+     * than YouTube offers, and a missing size can no longer blank the art.
+     * A song saved earlier with a broken URL heals itself the next time it plays.
+     */
+    private fun applyBestArtwork(item: PlayableItem, candidates: List<String>, generation: Int) {
+        if (item !is PlayableItem.YoutubeTrack || candidates.isEmpty()) return
+        scope.launch {
+            val best = firstLoadableArtwork(candidates) ?: return@launch
+            if (generation != resolveGeneration || best == _state.value.currentItem?.artworkUri) return@launch
+            val upgraded = upgradeArtworkIfCurrent(item, best)
             if (upgraded is PlayableItem.YoutubeTrack && upgraded.id == item.id) {
                 _state.update { it.copy(currentItem = upgraded) }
                 libraryRepository.cacheSong(upgraded)
             }
         }
+    }
+
+    /**
+     * The first of [candidates] (largest first) that Coil can actually load,
+     * which also leaves it decoded in Coil's cache so it appears instantly.
+     * Tries at most [MAX_ARTWORK_ATTEMPTS] sizes; null if none loads.
+     */
+    private suspend fun firstLoadableArtwork(candidates: List<String>): String? {
+        val loader = coil.Coil.imageLoader(context)
+        for (url in candidates.take(MAX_ARTWORK_ATTEMPTS)) {
+            val result = runCatching {
+                loader.execute(coil.request.ImageRequest.Builder(context).data(url).build())
+            }.getOrNull()
+            if (result is coil.request.SuccessResult) return url
+        }
+        return null
     }
 
     /**
@@ -1534,6 +1556,9 @@ class PlaybackController(
     }
 
     private companion object {
+        /** Thumbnail sizes tried before giving up on an artwork upgrade. */
+        private const val MAX_ARTWORK_ATTEMPTS = 4
+
         /**
          * Scheme for the inert placeholder URI [publishPendingMetadata]
          * attaches to a not-yet-resolved track. Kept distinct from the

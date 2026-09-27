@@ -83,6 +83,7 @@ class NewPipePlaybackProvider(
                 // thumbnail) — surfaced here so PlaybackController can
                 // upgrade the displayed artwork once this resolves.
                 resolvedArtworkUrl = streamInfo.thumbnails.maxByOrNull { it.height }?.url,
+                resolvedArtworkCandidates = streamInfo.thumbnails.sortedByDescending { it.height }.mapNotNull { it.url }.distinct(),
             )
         }
     }
@@ -115,6 +116,7 @@ class NewPipePlaybackProvider(
                 artist = streamInfo.uploaderName,
                 album = null,
                 artworkUrl = streamInfo.thumbnails.maxByOrNull { it.height }?.url,
+                artworkCandidates = streamInfo.thumbnails.sortedByDescending { it.height }.mapNotNull { it.url }.distinct(),
                 durationMs = streamInfo.duration.takeIf { it >= 0 }?.times(1000),
                 category = streamInfo.category,
             )

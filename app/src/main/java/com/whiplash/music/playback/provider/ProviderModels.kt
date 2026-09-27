@@ -25,6 +25,12 @@ data class ResolvedStream(
      * search-result thumbnail.
      */
     val resolvedArtworkUrl: String?,
+    /**
+     * Every thumbnail size the response lists, largest first. The largest
+     * (maxresdefault) does not exist for every video — YouTube answers 404 —
+     * so callers try these in order and use the first that actually loads.
+     */
+    val resolvedArtworkCandidates: List<String> = listOfNotNull(resolvedArtworkUrl),
 )
 
 /**
@@ -39,6 +45,8 @@ data class ProviderPlayerInfo(
     val album: String?,
     val artworkUrl: String?,
     val durationMs: Long?,
+    /** All thumbnail sizes, largest first (see ResolvedStream.resolvedArtworkCandidates). */
+    val artworkCandidates: List<String> = listOfNotNull(artworkUrl),
     /** The video's YouTube category (e.g. "Music", "Comedy", "Entertainment"), if available. */
     val category: String? = null,
 )
