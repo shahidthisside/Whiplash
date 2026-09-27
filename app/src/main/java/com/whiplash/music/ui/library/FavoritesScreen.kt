@@ -91,7 +91,7 @@ private fun ModernFavorites(
     )
 }
 
-/** Pink used for Liked songs everywhere (this page and its Playlists tile). */
+/** Pink used for the Liked songs page. */
 internal val LIKED_TINT = androidx.compose.ui.graphics.Color(0xFFE0648B)
 
 /** The previous Favorites page, kept for the "Modern library pages" toggle's off state. */

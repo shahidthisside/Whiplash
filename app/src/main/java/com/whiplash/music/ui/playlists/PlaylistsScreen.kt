@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -70,7 +69,7 @@ import com.whiplash.music.ui.theme.WhiplashRadius
 @androidx.compose.material3.ExperimentalMaterial3Api
 @androidx.compose.foundation.ExperimentalFoundationApi
 @Composable
-fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit, onOpenLiked: () -> Unit = {}) {
+fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: PlaylistsViewModel = viewModel(factory = PlaylistsViewModelFactory(app.libraryRepository, app.youtubeSearchRepository))
@@ -107,7 +106,6 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit, onOpenLiked: () -> Unit 
     val listView by app.settingsRepository.playlistsListView.collectAsState(initial = false)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val modern by app.settingsRepository.modernLibraryPages.collectAsState(initial = true)
-    val liked by app.libraryRepository.observeFavorites().collectAsState(initial = emptyList())
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (modern) {
@@ -170,9 +168,6 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit, onOpenLiked: () -> Unit 
         }
 
         if (modern && playlists.isEmpty()) {
-            if (liked.isNotEmpty()) {
-                LikedSongsRow(count = liked.size, onClick = onOpenLiked, modifier = Modifier.padding(horizontal = GlassTokens.spaceMd))
-            }
             com.whiplash.music.ui.theme.CollectionEmptyState(
                 icon = Icons.AutoMirrored.Filled.QueueMusic,
                 title = "No playlists yet",
@@ -203,11 +198,6 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit, onOpenLiked: () -> Unit 
                     bottom = GlassTokens.miniPlayerReservedHeight,
                 ),
             ) {
-                if (modern && liked.isNotEmpty()) {
-                    item(key = "__liked__") {
-                        LikedSongsGridTile(count = liked.size, onClick = onOpenLiked, modifier = Modifier.animateItem())
-                    }
-                }
                 gridItems(playlists, key = { it.id }) { playlist ->
                     PlaylistGridTile(
                         modern = modern,
@@ -226,11 +216,6 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit, onOpenLiked: () -> Unit 
                 verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
             ) {
-                if (modern && liked.isNotEmpty()) {
-                    item(key = "__liked__") {
-                        LikedSongsRow(count = liked.size, onClick = onOpenLiked, modifier = Modifier.animateItem())
-                    }
-                }
                 items(playlists, key = { it.id }) { playlist ->
                     val tracks by app.libraryRepository.observePlaylistTracks(playlist.id).collectAsState(initial = null)
                     GlassListItem(
@@ -731,55 +716,6 @@ private fun NamedPlaylistTile(name: String, modifier: Modifier) {
         )
     }
 }
-
-/** Liked songs as the first grid tile, opening the Favorites tab. */
-@Composable
-private fun LikedSongsGridTile(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .clickable(onClickLabel = "Open liked songs", onClick = onClick)
-            .semantics(mergeDescendants = true) {},
-    ) {
-        com.whiplash.music.ui.theme.GradientIconCover(
-            Icons.Filled.Favorite,
-            com.whiplash.music.ui.library.LIKED_TINT,
-            Modifier.fillMaxWidth().aspectRatio(1f).clip(androidx.compose.foundation.shape.RoundedCornerShape(WhiplashRadius.medium)),
-        )
-        Text(
-            text = "Liked songs",
-            style = MaterialTheme.typography.titleSmall,
-            color = WhiplashColors.textPrimary,
-            maxLines = 1,
-            modifier = Modifier.padding(top = GlassTokens.spaceSm),
-        )
-        Text(
-            text = "Auto playlist · ${com.whiplash.music.ui.theme.songCountLabel(count)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = WhiplashColors.textSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-/** Liked songs as the first list row. */
-@Composable
-private fun LikedSongsRow(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    GlassListItem(
-        title = "Liked songs",
-        subtitle = "Auto playlist · ${com.whiplash.music.ui.theme.songCountLabel(count)}",
-        onClick = onClick,
-        leading = {
-            com.whiplash.music.ui.theme.GradientIconCover(
-                Icons.Filled.Favorite,
-                com.whiplash.music.ui.library.LIKED_TINT,
-                Modifier.size(56.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(WhiplashRadius.small)),
-            )
-        },
-        modifier = modifier,
-    )
-}
-
 
 /**
  * A playlist's cover, honouring a custom choice ([PlaylistArt]):

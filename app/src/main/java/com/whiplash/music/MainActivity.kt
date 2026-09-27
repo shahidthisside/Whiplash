@@ -649,7 +649,7 @@ private fun WhiplashApp() {
                                             .fillMaxSize()
                                             .then(if (openPlaylist != null) Modifier.clearAndSetSemantics {} else Modifier),
                                     ) {
-                                        PlaylistsScreen(onOpenPlaylist = { openPlaylist = it }, onOpenLiked = { selectedTab = AppTab.FAVORITES })
+                                        PlaylistsScreen(onOpenPlaylist = { openPlaylist = it })
                                     }
                                     val playlist = shownPlaylist
                                     if (playlist != null) {
