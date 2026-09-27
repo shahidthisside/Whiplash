@@ -928,8 +928,8 @@ internal fun ModernAlbumGrid(
         items(albums.size, key = { albums[it].id }) { i ->
             val album = albums[i]
             Column(
+                // Only the cover is clipped, so a title's first letter is never shaved.
                 modifier = Modifier
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.medium))
                     .clickable(onClickLabel = "Open album") { onAlbumClick(album) }
                     .semantics(mergeDescendants = true) {},
             ) {

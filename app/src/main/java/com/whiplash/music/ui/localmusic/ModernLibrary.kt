@@ -338,9 +338,10 @@ private fun RecentDownloadsShelf(downloads: List<PlayableItem.DownloadedTrack>, 
             items(downloads.take(12).size, key = { downloads[it].id }) { i ->
                 val track = downloads[i]
                 Column(
+                    // Only the cover is clipped: clipping the whole column also shaved
+                    // the first letter of titles like "The Weeknd".
                     modifier = Modifier
                         .width(124.dp)
-                        .clip(RoundedCornerShape(WhiplashRadius.medium))
                         .clickable(onClickLabel = "Play ${track.title}") { onPlay(i) }
                         .semantics(mergeDescendants = true) {},
                 ) {
