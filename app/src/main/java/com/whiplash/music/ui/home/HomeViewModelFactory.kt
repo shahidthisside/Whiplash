@@ -8,9 +8,10 @@ import com.whiplash.music.data.repository.LibraryRepository
 class HomeViewModelFactory(
     private val libraryRepository: LibraryRepository,
     private val youtubeSearchRepository: com.whiplash.music.data.repository.YoutubeSearchRepository,
+    private val settingsRepository: com.whiplash.music.data.repository.SettingsRepository,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
         @Suppress("UNCHECKED_CAST")
-        return HomeViewModel(libraryRepository, youtubeSearchRepository) as T
+        return HomeViewModel(libraryRepository, youtubeSearchRepository, settingsRepository) as T
     }
 }

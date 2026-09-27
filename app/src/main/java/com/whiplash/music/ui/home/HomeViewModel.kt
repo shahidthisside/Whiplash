@@ -10,6 +10,7 @@ import com.whiplash.music.ui.common.ToastController
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -43,7 +44,31 @@ import kotlinx.coroutines.withTimeoutOrNull
 class HomeViewModel(
     private val libraryRepository: LibraryRepository,
     private val youtubeSearchRepository: YoutubeSearchRepository,
+    private val settingsRepository: com.whiplash.music.data.repository.SettingsRepository,
 ) : ViewModel() {
+
+    // Layout settings held here (not collected fresh in the screen) so their
+    // real values are already known when Home comes back from an album or
+    // History. Collecting them in the screen started each at a default for
+    // the first frame, which changed the list's length and made Home lose its
+    // scroll position (landing on Quick Picks instead of the shelf you left).
+    // null = not read from disk yet.
+    val speedDialListView: StateFlow<Boolean?> = settingsRepository.speedDialListView
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val quickPicksGridView: StateFlow<Boolean?> = settingsRepository.quickPicksGridView
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val quickPicksGridCount: StateFlow<Int?> = settingsRepository.quickPicksGridCount
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val homeShelvesEnabled: StateFlow<Boolean?> = settingsRepository.homeShelvesEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun setSpeedDialListView(list: Boolean) {
+        viewModelScope.launch { settingsRepository.setSpeedDialListView(list) }
+    }
+
+    fun setQuickPicksGridView(grid: Boolean) {
+        viewModelScope.launch { settingsRepository.setQuickPicksGridView(grid) }
+    }
 
     val recentlyPlayed: StateFlow<List<PlayableItem>> = libraryRepository.observeRecentlyPlayed(limit = 25)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -109,7 +134,10 @@ class HomeViewModel(
             }
         }
         .onEach { _isSpeedDialLoaded.value = true }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        // Eagerly (a cheap local query), so Speed dial is already filled in when
+        // Home returns after more than a few seconds away — otherwise it came back
+        // empty for a frame and shifted everything below it.
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _quickPicks = MutableStateFlow<List<PlayableItem.YoutubeTrack>>(emptyList())
     val quickPicks: StateFlow<List<PlayableItem.YoutubeTrack>> = _quickPicks
@@ -132,6 +160,105 @@ class HomeViewModel(
      */
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing
+
+    // --- 4.1: shelves feed -------------------------------------------------
+
+    /** One card on a shelf: a song (plays on tap) or an album/playlist (opens on tap). */
+    sealed interface ShelfItem {
+        val key: String
+        data class Track(val track: PlayableItem.YoutubeTrack) : ShelfItem {
+            override val key get() = "t:${track.id}"
+        }
+        data class Collection(val collection: com.whiplash.music.domain.model.YoutubePlaylistResult) : ShelfItem {
+            override val key get() = "c:${collection.url}"
+        }
+    }
+
+    data class HomeShelf(val spec: com.whiplash.music.domain.model.ShelfSpec, val items: List<ShelfItem>)
+
+    private val _shelves = MutableStateFlow<List<HomeShelf>>(emptyList())
+    val shelves: StateFlow<List<HomeShelf>> = _shelves
+
+    private val _isLoadingShelves = MutableStateFlow(false)
+    val isLoadingShelves: StateFlow<Boolean> = _isLoadingShelves
+
+    private val _hasMoreShelves = MutableStateFlow(true)
+    val hasMoreShelves: StateFlow<Boolean> = _hasMoreShelves
+
+    private var shelfPlan: List<com.whiplash.music.domain.model.ShelfSpec>? = null
+    private var nextShelfIndex = 0
+    private var shelvesJob: kotlinx.coroutines.Job? = null
+
+    /** Loads the next page of shelves when the end of the feed comes into view. */
+    fun loadMoreShelves() {
+        if (!shelvesEnabled || _isLoadingShelves.value || !_hasMoreShelves.value) return
+        shelvesJob = viewModelScope.launch { fetchShelves(reset = false) }
+    }
+
+    private suspend fun fetchShelves(reset: Boolean) {
+        _isLoadingShelves.value = true
+        try {
+            if (reset || shelfPlan == null) {
+                val history = withTimeoutOrNull(5_000L) {
+                    libraryRepository.observeRecentlyPlayed(limit = 50).first()
+                } ?: emptyList()
+                shelfPlan = com.whiplash.music.domain.model.planHomeShelves(
+                    com.whiplash.music.domain.model.rankArtists(history.map { it.artist }, MAX_SHELF_ARTISTS),
+                )
+                nextShelfIndex = 0
+                if (reset) _shelves.value = emptyList()
+            }
+            val plan = shelfPlan.orEmpty()
+            val loaded = mutableListOf<HomeShelf>()
+            // Keep going until a page yields something (empty searches are skipped)
+            // or the plan runs out, so one empty shelf never stalls paging.
+            while (loaded.isEmpty() && nextShelfIndex < plan.size) {
+                val page = plan.subList(nextShelfIndex, minOf(nextShelfIndex + com.whiplash.music.domain.model.SHELVES_PER_PAGE, plan.size))
+                nextShelfIndex += page.size
+                loaded += coroutineScope {
+                    page.map { spec -> async { loadShelf(spec) } }.awaitAll()
+                }.filterNotNull()
+            }
+            if (loaded.isNotEmpty()) {
+                val seen = _shelves.value.map { it.spec.key }.toSet()
+                _shelves.value = _shelves.value + loaded.filter { it.spec.key !in seen }
+            }
+            _hasMoreShelves.value = nextShelfIndex < plan.size
+        } finally {
+            _isLoadingShelves.value = false
+        }
+    }
+
+    /** One shelf's items, or null when the search failed or found nothing. */
+    private suspend fun loadShelf(spec: com.whiplash.music.domain.model.ShelfSpec): HomeShelf? {
+        val items: List<ShelfItem> = runCatching {
+            when (spec.kind) {
+                com.whiplash.music.domain.model.ShelfKind.ALBUMS ->
+                    youtubeSearchRepository.searchAlbums(spec.query).map { ShelfItem.Collection(it) }
+                com.whiplash.music.domain.model.ShelfKind.PLAYLISTS ->
+                    youtubeSearchRepository.searchPlaylists(spec.query).map { ShelfItem.Collection(it) }
+                com.whiplash.music.domain.model.ShelfKind.SONGS ->
+                    youtubeSearchRepository.search(spec.query).map { ShelfItem.Track(it) }
+            }
+        }.getOrDefault(emptyList())
+            .distinctBy { it.key }
+            .take(MAX_SHELF_ITEMS)
+        return if (items.isEmpty()) null else HomeShelf(spec, items)
+    }
+
+    /**
+     * Set from the "Home shelves" setting. The feed is only fetched while
+     * enabled, so turning it off also stops its network searches.
+     */
+    private var shelvesEnabled = false
+
+    fun setShelvesEnabled(enabled: Boolean) {
+        if (enabled == shelvesEnabled) return
+        shelvesEnabled = enabled
+        if (enabled && _shelves.value.isEmpty() && !_isLoadingShelves.value) {
+            shelvesJob = viewModelScope.launch { fetchShelves(reset = true) }
+        }
+    }
 
     init {
         loadQuickPicks()
@@ -185,6 +312,11 @@ class HomeViewModel(
                 coroutineScope {
                     launch { refreshSpeedDial() }
                     launch { fetchQuickPicks() }
+                    if (shelvesEnabled) launch {
+                        shelvesJob?.cancelAndJoin()
+                        _isLoadingShelves.value = false
+                        fetchShelves(reset = true)
+                    }
                 }
             } finally {
                 _isRefreshing.value = false
@@ -355,5 +487,7 @@ class HomeViewModel(
     private companion object {
         const val QUICK_PICKS_QUERY = "popular music 2026"
         const val MAX_BLEND_ARTISTS = 5
+        const val MAX_SHELF_ARTISTS = 6
+        const val MAX_SHELF_ITEMS = 12
     }
 }

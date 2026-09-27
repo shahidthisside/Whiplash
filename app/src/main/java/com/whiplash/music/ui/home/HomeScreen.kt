@@ -17,6 +17,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -61,6 +65,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.whiplash.music.WhiplashApplication
+import com.whiplash.music.ui.common.ToastController
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.domain.model.speedDialIdentity
 import com.whiplash.music.ui.player.SongActionsContent
@@ -81,7 +86,7 @@ import com.whiplash.music.ui.theme.WhiplashRadius
  * they have real backing data — no empty/fake placeholder sections.
  * (built by -SA · github.com/shahidthisside)
  */
-private enum class SheetOrigin { SPEED_DIAL, QUICK_PICKS }
+private enum class SheetOrigin { SPEED_DIAL, QUICK_PICKS, SHELF }
 
 /** Number of skeleton rows shown while Quick Picks' first real results are loading — roughly matches how many rows fit before scrolling. */
 private const val QUICK_PICKS_SKELETON_ROW_COUNT = 5
@@ -94,11 +99,15 @@ fun HomeScreen(
     onPlayTrack: (PlayableItem) -> Unit,
     onOpenHistory: () -> Unit,
     onPlayQueue: (queue: List<PlayableItem>, startIndex: Int) -> Unit = { _, _ -> },
+    onOpenCollection: (com.whiplash.music.domain.model.YoutubePlaylistResult) -> Unit = {},
+    // Hoisted by the caller so Home keeps its scroll position while an album
+    // or History is open on top of it (this screen leaves composition then).
+    listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: HomeViewModel = viewModel(
-        factory = HomeViewModelFactory(app.libraryRepository, app.youtubeSearchRepository),
+        factory = HomeViewModelFactory(app.libraryRepository, app.youtubeSearchRepository, app.settingsRepository),
     )
     val songActionsViewModel: SongActionsViewModel = viewModel(
         factory = SongActionsViewModelFactory(app.libraryRepository, app.downloadManager),
@@ -119,6 +128,46 @@ fun HomeScreen(
     var addToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showClearSpeedDialConfirm by remember { mutableStateOf(false) }
+    // 4.2: grid ⇄ list, persisted (and in backup) so it sticks across launches.
+    val speedDialListView = viewModel.speedDialListView.collectAsState().value ?: false
+    val quickPicksGridView = viewModel.quickPicksGridView.collectAsState().value ?: false
+    val quickPicksGridCount = viewModel.quickPicksGridCount.collectAsState().value ?: 9
+    val layoutScope = androidx.compose.runtime.rememberCoroutineScope()
+    // 4.1: shelves feed (can be turned off in Settings → Home shelves).
+    val shelvesEnabled = viewModel.homeShelvesEnabled.collectAsState().value
+    androidx.compose.runtime.LaunchedEffect(shelvesEnabled) {
+        shelvesEnabled?.let { viewModel.setShelvesEnabled(it) }
+    }
+    val shelves by viewModel.shelves.collectAsState()
+    val isLoadingShelves by viewModel.isLoadingShelves.collectAsState()
+    val hasMoreShelves by viewModel.hasMoreShelves.collectAsState()
+    var collectionSheetItem by remember { mutableStateOf<com.whiplash.music.domain.model.YoutubePlaylistResult?>(null) }
+    val onShelfClick: (HomeViewModel.ShelfItem) -> Unit = { item ->
+        when (item) {
+            is HomeViewModel.ShelfItem.Track -> onPlayTrack(item.track)
+            is HomeViewModel.ShelfItem.Collection -> onOpenCollection(item.collection)
+        }
+    }
+    val onShelfLongClick: (HomeViewModel.ShelfItem) -> Unit = { item ->
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        when (item) {
+            is HomeViewModel.ShelfItem.Track -> {
+                actionsSheetOrigin = SheetOrigin.SHELF
+                actionsSheetItem = item.track
+            }
+            is HomeViewModel.ShelfItem.Collection -> collectionSheetItem = item.collection
+        }
+    }
+    // Infinite feed: fetch the next shelves once the last loaded one scrolls into view.
+    val nearShelvesEnd by androidx.compose.runtime.remember {
+        androidx.compose.runtime.derivedStateOf {
+            val visible = listState.layoutInfo.visibleItemsInfo.map { it.key }
+            visible.any { it == "shelves-end" }
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(nearShelvesEnd, shelves.size, hasMoreShelves) {
+        if (nearShelvesEnd && shelvesEnabled == true && hasMoreShelves) viewModel.loadMoreShelves()
+    }
 
     // The truly-empty state ("no history, no Quick Picks, nothing loading")
     // must wait for isSpeedDialLoaded — otherwise this renders on every
@@ -162,6 +211,7 @@ fun HomeScreen(
         modifier = Modifier.fillMaxSize(),
     ) {
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd),
             verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
@@ -180,18 +230,41 @@ fun HomeScreen(
                 item { SpeedDialSkeletonGrid() }
             } else if (speedDial.isNotEmpty()) {
                 item {
-                    SectionHeader(title = "Speed dial", onHistory = onOpenHistory, onClear = { showClearSpeedDialConfirm = true })
-                }
-                item {
-                    SpeedDialGrid(
-                        items = speedDial,
-                        onPlayTrack = onPlayTrack,
-                        onLongPressTrack = { track ->
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            actionsSheetOrigin = SheetOrigin.SPEED_DIAL
-                            actionsSheetItem = track
+                    SectionHeader(
+                        title = "Speed dial",
+                        onHistory = onOpenHistory,
+                        onClear = { showClearSpeedDialConfirm = true },
+                        listView = speedDialListView,
+                        onToggleLayout = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            viewModel.setSpeedDialListView(!speedDialListView)
                         },
                     )
+                }
+                val onLongPressSpeedDial: (PlayableItem) -> Unit = { track ->
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    actionsSheetOrigin = SheetOrigin.SPEED_DIAL
+                    actionsSheetItem = track
+                }
+                if (speedDialListView) {
+                    items(speedDial, key = { it.speedDialIdentity().let { (id, source) -> "sdl:$source:$id" } }) { track ->
+                        GlassListItem(
+                            title = track.title,
+                            subtitle = track.artist,
+                            onClick = { onPlayTrack(track) },
+                            onLongClick = { onLongPressSpeedDial(track) },
+                            leading = { GlassArtworkThumbnail(artworkUri = track.artworkUri) },
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
+                } else {
+                    item {
+                        SpeedDialGrid(
+                            items = speedDial,
+                            onPlayTrack = onPlayTrack,
+                            onLongPressTrack = onLongPressSpeedDial,
+                        )
+                    }
                 }
             }
 
@@ -214,14 +287,35 @@ fun HomeScreen(
                         // the gesture that refreshes everything.
                         onRefresh = { viewModel.refreshQuickPicks() },
                         isRefreshing = isLoadingQuickPicks,
+                        listView = !quickPicksGridView,
+                        onToggleLayout = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            viewModel.setQuickPicksGridView(!quickPicksGridView)
+                        },
                     )
                 }
-                if (isLoadingQuickPicks && quickPicks.isEmpty()) {
-                    items(QUICK_PICKS_SKELETON_ROW_COUNT) {
-                        com.whiplash.music.ui.theme.ShimmerSkeletonRow()
+                val onLongPressQuickPick: (PlayableItem) -> Unit = { track ->
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    actionsSheetOrigin = SheetOrigin.QUICK_PICKS
+                    actionsSheetItem = track
+                }
+                if (quickPicksGridView && quickPicks.isNotEmpty()) {
+                    val perPage = quickPicksGridCount
+                    if (perPage == 0) {
+                        // "All": one tall grid, rows of three.
+                        val rows = quickPicks.chunked(3)
+                        items(rows.size, key = { "qpgrid:${rows[it].first().id}" }) { rowIndex ->
+                            QuickPicksTileRow(rows[rowIndex], onPlayTrack, onLongPressQuickPick, Modifier.animateItem())
+                        }
+                    } else {
+                        // Pages of [perPage] songs; swipe sideways for the rest,
+                        // with the next page peeking in at the edge.
+                        item(key = "qpgrid-pager") {
+                            QuickPicksPager(quickPicks, perPage, onPlayTrack, onLongPressQuickPick)
+                        }
                     }
                 }
-                items(quickPicks, key = { "quickpick:${it.id}" }) { track ->
+                if (!quickPicksGridView) items(quickPicks, key = { "quickpick:${it.id}" }) { track ->
                     GlassListItem(
                         title = track.title,
                         subtitle = track.artist,
@@ -312,6 +406,42 @@ fun HomeScreen(
                     )
                 }
             }
+
+            // 4.1: hero + shelves after Quick Picks; the feed keeps loading at the end.
+            if (shelvesEnabled == true) {
+                val heroShelf = shelves.firstOrNull()
+                val hero = heroShelf?.items?.firstOrNull { it is HomeViewModel.ShelfItem.Collection }
+                if (heroShelf == null && isLoadingShelves) {
+                    item(key = "hero-skeleton") { Box(Modifier.padding(top = GlassTokens.spaceMd)) { ShelfHeroSkeleton() } }
+                    item(key = "shelf-skeleton-0") { ShelfSkeleton() }
+                } else if (heroShelf != null) {
+                    if (hero != null) {
+                        item(key = "hero") {
+                            Box(Modifier.padding(top = GlassTokens.spaceMd)) {
+                                ShelfHeroCard(
+                                    label = heroLabel(heroShelf.spec.kind),
+                                    item = hero,
+                                    onClick = { onShelfClick(hero) },
+                                    onLongClick = { onShelfLongClick(hero) },
+                                )
+                            }
+                        }
+                    }
+                    shelves.forEachIndexed { index, shelf ->
+                        // The hero is not repeated on its own shelf.
+                        val shelfItems = if (index == 0 && hero != null) shelf.items - hero else shelf.items
+                        if (shelfItems.isNotEmpty()) {
+                            item(key = "shelf:${shelf.spec.key}") {
+                                HomeShelfRow(shelf, shelfItems, onShelfClick, onShelfLongClick)
+                            }
+                        }
+                    }
+                    if (isLoadingShelves) item(key = "shelf-skeleton-more") { ShelfSkeleton() }
+                    // Sentinel for paging (zero height).
+                    item(key = "shelves-end") { Box(Modifier.size(1.dp)) }
+                }
+            }
+
         }
     }
 
@@ -319,6 +449,36 @@ fun HomeScreen(
     // Pin/Unpin to Speed dial — reachable via long-press on either a Speed
     // dial tile or a Quick Picks row, since Speed dial tiles have no room
     // for an inline 3-dot button of their own at that tile size.
+    val collectionItem = collectionSheetItem
+    if (collectionItem != null) {
+        GlassSheet(onDismissRequest = { collectionSheetItem = null }) {
+            CollectionActionsContent(
+                collection = collectionItem,
+                onOpen = {
+                    collectionSheetItem = null
+                    onOpenCollection(collectionItem)
+                },
+                onPlay = {
+                    collectionSheetItem = null
+                    layoutScope.launch { playCollection(app, collectionItem, shuffle = false, onPlayQueue) }
+                },
+                onShuffle = {
+                    collectionSheetItem = null
+                    layoutScope.launch { playCollection(app, collectionItem, shuffle = true, onPlayQueue) }
+                },
+                onShare = {
+                    collectionSheetItem = null
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(android.content.Intent.EXTRA_TEXT, collectionItem.url)
+                    }
+                    runCatching { context.startActivity(android.content.Intent.createChooser(send, "Share ${collectionItem.title}")) }
+                        .onFailure { ToastController.show("Couldn't open share") }
+                },
+            )
+        }
+    }
+
     val sheetItem = actionsSheetItem
     if (sheetItem != null) {
         val isFavorite by app.libraryRepository.observeIsFavorite(sheetItem).collectAsState(initial = false)
@@ -654,6 +814,8 @@ private fun SectionHeader(
     onRefresh: (() -> Unit)? = null,
     isRefreshing: Boolean = false,
     onClear: (() -> Unit)? = null,
+    listView: Boolean = false,
+    onToggleLayout: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = GlassTokens.spaceSm, bottom = GlassTokens.spaceXs),
@@ -666,6 +828,19 @@ private fun SectionHeader(
             color = WhiplashColors.textPrimary,
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (onToggleLayout != null) {
+                PlainIconButton(
+                    contentDescription = if (listView) "Show $title as grid" else "Show $title as list",
+                    onClick = onToggleLayout,
+                    size = 48.dp,
+                ) {
+                    androidx.compose.material3.Icon(
+                        if (listView) Icons.Filled.GridView else Icons.AutoMirrored.Filled.ViewList,
+                        contentDescription = null,
+                        tint = WhiplashColors.textSecondary,
+                    )
+                }
+            }
             if (onHistory != null) {
                 PlainIconButton(contentDescription = "See full history", onClick = onHistory, size = 48.dp) {
                     androidx.compose.material3.Icon(
@@ -724,6 +899,153 @@ private fun SectionHeader(
                         Icons.Filled.Close,
                         contentDescription = null,
                         tint = WhiplashColors.textSecondary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Fetches an album/playlist's tracks and plays them (shuffled if asked). */
+private suspend fun playCollection(
+    app: WhiplashApplication,
+    collection: com.whiplash.music.domain.model.YoutubePlaylistResult,
+    shuffle: Boolean,
+    onPlayQueue: (List<PlayableItem>, Int) -> Unit,
+) {
+    ToastController.show("Loading ${collection.title}…")
+    val tracks = runCatching { app.youtubeDetailProvider.getPlaylistDetail(collection.url).tracks }.getOrNull()
+    if (tracks.isNullOrEmpty()) {
+        ToastController.show("Couldn't load ${collection.title}")
+        return
+    }
+    onPlayQueue(if (shuffle) tracks.shuffled() else tracks, 0)
+}
+
+/** Quick Picks grid tile: square artwork with title and artist beneath. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickPickTile(
+    track: PlayableItem,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick, onClickLabel = "Play", onLongClickLabel = "More options")
+            .semantics(mergeDescendants = true) {},
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(WhiplashRadius.medium))
+                .background(WhiplashColors.surfaceElevated),
+        ) {
+            if (track.artworkUri != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(track.artworkUri).crossfade(true).build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Text(
+            text = track.title,
+            style = MaterialTheme.typography.labelMedium,
+            color = WhiplashColors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = GlassTokens.spaceXs),
+        )
+        Text(
+            text = track.artist,
+            style = MaterialTheme.typography.labelSmall,
+            color = WhiplashColors.textSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** One row of up to three Quick Picks tiles (empty slots keep the columns aligned). */
+@Composable
+private fun QuickPicksTileRow(
+    tracks: List<PlayableItem>,
+    onPlayTrack: (PlayableItem) -> Unit,
+    onLongPress: (PlayableItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+    ) {
+        tracks.forEach { track ->
+            QuickPickTile(
+                track = track,
+                onClick = { onPlayTrack(track) },
+                onLongClick = { onLongPress(track) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        repeat(3 - tracks.size) { Box(Modifier.weight(1f)) }
+    }
+}
+
+/**
+ * YouTube-Music-style Quick Picks grid: [perPage] songs per page (rows of
+ * three), swiped sideways. Every page is padded to the same number of rows so
+ * the pager's height never changes mid-swipe, and a dot row shows where you are.
+ */
+@Composable
+private fun QuickPicksPager(
+    tracks: List<PlayableItem>,
+    perPage: Int,
+    onPlayTrack: (PlayableItem) -> Unit,
+    onLongPress: (PlayableItem) -> Unit,
+) {
+    val pages = tracks.chunked(perPage)
+    val rowsPerPage = (perPage + 2) / 3
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState { pages.size }
+    Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+        androidx.compose.foundation.pager.HorizontalPager(
+            state = pagerState,
+            // Leave a sliver of the next page visible so it reads as swipeable.
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(end = if (pages.size > 1) 28.dp else 0.dp),
+            pageSpacing = GlassTokens.spaceMd,
+            key = { pages[it].first().id },
+            modifier = Modifier.fillMaxWidth(),
+        ) { page ->
+            val rows = pages[page].chunked(3)
+            Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+                for (r in 0 until rowsPerPage) {
+                    val row = rows.getOrNull(r)
+                    if (row != null) {
+                        QuickPicksTileRow(row, onPlayTrack, onLongPress)
+                    } else {
+                        // Invisible stand-in with a real tile's height.
+                        QuickPicksTileRow(emptyList(), onPlayTrack, onLongPress, Modifier.graphicsLayer { alpha = 0f })
+                    }
+                }
+            }
+        }
+        if (pages.size > 1) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = "Page ${pagerState.currentPage + 1} of ${pages.size}" },
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                repeat(pages.size) { i ->
+                    val active = i == pagerState.currentPage
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 3.dp)
+                            .size(width = if (active) 16.dp else 6.dp, height = 6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(if (active) WhiplashColors.textPrimary else WhiplashColors.textSecondary.copy(alpha = 0.4f)),
                     )
                 }
             }

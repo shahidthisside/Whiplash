@@ -156,6 +156,7 @@ class BackupManager(
                             put("artworkUrl", playlist.artworkUrl)
                             put("createdAtEpochMs", playlist.createdAtEpochMs)
                             put("updatedAtEpochMs", playlist.updatedAtEpochMs)
+                            playlist.pinnedAtEpochMs?.let { put("pinnedAtEpochMs", it) }
                             put(
                                 "tracks",
                                 JSONArray().apply {
@@ -298,6 +299,11 @@ class BackupManager(
                         put("playerLyricStrip", settingsRepository.playerLyricStrip.first())
                         put("lyricsSource", settingsRepository.lyricsSource.first().name)
                         put("lyricsBlurUnfocused", settingsRepository.lyricsBlurUnfocused.first())
+                        put("speedDialListView", settingsRepository.speedDialListView.first())
+                        put("quickPicksGridView", settingsRepository.quickPicksGridView.first())
+                        put("quickPicksGridCount", settingsRepository.quickPicksGridCount.first())
+                        put("playlistsListView", settingsRepository.playlistsListView.first())
+                        put("homeShelvesEnabled", settingsRepository.homeShelvesEnabled.first())
                         put("playerHeroArtwork", settingsRepository.playerHeroArtwork.first())
                         put("perNetworkQualityEnabled", settingsRepository.perNetworkQualityEnabled.first())
                         put("audioQualityWifi", settingsRepository.audioQualityWifi.first().name)
@@ -438,6 +444,21 @@ class BackupManager(
                     }
                     if (s.has("playerHeroArtwork")) {
                         runCatching { settingsRepository.setPlayerHeroArtwork(s.getBoolean("playerHeroArtwork")) }
+                    }
+                    if (s.has("homeShelvesEnabled")) {
+                        runCatching { settingsRepository.setHomeShelvesEnabled(s.getBoolean("homeShelvesEnabled")) }
+                    }
+                    if (s.has("playlistsListView")) {
+                        runCatching { settingsRepository.setPlaylistsListView(s.getBoolean("playlistsListView")) }
+                    }
+                    if (s.has("quickPicksGridCount")) {
+                        runCatching { settingsRepository.setQuickPicksGridCount(s.getInt("quickPicksGridCount")) }
+                    }
+                    if (s.has("quickPicksGridView")) {
+                        runCatching { settingsRepository.setQuickPicksGridView(s.getBoolean("quickPicksGridView")) }
+                    }
+                    if (s.has("speedDialListView")) {
+                        runCatching { settingsRepository.setSpeedDialListView(s.getBoolean("speedDialListView")) }
                     }
                     if (s.has("lyricsBlurUnfocused")) {
                         runCatching { settingsRepository.setLyricsBlurUnfocused(s.getBoolean("lyricsBlurUnfocused")) }
@@ -596,6 +617,8 @@ class BackupManager(
                         artworkUrl = p.optString("artworkUrl").takeIf { p.has("artworkUrl") && !p.isNull("artworkUrl") },
                         createdAtEpochMs = p.getLong("createdAtEpochMs"),
                         updatedAtEpochMs = p.getLong("updatedAtEpochMs"),
+                        // Absent in backups from before pinning existed → unpinned.
+                        pinnedAtEpochMs = if (p.has("pinnedAtEpochMs") && !p.isNull("pinnedAtEpochMs")) p.getLong("pinnedAtEpochMs") else null,
                     )
                 )
                 val tracks = p.optJSONArray("tracks") ?: JSONArray()

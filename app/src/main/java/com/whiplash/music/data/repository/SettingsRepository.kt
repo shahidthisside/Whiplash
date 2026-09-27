@@ -217,6 +217,47 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[PLAYER_LYRIC_STRIP_KEY] = enabled }
     }
 
+    /** Home recommendation shelves (albums/playlists from artists you play). Default on. */
+    val homeShelvesEnabled: Flow<Boolean> = dataStore.data.map { prefs -> prefs[HOME_SHELVES_KEY] ?: true }
+
+    suspend fun setHomeShelvesEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[HOME_SHELVES_KEY] = enabled }
+    }
+
+    /** Playlists screen shown as a list instead of the cover grid (default: grid). */
+    val playlistsListView: Flow<Boolean> = dataStore.data.map { prefs -> prefs[PLAYLISTS_LIST_KEY] ?: false }
+
+    suspend fun setPlaylistsListView(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[PLAYLISTS_LIST_KEY] = enabled }
+    }
+
+    /** Home "Quick Picks" shown as an artwork grid instead of a list (default: list). */
+    val quickPicksGridView: Flow<Boolean> = dataStore.data.map { prefs -> prefs[QUICK_PICKS_GRID_KEY] ?: false }
+
+    suspend fun setQuickPicksGridView(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[QUICK_PICKS_GRID_KEY] = enabled }
+    }
+
+    /**
+     * Quick Picks grid: songs per swipeable page (3, 6, 9 or 12 = one to four
+     * rows of three), or 0 for "All" (one tall grid, no paging). Default 9.
+     */
+    val quickPicksGridCount: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[QUICK_PICKS_GRID_COUNT_KEY]?.takeIf { it in QUICK_PICKS_GRID_COUNTS } ?: 9
+    }
+
+    suspend fun setQuickPicksGridCount(count: Int) {
+        if (count !in QUICK_PICKS_GRID_COUNTS) return
+        dataStore.edit { prefs -> prefs[QUICK_PICKS_GRID_COUNT_KEY] = count }
+    }
+
+    /** Home "Speed dial" shown as a list instead of the 3x3 artwork grid. */
+    val speedDialListView: Flow<Boolean> = dataStore.data.map { prefs -> prefs[SPEED_DIAL_LIST_KEY] ?: false }
+
+    suspend fun setSpeedDialListView(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[SPEED_DIAL_LIST_KEY] = enabled }
+    }
+
     /** Soft blur on lyric lines away from the one being sung (API 31+; ignored on older Android). */
     val lyricsBlurUnfocused: Flow<Boolean> = dataStore.data.map { prefs -> prefs[LYRICS_BLUR_KEY] ?: false }
 
@@ -339,6 +380,11 @@ class SettingsRepository(context: Context) {
         val REDUCE_ANIMATIONS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("reduce_animations")
         val PLAYER_ARTWORK_COLORS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_artwork_colors")
         val PLAYER_LYRIC_STRIP_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_lyric_strip")
+        val HOME_SHELVES_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("home_shelves_enabled")
+        val PLAYLISTS_LIST_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("playlists_list_view")
+        val QUICK_PICKS_GRID_COUNT_KEY: Preferences.Key<Int> = androidx.datastore.preferences.core.intPreferencesKey("quick_picks_grid_count")
+        val QUICK_PICKS_GRID_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("quick_picks_grid_view")
+        val SPEED_DIAL_LIST_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("speed_dial_list_view")
         val LYRICS_BLUR_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("lyrics_blur_unfocused")
         val LYRICS_SOURCE_KEY: Preferences.Key<String> = stringPreferencesKey("lyrics_source")
         val PLAYER_HERO_ARTWORK_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_hero_artwork")
@@ -348,3 +394,6 @@ class SettingsRepository(context: Context) {
         val PER_NETWORK_QUALITY_ENABLED_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("per_network_quality_enabled")
     }
 }
+
+/** Allowed Quick Picks grid page sizes; 0 = All. */
+val QUICK_PICKS_GRID_COUNTS = listOf(3, 6, 9, 12, 0)
