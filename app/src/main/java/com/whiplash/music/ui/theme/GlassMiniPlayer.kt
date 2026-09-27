@@ -1,6 +1,7 @@
 package com.whiplash.music.ui.theme
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -57,6 +58,12 @@ fun GlassMiniPlayer(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Fill colour. Null keeps the original raised sheet look (surface colour
+     * plus shadow); a colour draws a flat, tinted card with a hairline edge,
+     * used with the modern navigation bar.
+     */
+    containerColor: androidx.compose.ui.graphics.Color? = null,
 ) {
     val shape = RoundedCornerShape(WhiplashRadius.large)
     val haptic = LocalHapticFeedback.current
@@ -65,9 +72,19 @@ fun GlassMiniPlayer(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(elevation = GlassTokens.elevationElevated, shape = shape, clip = false)
-            .clip(shape)
-            .background(WhiplashColors.surfaceSheet)
+            .then(
+                if (containerColor == null) {
+                    Modifier
+                        .shadow(elevation = GlassTokens.elevationElevated, shape = shape, clip = false)
+                        .clip(shape)
+                        .background(WhiplashColors.surfaceSheet)
+                } else {
+                    Modifier
+                        .clip(shape)
+                        .background(containerColor)
+                        .border(0.5.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.06f), shape)
+                },
+            )
             .clickable(onClick = onExpand)
             // Section 58: swipe the mini-player left/right for next/
             // previous — an additive gesture layered on top of the

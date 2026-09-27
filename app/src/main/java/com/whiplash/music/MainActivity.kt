@@ -45,6 +45,13 @@ import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Home as OutlinedHome
+import androidx.compose.material.icons.outlined.LibraryMusic as OutlinedLibraryMusic
+import androidx.compose.material.icons.outlined.Search as OutlinedSearch
+import androidx.compose.material.icons.outlined.Settings as OutlinedSettings
+import androidx.compose.material.icons.automirrored.outlined.QueueMusic as OutlinedQueueMusic
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -74,7 +81,6 @@ import com.whiplash.music.ui.playlists.PlaylistDetailScreen
 import com.whiplash.music.ui.playlists.PlaylistsScreen
 import com.whiplash.music.ui.search.SearchScreen
 import com.whiplash.music.ui.settings.SettingsScreen
-import com.whiplash.music.ui.theme.GlassBottomBar
 import com.whiplash.music.ui.theme.GlassMiniPlayer
 import com.whiplash.music.ui.theme.GlassTokens
 import com.whiplash.music.ui.theme.WhiplashTheme
@@ -179,7 +185,15 @@ private fun MiniPlayerHost(
 ) {
     val state by playerViewModel.state.collectAsState()
     val currentItem = state.currentItem ?: return
+    // A flat card in the app's own near-black surface, so the mini player
+    // belongs to the page instead of sitting on it as a grey slab.
+    val uiSurface = androidx.compose.ui.graphics.lerp(
+        com.whiplash.music.ui.theme.WhiplashColors.background,
+        androidx.compose.ui.graphics.Color.White,
+        0.06f,
+    )
     GlassMiniPlayer(
+        containerColor = uiSurface,
         title = currentItem.title,
         artist = currentItem.artist,
         artworkUri = currentItem.artworkUri,
@@ -668,61 +682,65 @@ private fun WhiplashApp() {
                     // recomposition scope, a real, measurable contributor to
                     // "choppy" scrolling/interaction while a song is
                     // playing, reported by a user on a 120Hz device.
+                    // The page fades out into the bottom bar (drawn under the mini player).
+                    com.whiplash.music.ui.theme.BottomBarFade(modifier = Modifier.align(Alignment.BottomCenter))
                     MiniPlayerHost(
                         playerViewModel = playerViewModel,
                         onExpand = { isPlayerExpanded = true },
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .padding(GlassTokens.spaceMd),
+                            .padding(horizontal = GlassTokens.spaceSm)
+                            .padding(bottom = GlassTokens.spaceXs),
                     )
                 }
 
-                GlassBottomBar(
+                val onSelectTab: (AppTab) -> Unit = { tab ->
+                    // Real, reported navigation bug (UAT audit
+                    // finding): re-tapping the *already-selected*
+                    // bottom-nav tab while a nested sub-screen was
+                    // open (History under Home, a playlist's detail
+                    // view under Playlists, an album/artist detail
+                    // under Search) silently did nothing — Compose
+                    // never recomposes from `selectedTab = it` when
+                    // `it` already equals the current value, and none
+                    // of those nested-state variables were ever reset
+                    // anywhere except their own screen-local `onBack`.
+                    // Every other major app treats "tap the tab
+                    // you're already on" as "return to that tab's
+                    // root", so this now explicitly collapses the
+                    // matching nested state when the tap target is
+                    // the tab already selected, in addition to the
+                    // always-correct plain tab switch.
+                    if (tab == selectedTab) {
+                        when (tab) {
+                            AppTab.HOME, AppTab.LOCAL -> {
+                                if (historyTab == tab) historyTab = null
+                                if (tab == AppTab.HOME) homeCollectionUrl = null
+                            }
+                            AppTab.SEARCH -> searchDetailStack = emptyList()
+                            AppTab.PLAYLISTS -> openPlaylist = null
+                            else -> {}
+                        }
+                    }
+                    selectedTab = tab
+                }
+                com.whiplash.music.ui.theme.FadeBottomBar(
                     items = AppTab.entries,
                     selected = selectedTab,
-                    onSelect = { tab ->
-                        // Real, reported navigation bug (UAT audit
-                        // finding): re-tapping the *already-selected*
-                        // bottom-nav tab while a nested sub-screen was
-                        // open (History under Home, a playlist's detail
-                        // view under Playlists, an album/artist detail
-                        // under Search) silently did nothing — Compose
-                        // never recomposes from `selectedTab = it` when
-                        // `it` already equals the current value, and none
-                        // of those nested-state variables were ever reset
-                        // anywhere except their own screen-local `onBack`.
-                        // Every other major app treats "tap the tab
-                        // you're already on" as "return to that tab's
-                        // root", so this now explicitly collapses the
-                        // matching nested state when the tap target is
-                        // the tab already selected, in addition to the
-                        // always-correct plain tab switch.
-                        if (tab == selectedTab) {
-                            when (tab) {
-                                AppTab.HOME, AppTab.LOCAL -> {
-                                    if (historyTab == tab) historyTab = null
-                                    if (tab == AppTab.HOME) homeCollectionUrl = null
-                                }
-                                AppTab.SEARCH -> searchDetailStack = emptyList()
-                                AppTab.PLAYLISTS -> openPlaylist = null
-                                else -> {}
-                            }
-                        }
-                        selectedTab = tab
-                    },
+                    onSelect = onSelectTab,
                     label = { it.label },
-                    icon = { tab ->
+                    icon = { tab, sel ->
                         Icon(
                             imageVector = when (tab) {
-                                AppTab.HOME -> Icons.Filled.Home
-                                AppTab.SEARCH -> Icons.Filled.Search
-                                AppTab.LOCAL -> Icons.Filled.LibraryMusic
-                                AppTab.FAVORITES -> Icons.Filled.Favorite
-                                AppTab.PLAYLISTS -> Icons.AutoMirrored.Filled.QueueMusic
-                                AppTab.SETTINGS -> Icons.Filled.Settings
+                                AppTab.HOME -> if (sel) Icons.Filled.Home else Icons.Outlined.OutlinedHome
+                                AppTab.SEARCH -> if (sel) Icons.Filled.Search else Icons.Outlined.OutlinedSearch
+                                AppTab.LOCAL -> if (sel) Icons.Filled.LibraryMusic else Icons.Outlined.OutlinedLibraryMusic
+                                AppTab.FAVORITES -> if (sel) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder
+                                AppTab.PLAYLISTS -> if (sel) Icons.AutoMirrored.Filled.QueueMusic else Icons.AutoMirrored.Outlined.OutlinedQueueMusic
+                                AppTab.SETTINGS -> if (sel) Icons.Filled.Settings else Icons.Outlined.OutlinedSettings
                             },
                             contentDescription = null,
-                            modifier = Modifier.padding(bottom = 2.dp),
+                            modifier = Modifier.size(26.dp),
                         )
                     },
                 )

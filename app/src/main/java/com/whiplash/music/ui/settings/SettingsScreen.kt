@@ -1200,8 +1200,7 @@ private fun SettingToggleRow(
  * Premium pill-segment quality selector — replaces the earlier bare
  * horizontal-scrolling [com.whiplash.music.ui.theme.GlassChip] row (the
  * "poor/cheap" look flagged explicitly) with a single continuous rounded
- * track and an animated selection indicator, matching the same visual
- * language as [com.whiplash.music.ui.theme.GlassBottomBar]'s selection pill.
+ * track and an animated selection indicator.
  */
 @Composable
 private fun AudioQualitySelector(selected: AudioQuality, onSelect: (AudioQuality) -> Unit) {
