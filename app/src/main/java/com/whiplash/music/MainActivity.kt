@@ -667,7 +667,7 @@ private fun WhiplashApp() {
                                     }
                                 }
                             }
-                            AppTab.SETTINGS -> SettingsScreen(resetKey = settingsResetKey)
+                            AppTab.SETTINGS -> SettingsScreen(resetKey = settingsResetKey, backEnabled = !isPlayerExpanded)
                         }
                     }
 

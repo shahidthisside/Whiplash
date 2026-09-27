@@ -105,7 +105,7 @@ private const val EQUALIZER_REQUEST_CODE = 4242
 
 @androidx.compose.foundation.layout.ExperimentalLayoutApi
 @Composable
-fun SettingsScreen(resetKey: Int = 0) {
+fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository, app.audioCacheManager, app.backupManager, app.lyricsCache, app.lyricsProviderChain, app.downloadManager))
@@ -253,7 +253,9 @@ fun SettingsScreen(resetKey: Int = 0) {
     var openSection by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<SettingsSection?>(null) }
     // Re-tapping the Settings tab returns to the start page.
     androidx.compose.runtime.LaunchedEffect(resetKey) { if (resetKey > 0) openSection = null }
-    androidx.activity.compose.BackHandler(enabled = openSection != null) { openSection = null }
+    // Off while something covers Settings (the full player): Back must close
+    // that first, not the folder page hidden behind it.
+    androidx.activity.compose.BackHandler(enabled = backEnabled && openSection != null) { openSection = null }
     val reduceMotion = com.whiplash.music.ui.common.isReducedMotionEnabled()
     val rootListState = androidx.compose.foundation.lazy.rememberLazyListState()
 
