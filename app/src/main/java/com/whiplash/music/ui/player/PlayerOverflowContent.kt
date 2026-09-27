@@ -10,6 +10,8 @@ import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.LibraryAddCheck
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -49,7 +51,12 @@ fun PlayerOverflowContent(
     isDownloaded: Boolean = false,
     onDownload: (() -> Unit)? = null,
     onRemoveDownload: (() -> Unit)? = null,
+    // The song playing now, so the playlist and download rows can follow
+    // its live state (Saved in …, Cancel download).
+    item: com.whiplash.music.domain.model.PlayableItem? = null,
 ) {
+    val live = rememberSongLibraryState(item)
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? com.whiplash.music.WhiplashApplication
     OverflowRow(
         icon = {
             Icon(
@@ -86,12 +93,29 @@ fun PlayerOverflowContent(
         label = "Audio output: ${output.name}",
         onClick = onOpenAudioOutput,
     )
+    val saved = live.inPlaylists.isNotEmpty()
     OverflowRow(
-        icon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null, tint = WhiplashColors.textPrimary) },
+        icon = {
+            Icon(
+                if (saved) Icons.Filled.LibraryAddCheck else Icons.AutoMirrored.Filled.PlaylistAdd,
+                contentDescription = null,
+                tint = if (saved) WhiplashColors.accent else WhiplashColors.textPrimary,
+            )
+        },
         label = "Add to playlist",
+        subtitle = inPlaylistsSubtitle(live.inPlaylists),
         onClick = onOpenAddToPlaylist,
     )
-    if (onDownload != null) {
+    if (live.downloading && item != null && app != null) {
+        OverflowRow(
+            icon = { Icon(Icons.Filled.Close, contentDescription = null, tint = WhiplashColors.textPrimary) },
+            label = "Cancel download",
+            onClick = {
+                app.downloadManager.cancelDownload(item.id)
+                com.whiplash.music.ui.common.ToastController.show("Download cancelled")
+            },
+        )
+    } else if (onDownload != null) {
         OverflowRow(
             icon = {
                 Icon(
@@ -114,7 +138,7 @@ fun PlayerOverflowContent(
 }
 
 @Composable
-private fun OverflowRow(icon: @Composable () -> Unit, label: String, onClick: () -> Unit) {
+private fun OverflowRow(icon: @Composable () -> Unit, label: String, onClick: () -> Unit, subtitle: String? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -123,11 +147,21 @@ private fun OverflowRow(icon: @Composable () -> Unit, label: String, onClick: ()
         verticalAlignment = Alignment.CenterVertically,
     ) {
         icon()
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = WhiplashColors.textPrimary,
-            modifier = Modifier.padding(start = GlassTokens.spaceMd),
-        )
+        androidx.compose.foundation.layout.Column(modifier = Modifier.padding(start = GlassTokens.spaceMd)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = WhiplashColors.textPrimary,
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = WhiplashColors.accent,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }

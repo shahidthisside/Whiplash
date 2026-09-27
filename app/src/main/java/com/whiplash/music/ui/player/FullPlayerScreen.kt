@@ -657,6 +657,7 @@ fun FullPlayerScreen(
         GlassSheet(onDismissRequest = { isOverflowSheetOpen = false }) {
             val overflowContext = androidx.compose.ui.platform.LocalContext.current
             PlayerOverflowContent(
+                item = item,
                 sleepTimerActive = state.sleepTimer != null,
                 playbackSpeed = playbackSpeed,
                 onOpenSleepTimer = {
@@ -739,6 +740,7 @@ fun FullPlayerScreen(
     if (isAddToPlaylistSheetOpen) {
         GlassSheet(onDismissRequest = { isAddToPlaylistSheetOpen = false }) {
             AddToPlaylistContent(
+                item = item,
                 playlists = playlists,
                 onSelectPlaylist = { playlist ->
                     onAddToPlaylist(playlist.id, playlist.name)

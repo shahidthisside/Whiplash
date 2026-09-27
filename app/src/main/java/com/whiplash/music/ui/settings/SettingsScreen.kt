@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.GraphicEq
@@ -132,6 +133,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val exploreEnabled by viewModel.exploreEnabled.collectAsState()
     val replayEnabled by viewModel.replayEnabled.collectAsState()
     val modernLibraryPages by viewModel.modernLibraryPages.collectAsState()
+    val modernSearch by viewModel.modernSearch.collectAsState()
     val quickPicksGridCount by viewModel.quickPicksGridCount.collectAsState()
     val lyricsProviderHealth by viewModel.lyricsProviderHealth.collectAsState()
     val playerHeroArtwork by viewModel.playerHeroArtwork.collectAsState()
@@ -727,6 +729,18 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     subtitle = "Cover headers, Play and Shuffle buttons, sorting, and album and artist pages in Library, Favorites and Playlists.",
                                     checked = modernLibraryPages,
                                     onCheckedChange = viewModel::setModernLibraryPages,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.MODERN_SEARCH)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Modern search results",
+                                    icon = Icons.Filled.Search,
+                                    subtitle = "A top result card, a sliding category bar, cover grids, and menus on albums and playlists.",
+                                    checked = modernSearch,
+                                    onCheckedChange = viewModel::setModernSearch,
                                 )
                             }
                         }

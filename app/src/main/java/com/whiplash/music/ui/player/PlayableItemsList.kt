@@ -77,6 +77,10 @@ fun PlayableItemsList(
     contentPadding: androidx.compose.foundation.layout.PaddingValues =
         androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
     header: (@Composable () -> Unit)? = null,
+    // Like [header], but also handed a way to open this list's song
+    // actions sheet for any item (Search's top result card uses it for
+    // its own long-press and ⋮ menu). Used instead of [header] when set.
+    headerWithActions: (@Composable (openActions: (PlayableItem) -> Unit) -> Unit)? = null,
     // Optional real infinite-scroll hook (section: search pagination) —
     // both default to null/false so every existing caller (Local
     // Library, Home, Favorites) behaves exactly as before with zero
@@ -166,7 +170,7 @@ fun PlayableItemsList(
                     // are real LazyColumn items but not part of [items],
                     // so the threshold check below is against [items]'
                     // own last index, offset by whether a header exists.
-                    val headerOffset = if (header != null) 1 else 0
+                    val headerOffset = if (header != null || headerWithActions != null) 1 else 0
                     val lastItemIndex = headerOffset + items.lastIndex
                     if (!currentlyLoadingMore && lastVisibleIndex >= lastItemIndex - LOAD_MORE_THRESHOLD) {
                         onLoadMore()
@@ -189,7 +193,9 @@ fun PlayableItemsList(
         // tall artwork could push the header+track list below the
         // viewport with no way to scroll back up past it, since only the
         // inner list (not the header above it) was ever scrollable.
-        if (header != null) {
+        if (headerWithActions != null) {
+            item(key = "__header__") { headerWithActions { actionsSheetItem = it } }
+        } else if (header != null) {
             item(key = "__header__") { header() }
         }
         itemsIndexed(items, key = { _, item -> "${item.source}:${item.id}" }) { index, item ->
@@ -426,6 +432,7 @@ fun PlayableItemsList(
         val playlists by app.libraryRepository.observePlaylists().collectAsState(initial = emptyList())
         GlassSheet(onDismissRequest = { addToPlaylistItem = null }) {
             com.whiplash.music.ui.player.AddToPlaylistContent(
+                item = playlistTargetItem,
                 playlists = playlists,
                 onSelectPlaylist = { playlist ->
                     songActionsViewModel.addToPlaylist(playlistTargetItem, playlist.id, playlist.name)

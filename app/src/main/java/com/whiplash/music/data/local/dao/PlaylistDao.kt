@@ -41,6 +41,10 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY position ASC")
     fun observeTracks(playlistId: Long): Flow<List<PlaylistTrackEntity>>
 
+    /** Every playlist holding [trackId], for "Saved in …" labels and ticks in the playlist picker. */
+    @Query("SELECT DISTINCT playlistId FROM playlist_tracks WHERE trackId = :trackId")
+    fun observePlaylistIdsContaining(trackId: String): Flow<List<Long>>
+
     /**
      * Real, reported crash: [addTrack] had no duplicate check, so adding
      * the same song to the same playlist twice (e.g. via "Add to

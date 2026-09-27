@@ -443,6 +443,7 @@ private fun ArtistDetailContent(
         val playlists by app.libraryRepository.observePlaylists().collectAsState(initial = emptyList())
         GlassSheet(onDismissRequest = { addToPlaylistItem = null }) {
             com.whiplash.music.ui.player.AddToPlaylistContent(
+                item = playlistTargetItem,
                 playlists = playlists,
                 onSelectPlaylist = { playlist ->
                     songActionsViewModel.addToPlaylist(playlistTargetItem, playlist.id, playlist.name)

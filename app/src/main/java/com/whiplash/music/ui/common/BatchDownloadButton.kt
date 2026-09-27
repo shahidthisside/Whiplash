@@ -11,7 +11,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -31,7 +30,7 @@ import kotlinx.coroutines.launch
  * should reflect real progress, not just start a fire-and-forget batch
  * with no way to see or cancel it, or to know it already finished).
  */
-private enum class BatchDownloadState { DOWNLOAD, DOWNLOADING, DOWNLOADED }
+internal enum class BatchDownloadState { DOWNLOAD, DOWNLOADING, DOWNLOADED }
 
 /**
  * Shared state + confirmation-dialog plumbing behind both
@@ -83,7 +82,7 @@ private enum class BatchDownloadState { DOWNLOAD, DOWNLOADING, DOWNLOADED }
  * songs added straight from the Downloads tab would show no download
  * control at all instead of "Downloaded".
  */
-private class BatchDownloadController(
+internal class BatchDownloadController(
     val batchName: String,
     val notDownloaded: List<PlayableItem.YoutubeTrack>,
     val inFlightInBatch: List<PlayableItem.YoutubeTrack>,
@@ -92,7 +91,7 @@ private class BatchDownloadController(
 )
 
 @Composable
-private fun rememberBatchDownloadController(batchName: String, tracks: List<PlayableItem>): BatchDownloadController? {
+internal fun rememberBatchDownloadController(batchName: String, tracks: List<PlayableItem>): BatchDownloadController? {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
 
@@ -150,7 +149,7 @@ private fun rememberBatchDownloadController(batchName: String, tracks: List<Play
 
 /** The three confirmation dialogs shared by both [BatchDownloadButton] and [BatchDownloadIconButton]. */
 @Composable
-private fun BatchDownloadDialogs(
+internal fun BatchDownloadDialogs(
     controller: BatchDownloadController,
     showDownloadConfirm: Boolean,
     showCancelConfirm: Boolean,
@@ -161,7 +160,9 @@ private fun BatchDownloadDialogs(
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
-    val scope = rememberCoroutineScope()
+    // Outlives the dialog: closing it (and any sheet under it) must not
+    // cancel a cancel/remove that has only just started.
+    val scope = UiActionScope.scope
 
     if (showDownloadConfirm) {
         if (controller.notDownloaded.isEmpty()) {

@@ -104,6 +104,8 @@ fun SearchScreen(
     // 4.3: Settings → Explore in Search. While off, Explore isn't composed, so it fetches nothing.
     val exploreEnabled by app.settingsRepository.exploreEnabled.collectAsState(initial = false)
     val trendingArtists by viewModel.trendingArtists.collectAsState()
+    // Settings → Modern search results. Off draws the previous plain lists.
+    val modern by app.settingsRepository.modernSearch.collectAsState(initial = true)
     val trendingArtistResults by viewModel.trendingArtistResults.collectAsState()
     val trendingRefreshing by viewModel.isRefreshingTrending.collectAsState()
     // Same activity-scoped instance ExploreSection uses. Only created while
@@ -203,13 +205,25 @@ fun SearchScreen(
             // actually visible.
             state.isSearching && state.results.isEmpty() && state.albums.isEmpty() &&
                 state.artists.isEmpty() && state.playlists.isEmpty() -> LoadingState()
-            !state.hasSearched -> SuggestionsState(
-                suggestions = state.suggestions,
-                onSuggestionTap = { suggestion ->
-                    dismissKeyboard()
-                    viewModel.onSuggestionTapped(suggestion)
-                },
-            )
+            !state.hasSearched -> if (modern) {
+                ModernSuggestions(
+                    query = state.query,
+                    suggestions = state.suggestions,
+                    onSuggestionTap = { suggestion ->
+                        dismissKeyboard()
+                        viewModel.onSuggestionTapped(suggestion)
+                    },
+                    onFill = { suggestion -> viewModel.onQueryChanged("$suggestion ") },
+                )
+            } else {
+                SuggestionsState(
+                    suggestions = state.suggestions,
+                    onSuggestionTap = { suggestion ->
+                        dismissKeyboard()
+                        viewModel.onSuggestionTapped(suggestion)
+                    },
+                )
+            }
             state.results.isEmpty() && state.errorMessage != null -> ErrorState(state.errorMessage!!, onRetry = viewModel::retry)
             // Only claim "no results" when every category genuinely came back
             // empty. If a category actually *failed*, fall through to the tab
@@ -219,20 +233,27 @@ fun SearchScreen(
                 state.playlists.isEmpty() && state.hasSearched &&
                 state.albumsError == null && state.playlistsError == null && state.artistsError == null -> NoResultsState()
             else -> {
-                GlassTabRow(
-                    items = SearchResultTab.entries,
-                    selected = selectedTab,
-                    onSelect = onSelectedTabChange,
-                    label = { tab ->
-                        val count = when (tab) {
-                            SearchResultTab.SONGS -> state.results.size
-                            SearchResultTab.ALBUMS -> state.albums.size
-                            SearchResultTab.ARTISTS -> state.artists.size
-                            SearchResultTab.PLAYLISTS -> state.playlists.size
-                        }
-                        if (count > 0) "${tab.label} ($count)" else tab.label
-                    },
-                )
+                val countFor: (SearchResultTab) -> Int = { tab ->
+                    when (tab) {
+                        SearchResultTab.SONGS -> state.results.size
+                        SearchResultTab.ALBUMS -> state.albums.size
+                        SearchResultTab.ARTISTS -> state.artists.size
+                        SearchResultTab.PLAYLISTS -> state.playlists.size
+                    }
+                }
+                if (modern) {
+                    ModernSearchFilters(selected = selectedTab, count = countFor, onSelect = onSelectedTabChange)
+                } else {
+                    GlassTabRow(
+                        items = SearchResultTab.entries,
+                        selected = selectedTab,
+                        onSelect = onSelectedTabChange,
+                        label = { tab ->
+                            val count = countFor(tab)
+                            if (count > 0) "${tab.label} ($count)" else tab.label
+                        },
+                    )
+                }
                 androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
                 // Songs/Albums/Playlists/Artists sub-tab crossfade — a
                 // plain fade (not a directional slide) since these
@@ -248,7 +269,47 @@ fun SearchScreen(
                     },
                     label = "searchResultTabContent",
                 ) { tab ->
-                    when (tab) {
+                    if (modern) when (tab) {
+                        SearchResultTab.SONGS -> ModernSongsTab(
+                            results = state.results,
+                            isRefreshing = state.isSearching,
+                            onPlayTrack = handlePlayTrack,
+                            onLoadMore = { viewModel.loadMore(SearchResultTab.SONGS) },
+                            isLoadingMore = state.isLoadingMoreSongs,
+                        )
+                        SearchResultTab.ALBUMS -> if (state.albums.isEmpty() && state.albumsError != null) {
+                            ErrorState(state.albumsError!!, onRetry = viewModel::retry)
+                        } else {
+                            ModernCollectionGrid(
+                                items = state.albums,
+                                isAlbum = true,
+                                onOpen = handleOpenAlbum,
+                                onLoadMore = { viewModel.loadMore(SearchResultTab.ALBUMS) },
+                                isLoadingMore = state.isLoadingMoreAlbums,
+                            )
+                        }
+                        SearchResultTab.PLAYLISTS -> if (state.playlists.isEmpty() && state.playlistsError != null) {
+                            ErrorState(state.playlistsError!!, onRetry = viewModel::retry)
+                        } else {
+                            ModernCollectionGrid(
+                                items = state.playlists,
+                                isAlbum = false,
+                                onOpen = handleOpenAlbum,
+                                onLoadMore = { viewModel.loadMore(SearchResultTab.PLAYLISTS) },
+                                isLoadingMore = state.isLoadingMorePlaylists,
+                            )
+                        }
+                        SearchResultTab.ARTISTS -> if (state.artists.isEmpty() && state.artistsError != null) {
+                            ErrorState(state.artistsError!!, onRetry = viewModel::retry)
+                        } else {
+                            ModernArtistGrid(
+                                items = state.artists,
+                                onOpen = handleOpenArtist,
+                                onLoadMore = { viewModel.loadMore(SearchResultTab.ARTISTS) },
+                                isLoadingMore = state.isLoadingMoreArtists,
+                            )
+                        }
+                    } else when (tab) {
                         SearchResultTab.SONGS -> ResultsList(
                             results = state.results,
                             isRefreshing = state.isSearching,

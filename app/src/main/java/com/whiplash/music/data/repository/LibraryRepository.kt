@@ -229,6 +229,10 @@ class LibraryRepository(
         }
     }
 
+    /** Ids of every playlist that holds the track [trackId]. */
+    fun observePlaylistIdsContaining(trackId: String): Flow<Set<Long>> =
+        playlistDao.observePlaylistIdsContaining(trackId).map { it.toSet() }
+
     /** Pinned playlists first (in the order they were pinned), then the rest by last change. */
     fun observePlaylists(): Flow<List<Playlist>> = playlistDao.observeAll().map { entities ->
         com.whiplash.music.domain.model.orderPlaylists(

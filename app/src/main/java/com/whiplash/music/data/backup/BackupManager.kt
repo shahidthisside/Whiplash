@@ -333,6 +333,7 @@ class BackupManager(
                         put("exploreEnabled", settingsRepository.exploreEnabled.first())
                         put("replayEnabled", settingsRepository.replayEnabled.first())
                         put("modernLibraryPages", settingsRepository.modernLibraryPages.first())
+                        put("modernSearch", settingsRepository.modernSearch.first())
                         put("playerHeroArtwork", settingsRepository.playerHeroArtwork.first())
                         put("perNetworkQualityEnabled", settingsRepository.perNetworkQualityEnabled.first())
                         put("audioQualityWifi", settingsRepository.audioQualityWifi.first().name)
@@ -477,6 +478,9 @@ class BackupManager(
                     }
                     if (s.has("modernLibraryPages")) {
                         runCatching { settingsRepository.setModernLibraryPages(s.getBoolean("modernLibraryPages")) }
+                    }
+                    if (s.has("modernSearch")) {
+                        runCatching { settingsRepository.setModernSearch(s.getBoolean("modernSearch")) }
                     }
                     if (s.has("replayEnabled")) {
                         runCatching { settingsRepository.setReplayEnabled(s.getBoolean("replayEnabled")) }

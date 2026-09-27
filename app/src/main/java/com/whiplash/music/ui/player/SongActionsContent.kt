@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.LibraryAdd
+import androidx.compose.material.icons.filled.LibraryAddCheck
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.filled.Radio
@@ -75,6 +77,8 @@ fun SongActionsContent(
     onRemoveDownload: (() -> Unit)? = null,
 ) {
     val haptic = LocalHapticFeedback.current
+    val live = rememberSongLibraryState(item)
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? com.whiplash.music.WhiplashApplication
     Column {
         Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceSm),
@@ -116,9 +120,20 @@ fun SongActionsContent(
                 onClick = onStartRadio,
             )
         }
+        // Outside a playlist this says where the song already is ("Saved in
+        // Chill"); the picker it opens ticks those playlists and a tap on a
+        // ticked one takes the song out again.
+        val saved = onRemoveFromPlaylist == null && live.inPlaylists.isNotEmpty()
         SongActionRow(
-            icon = { Icon(Icons.Filled.LibraryAdd, contentDescription = null, tint = WhiplashColors.textPrimary) },
+            icon = {
+                Icon(
+                    if (saved) Icons.Filled.LibraryAddCheck else Icons.Filled.LibraryAdd,
+                    contentDescription = null,
+                    tint = if (saved) WhiplashColors.accent else WhiplashColors.textPrimary,
+                )
+            },
             label = if (onRemoveFromPlaylist != null) "Remove from playlist" else "Add to playlist",
+            subtitle = if (onRemoveFromPlaylist != null) null else inPlaylistsSubtitle(live.inPlaylists),
             onClick = onRemoveFromPlaylist ?: onAddToPlaylist,
         )
         if (onMoveToOtherPlaylist != null) {
@@ -135,7 +150,19 @@ fun SongActionsContent(
                 onClick = onCopyToOtherPlaylist,
             )
         }
-        if (onDownload != null) {
+        if (live.downloading && app != null) {
+            // Download → Cancel download → Remove download, following the
+            // song's real state. Cancelling keeps the menu open so the row
+            // turns straight back into "Download".
+            SongActionRow(
+                icon = { Icon(Icons.Filled.Close, contentDescription = null, tint = WhiplashColors.textPrimary) },
+                label = "Cancel download",
+                onClick = {
+                    app.downloadManager.cancelDownload(item.id)
+                    com.whiplash.music.ui.common.ToastController.show("Download cancelled")
+                },
+            )
+        } else if (onDownload != null) {
             SongActionRow(
                 icon = {
                     Icon(
@@ -218,7 +245,7 @@ fun SongActionsContent(
 }
 
 @Composable
-private fun SongActionRow(icon: @Composable () -> Unit, label: String, onClick: () -> Unit) {
+private fun SongActionRow(icon: @Composable () -> Unit, label: String, onClick: () -> Unit, subtitle: String? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -227,11 +254,21 @@ private fun SongActionRow(icon: @Composable () -> Unit, label: String, onClick: 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         icon()
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = WhiplashColors.textPrimary,
-            modifier = Modifier.padding(start = GlassTokens.spaceMd),
-        )
+        Column(modifier = Modifier.padding(start = GlassTokens.spaceMd)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = WhiplashColors.textPrimary,
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = WhiplashColors.accent,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }

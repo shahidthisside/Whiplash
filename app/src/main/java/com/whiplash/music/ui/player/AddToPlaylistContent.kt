@@ -9,6 +9,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import kotlinx.coroutines.launch
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -36,7 +40,14 @@ fun AddToPlaylistContent(
     // just be a redundant, confusing entry point rather than a real
     // additional capability.
     showCreateNew: Boolean = true,
+    // The song being saved. When given, playlists that already hold it
+    // show a tick, and tapping one of those takes the song out again
+    // (the sheet stays open so the tick clears in place).
+    item: com.whiplash.music.domain.model.PlayableItem? = null,
 ) {
+    val live = rememberSongLibraryState(item)
+    val containing = if (item != null) live.inPlaylists.map { it.id }.toSet() else emptySet()
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? com.whiplash.music.WhiplashApplication
     Column {
         Text(
             text = title,
@@ -44,6 +55,15 @@ fun AddToPlaylistContent(
             color = WhiplashColors.textPrimary,
             modifier = Modifier.padding(bottom = GlassTokens.spaceSm),
         )
+
+        if (containing.isNotEmpty()) {
+            Text(
+                text = "Tap a playlist to add this song. Ticked ones already have it; tap one to take it out.",
+                style = MaterialTheme.typography.bodySmall,
+                color = WhiplashColors.textSecondary,
+                modifier = Modifier.padding(bottom = GlassTokens.spaceSm),
+            )
+        }
 
         if (showCreateNew) {
             Row(
@@ -73,14 +93,29 @@ fun AddToPlaylistContent(
         }
 
         playlists.forEach { playlist ->
+            val isIn = playlist.id in containing
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = { onSelectPlaylist(playlist) })
+                    .clickable(onClick = {
+                        if (isIn && item != null && app != null) {
+                            com.whiplash.music.ui.common.UiActionScope.scope.launch {
+                                app.libraryRepository.removeFromPlaylist(playlist.id, item)
+                                com.whiplash.music.ui.common.ToastController.show("Removed from ${playlist.name}")
+                            }
+                        } else {
+                            onSelectPlaylist(playlist)
+                        }
+                    })
+                    .semantics { stateDescription = if (isIn) "Saved here, tap to remove" else "Not saved here" }
                     .padding(vertical = GlassTokens.spaceSm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null, tint = WhiplashColors.textPrimary)
+                Icon(
+                    if (isIn) Icons.Filled.CheckCircle else Icons.AutoMirrored.Filled.PlaylistAdd,
+                    contentDescription = null,
+                    tint = if (isIn) WhiplashColors.accent else WhiplashColors.textPrimary,
+                )
                 Text(
                     text = playlist.name,
                     style = MaterialTheme.typography.bodyLarge,
