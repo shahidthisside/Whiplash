@@ -108,20 +108,6 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setQuickPicksGridCount(count) }
     }
 
-    val modernLibraryPages: StateFlow<Boolean> = repository.modernLibraryPages
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
-
-    fun setModernLibraryPages(enabled: Boolean) {
-        viewModelScope.launch { repository.setModernLibraryPages(enabled) }
-    }
-
-    val modernSearch: StateFlow<Boolean> = repository.modernSearch
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
-
-    fun setModernSearch(enabled: Boolean) {
-        viewModelScope.launch { repository.setModernSearch(enabled) }
-    }
-
     val replayEnabled: StateFlow<Boolean> = repository.replayEnabled
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 

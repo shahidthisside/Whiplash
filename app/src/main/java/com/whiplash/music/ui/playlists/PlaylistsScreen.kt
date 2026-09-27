@@ -105,69 +105,21 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
     // 4.4: cover grid (default) or compact list; persisted and in backup.
     val listView by app.settingsRepository.playlistsListView.collectAsState(initial = false)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val modern by app.settingsRepository.modernLibraryPages.collectAsState(initial = true)
 
     Column(modifier = Modifier.fillMaxSize()) {
-        if (modern) {
-            ModernPlaylistsActions(
-                isImporting = isImporting,
-                showLayoutToggle = playlists.isNotEmpty(),
-                listView = listView,
-                onNew = { showCreateDialog = true },
-                onImport = { showImportDialog = true },
-                onToggleLayout = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    scope.launch { app.settingsRepository.setPlaylistsListView(!listView) }
-                },
-            )
-        } else Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = GlassTokens.spaceMd, vertical = GlassTokens.spaceSm),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(text = "Playlists", style = MaterialTheme.typography.titleMedium, color = WhiplashColors.textPrimary)
-            Row {
-                if (playlists.isNotEmpty()) {
-                    PlainIconButton(
-                        contentDescription = if (listView) "Show playlists as grid" else "Show playlists as list",
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            scope.launch { app.settingsRepository.setPlaylistsListView(!listView) }
-                        },
-                        size = 48.dp,
-                    ) {
-                        Icon(
-                            if (listView) Icons.Filled.GridView else Icons.AutoMirrored.Filled.ViewList,
-                            contentDescription = null,
-                            tint = WhiplashColors.textPrimary,
-                        )
-                    }
-                }
-                // Import from a YouTube/YouTube Music playlist link —
-                // disabled (rather than hidden) while an import is
-                // already running so a second tap can't stack another
-                // import on top of the one in progress, matching the
-                // same enabled=!isRefreshing pattern Home's Quick Picks
-                // refresh button already uses.
-                PlainIconButton(
-                    contentDescription = "Import playlist from YouTube",
-                    onClick = { showImportDialog = true },
-                    size = 48.dp,
-                    enabled = !isImporting,
-                ) {
-                    if (isImporting) {
-                        CircularProgressIndicator(color = WhiplashColors.accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-                    } else {
-                        Icon(Icons.Filled.Link, contentDescription = null, tint = WhiplashColors.textPrimary)
-                    }
-                }
-                PlainIconButton(contentDescription = "New playlist", onClick = { showCreateDialog = true }, size = 48.dp) {
-                    Icon(Icons.Filled.Add, contentDescription = null, tint = WhiplashColors.textPrimary)
-                }
-            }
-        }
+        ModernPlaylistsActions(
+            isImporting = isImporting,
+            showLayoutToggle = playlists.isNotEmpty(),
+            listView = listView,
+            onNew = { showCreateDialog = true },
+            onImport = { showImportDialog = true },
+            onToggleLayout = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                scope.launch { app.settingsRepository.setPlaylistsListView(!listView) }
+            },
+        )
 
-        if (modern && playlists.isEmpty()) {
+        if (playlists.isEmpty()) {
             com.whiplash.music.ui.theme.CollectionEmptyState(
                 icon = Icons.AutoMirrored.Filled.QueueMusic,
                 title = "No playlists yet",
@@ -178,14 +130,6 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                     com.whiplash.music.ui.theme.CollectionPillButton("New playlist", Icons.Filled.Add, { showCreateDialog = true }, primary = true)
                     com.whiplash.music.ui.theme.CollectionPillButton("Import", Icons.Filled.Link, { showImportDialog = true }, primary = false, enabled = !isImporting)
                 }
-            }
-        } else if (playlists.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd), contentAlignment = Alignment.Center) {
-                Text(
-                    text = "No playlists yet. Tap + to create one.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = WhiplashColors.textSecondary,
-                )
             }
         } else if (!listView) {
             androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
@@ -200,7 +144,6 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
             ) {
                 gridItems(playlists, key = { it.id }) { playlist ->
                     PlaylistGridTile(
-                        modern = modern,
                         playlist = playlist,
                         onClick = { onOpenPlaylist(playlist) },
                         onLongClick = {
@@ -232,13 +175,13 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                                 tracks = tracks,
                                 modifier = Modifier.size(56.dp),
                                 cornerRadius = WhiplashRadius.small,
-                                emptyTile = if (modern) { m ->
+                                emptyTile = { m ->
                                     com.whiplash.music.ui.theme.GradientIconCover(
                                         Icons.AutoMirrored.Filled.QueueMusic,
                                         com.whiplash.music.ui.theme.tintForName(playlist.name),
                                         m,
                                     )
-                                } else null,
+                                },
                             )
                         },
                         trailing = {
@@ -543,7 +486,6 @@ private fun playlistSubtitle(playlist: Playlist, count: Int?): String? {
 @Composable
 private fun PlaylistGridTile(
     playlist: Playlist,
-    modern: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -563,7 +505,7 @@ private fun PlaylistGridTile(
                 modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                 cornerRadius = WhiplashRadius.medium,
                 // An empty playlist gets its own colour and initial rather than a grey tile.
-                emptyTile = if (modern) { m -> NamedPlaylistTile(playlist.name, m) } else null,
+                emptyTile = { m -> NamedPlaylistTile(playlist.name, m) },
             )
             if (playlist.pinned) {
                 Box(

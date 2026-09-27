@@ -132,8 +132,6 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val homeShelvesEnabled by viewModel.homeShelvesEnabled.collectAsState()
     val exploreEnabled by viewModel.exploreEnabled.collectAsState()
     val replayEnabled by viewModel.replayEnabled.collectAsState()
-    val modernLibraryPages by viewModel.modernLibraryPages.collectAsState()
-    val modernSearch by viewModel.modernSearch.collectAsState()
     val quickPicksGridCount by viewModel.quickPicksGridCount.collectAsState()
     val lyricsProviderHealth by viewModel.lyricsProviderHealth.collectAsState()
     val playerHeroArtwork by viewModel.playerHeroArtwork.collectAsState()
@@ -717,30 +715,6 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     subtitle = "Count what you play for a monthly recap of your top songs and artists, opened from Home. Counting stays on this device.",
                                     checked = replayEnabled,
                                     onCheckedChange = viewModel::setReplayEnabled,
-                                )
-                            }
-                        }
-
-                        if (shown(SettingEntry.MODERN_LIBRARY)) {
-                            SettingItem(divider = rows.next()) {
-                                SettingToggleRow(
-                                    title = "Modern library pages",
-                                    icon = Icons.Filled.LibraryMusic,
-                                    subtitle = "Cover headers, Play and Shuffle buttons, sorting, and album and artist pages in Library, Favorites and Playlists.",
-                                    checked = modernLibraryPages,
-                                    onCheckedChange = viewModel::setModernLibraryPages,
-                                )
-                            }
-                        }
-
-                        if (shown(SettingEntry.MODERN_SEARCH)) {
-                            SettingItem(divider = rows.next()) {
-                                SettingToggleRow(
-                                    title = "Modern search results",
-                                    icon = Icons.Filled.Search,
-                                    subtitle = "A top result card, a sliding category bar, cover grids, and menus on albums and playlists.",
-                                    checked = modernSearch,
-                                    onCheckedChange = viewModel::setModernSearch,
                                 )
                             }
                         }

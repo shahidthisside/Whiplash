@@ -228,28 +228,6 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[REPLAY_KEY] = enabled }
     }
 
-    /**
-     * Modern Library, Favorites and Playlists pages (hero headers, pill
-     * buttons, sort, album/artist pages). Off shows the previous pages.
-     * Default on.
-     */
-    val modernLibraryPages: Flow<Boolean> = dataStore.data.map { prefs -> prefs[MODERN_LIBRARY_KEY] ?: true }
-
-    suspend fun setModernLibraryPages(enabled: Boolean) {
-        dataStore.edit { prefs -> prefs[MODERN_LIBRARY_KEY] = enabled }
-    }
-
-    /**
-     * Modern Search results: top result card, sliding category bar, album,
-     * playlist and artist grids. Off shows the previous plain lists.
-     * Default on.
-     */
-    val modernSearch: Flow<Boolean> = dataStore.data.map { prefs -> prefs[MODERN_SEARCH_KEY] ?: true }
-
-    suspend fun setModernSearch(enabled: Boolean) {
-        dataStore.edit { prefs -> prefs[MODERN_SEARCH_KEY] = enabled }
-    }
-
     /** Explore (new releases, charts, moods & genres) on Search's start screen. Default on. */
     val exploreEnabled: Flow<Boolean> = dataStore.data.map { prefs -> prefs[EXPLORE_KEY] ?: true }
 
@@ -422,8 +400,6 @@ class SettingsRepository(context: Context) {
         val PLAYER_LYRIC_STRIP_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_lyric_strip")
         val EXPLORE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("explore_enabled")
         val REPLAY_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("replay_enabled")
-        val MODERN_LIBRARY_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("library_modern")
-        val MODERN_SEARCH_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("search_modern")
         val HOME_SHELVES_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("home_shelves_enabled")
         val PLAYLISTS_LIST_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("playlists_list_view")
         val QUICK_PICKS_GRID_COUNT_KEY: Preferences.Key<Int> = androidx.datastore.preferences.core.intPreferencesKey("quick_picks_grid_count")

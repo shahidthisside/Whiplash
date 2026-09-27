@@ -102,7 +102,7 @@ import com.whiplash.music.ui.theme.tintForName
 import kotlinx.coroutines.launch
 
 /*
- * The "Modern search results" look (Settings → Appearance, on by default).
+ * The Search results look.
  * Nothing here adds work to a search itself: results arrive exactly as
  * before, and the only extra fetches are larger cover images for the top
  * result card and the grids, loaded in the background like any artwork.

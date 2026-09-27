@@ -45,12 +45,7 @@ fun FavoritesScreen(
     val app = context.applicationContext as WhiplashApplication
     val viewModel: FavoritesViewModel = viewModel(factory = FavoritesViewModelFactory(app.libraryRepository))
     val favorites by viewModel.favorites.collectAsState()
-    val modern by app.settingsRepository.modernLibraryPages.collectAsState(initial = true)
-    if (modern) {
-        ModernFavorites(favorites, onPlayQueue)
-    } else {
-        ClassicFavorites(favorites, onPlayQueue, onBack)
-    }
+    ModernFavorites(favorites, onPlayQueue)
 }
 
 /**
@@ -93,70 +88,3 @@ private fun ModernFavorites(
 
 /** Pink used for the Liked songs page. */
 internal val LIKED_TINT = androidx.compose.ui.graphics.Color(0xFFE0648B)
-
-/** The previous Favorites page, kept for the "Modern library pages" toggle's off state. */
-@androidx.compose.material3.ExperimentalMaterial3Api
-@Composable
-private fun ClassicFavorites(
-    favorites: List<PlayableItem>,
-    onPlayQueue: (List<PlayableItem>, Int) -> Unit,
-    onBack: () -> Unit,
-) {
-
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
-        // Header row renders in both the populated and empty states, so the
-        // Back affordance never disappears just because there is nothing to
-        // show yet — the previous early return for the empty case skipped this
-        // row entirely.
-        //
-        // Back mirrors what the system back gesture already does from any
-        // non-Home tab, and puts this screen's header in the same shape as the
-        // playlist detail header: navigation on the left, actions on the right.
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = GlassTokens.spaceSm, bottom = GlassTokens.spaceSm),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            PlainIconButton(contentDescription = "Back", onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = null,
-                    tint = WhiplashColors.textPrimary,
-                )
-            }
-            if (favorites.isNotEmpty()) {
-                // Same reasoning as the playlist detail header: a PlainIconButton
-                // is a 48dp box around a 24dp icon and already carries 12dp of
-                // padding per side, so extra spacing here pushed the icons 32dp
-                // apart. Butted together they sit the standard 24dp apart, and
-                // these two rows stay visually identical to each other.
-                Row {
-                    PlainIconButton(contentDescription = "Shuffle play", onClick = { onPlayQueue(favorites.shuffled(), 0) }) {
-                        Icon(Icons.Filled.Shuffle, contentDescription = null, tint = WhiplashColors.textPrimary)
-                    }
-                    PlainIconButton(contentDescription = "Play all", onClick = { onPlayQueue(favorites, 0) }) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = WhiplashColors.textPrimary)
-                    }
-                }
-            }
-        }
-
-        if (favorites.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = "No favorites yet. Long-press any song to add it.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = WhiplashColors.textSecondary,
-                    modifier = Modifier.padding(GlassTokens.spaceLg),
-                )
-            }
-            return
-        }
-
-        PlayableItemsList(
-            items = favorites,
-            onPlayQueue = onPlayQueue,
-            modifier = Modifier.fillMaxSize(),
-        )
-    }
-}

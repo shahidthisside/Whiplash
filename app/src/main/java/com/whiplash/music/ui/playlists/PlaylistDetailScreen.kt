@@ -57,71 +57,7 @@ fun PlaylistDetailScreen(
         factory = PlaylistDetailViewModelFactory(app.libraryRepository, playlist.id),
     )
     val tracks by viewModel.tracks.collectAsState()
-    val modern by app.settingsRepository.modernLibraryPages.collectAsState(initial = true)
-    if (modern) {
-        ModernPlaylistDetail(playlist, tracks, onBack, onPlayQueue)
-        return
-    }
-
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = GlassTokens.spaceSm, bottom = GlassTokens.spaceSm, end = GlassTokens.spaceMd),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            PlainIconButton(contentDescription = "Back", onClick = onBack) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = WhiplashColors.textPrimary)
-            }
-            Text(
-                text = playlist.name,
-                style = MaterialTheme.typography.titleMedium,
-                color = WhiplashColors.textPrimary,
-                // Long names — common on imported playlists, whose titles come
-                // straight from YouTube and often run to a full sentence — used
-                // to wrap here and push this header to two or three lines,
-                // shoving the Shuffle/Play/Download buttons around with them.
-                // The weight below already constrains the width, so all that
-                // was missing was permission to clip.
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = GlassTokens.spaceSm).weight(1f),
-            )
-            if (tracks.isNotEmpty()) {
-                // No extra spacing between these. Each PlainIconButton is a
-                // 48dp box around a 24dp icon, so it already carries 12dp of
-                // padding on every side; adding 8dp on top pushed adjacent
-                // icons 32dp apart and left the row looking gappy and
-                // disconnected. Butting the boxes together gives the 24dp
-                // icon-to-icon gap that a standard app-bar action row uses,
-                // with the touch targets still a full 48dp and still not
-                // overlapping.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    PlainIconButton(contentDescription = "Shuffle play", onClick = { onPlayQueue(tracks.shuffled(), 0) }) {
-                        Icon(Icons.Filled.Shuffle, contentDescription = null, tint = WhiplashColors.textPrimary)
-                    }
-                    PlainIconButton(contentDescription = "Play all", onClick = { onPlayQueue(tracks, 0) }) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = WhiplashColors.textPrimary)
-                    }
-                    com.whiplash.music.ui.common.BatchDownloadIconButton(batchName = playlist.name, tracks = tracks)
-                }
-            }
-        }
-
-        if (tracks.isEmpty()) {
-            Text(
-                text = "No tracks yet. Add songs via the long-press menu.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = WhiplashColors.textSecondary,
-                modifier = Modifier.padding(GlassTokens.spaceLg),
-            )
-        } else {
-            PlayableItemsList(
-                items = tracks,
-                onPlayQueue = onPlayQueue,
-                modifier = Modifier.fillMaxSize(),
-                playlistContext = com.whiplash.music.ui.player.PlaylistContext(playlist.id, playlist.name),
-            )
-        }
-    }
+    ModernPlaylistDetail(playlist, tracks, onBack, onPlayQueue)
 }
 
 

@@ -104,8 +104,6 @@ fun SearchScreen(
     // 4.3: Settings → Explore in Search. While off, Explore isn't composed, so it fetches nothing.
     val exploreEnabled by app.settingsRepository.exploreEnabled.collectAsState(initial = false)
     val trendingArtists by viewModel.trendingArtists.collectAsState()
-    // Settings → Modern search results. Off draws the previous plain lists.
-    val modern by app.settingsRepository.modernSearch.collectAsState(initial = true)
     val trendingArtistResults by viewModel.trendingArtistResults.collectAsState()
     val trendingRefreshing by viewModel.isRefreshingTrending.collectAsState()
     // Same activity-scoped instance ExploreSection uses. Only created while
@@ -205,25 +203,15 @@ fun SearchScreen(
             // actually visible.
             state.isSearching && state.results.isEmpty() && state.albums.isEmpty() &&
                 state.artists.isEmpty() && state.playlists.isEmpty() -> LoadingState()
-            !state.hasSearched -> if (modern) {
-                ModernSuggestions(
-                    query = state.query,
-                    suggestions = state.suggestions,
-                    onSuggestionTap = { suggestion ->
-                        dismissKeyboard()
-                        viewModel.onSuggestionTapped(suggestion)
-                    },
-                    onFill = { suggestion -> viewModel.onQueryChanged("$suggestion ") },
-                )
-            } else {
-                SuggestionsState(
-                    suggestions = state.suggestions,
-                    onSuggestionTap = { suggestion ->
-                        dismissKeyboard()
-                        viewModel.onSuggestionTapped(suggestion)
-                    },
-                )
-            }
+            !state.hasSearched -> ModernSuggestions(
+                query = state.query,
+                suggestions = state.suggestions,
+                onSuggestionTap = { suggestion ->
+                    dismissKeyboard()
+                    viewModel.onSuggestionTapped(suggestion)
+                },
+                onFill = { suggestion -> viewModel.onQueryChanged("$suggestion ") },
+            )
             state.results.isEmpty() && state.errorMessage != null -> ErrorState(state.errorMessage!!, onRetry = viewModel::retry)
             // Only claim "no results" when every category genuinely came back
             // empty. If a category actually *failed*, fall through to the tab
@@ -241,19 +229,7 @@ fun SearchScreen(
                         SearchResultTab.PLAYLISTS -> state.playlists.size
                     }
                 }
-                if (modern) {
-                    ModernSearchFilters(selected = selectedTab, count = countFor, onSelect = onSelectedTabChange)
-                } else {
-                    GlassTabRow(
-                        items = SearchResultTab.entries,
-                        selected = selectedTab,
-                        onSelect = onSelectedTabChange,
-                        label = { tab ->
-                            val count = countFor(tab)
-                            if (count > 0) "${tab.label} ($count)" else tab.label
-                        },
-                    )
-                }
+                ModernSearchFilters(selected = selectedTab, count = countFor, onSelect = onSelectedTabChange)
                 androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
                 // Songs/Albums/Playlists/Artists sub-tab crossfade — a
                 // plain fade (not a directional slide) since these
@@ -269,7 +245,7 @@ fun SearchScreen(
                     },
                     label = "searchResultTabContent",
                 ) { tab ->
-                    if (modern) when (tab) {
+                    when (tab) {
                         SearchResultTab.SONGS -> ModernSongsTab(
                             results = state.results,
                             isRefreshing = state.isSearching,
@@ -309,51 +285,6 @@ fun SearchScreen(
                                 isLoadingMore = state.isLoadingMoreArtists,
                             )
                         }
-                    } else when (tab) {
-                        SearchResultTab.SONGS -> ResultsList(
-                            results = state.results,
-                            isRefreshing = state.isSearching,
-                            onPlayTrack = handlePlayTrack,
-                            onLoadMore = { viewModel.loadMore(SearchResultTab.SONGS) },
-                            isLoadingMore = state.isLoadingMoreSongs,
-                        )
-                        // Each secondary tab now shows a real, retryable
-                        // error when its own lookup failed and it has nothing
-                        // to show, instead of rendering an empty list that
-                        // looked exactly like a genuine "no results" (see
-                        // SearchUiState.albumsError).
-                        SearchResultTab.ALBUMS -> if (state.albums.isEmpty() && state.albumsError != null) {
-                            ErrorState(state.albumsError!!, onRetry = viewModel::retry)
-                        } else {
-                            PlaylistResultsList(
-                                items = state.albums,
-                                isAlbum = true,
-                                onClick = handleOpenAlbum,
-                                onLoadMore = { viewModel.loadMore(SearchResultTab.ALBUMS) },
-                                isLoadingMore = state.isLoadingMoreAlbums,
-                            )
-                        }
-                        SearchResultTab.PLAYLISTS -> if (state.playlists.isEmpty() && state.playlistsError != null) {
-                            ErrorState(state.playlistsError!!, onRetry = viewModel::retry)
-                        } else {
-                            PlaylistResultsList(
-                                items = state.playlists,
-                                isAlbum = false,
-                                onClick = handleOpenAlbum,
-                                onLoadMore = { viewModel.loadMore(SearchResultTab.PLAYLISTS) },
-                                isLoadingMore = state.isLoadingMorePlaylists,
-                            )
-                        }
-                        SearchResultTab.ARTISTS -> if (state.artists.isEmpty() && state.artistsError != null) {
-                            ErrorState(state.artistsError!!, onRetry = viewModel::retry)
-                        } else {
-                            ArtistResultsList(
-                                items = state.artists,
-                                onClick = handleOpenArtist,
-                                onLoadMore = { viewModel.loadMore(SearchResultTab.ARTISTS) },
-                                isLoadingMore = state.isLoadingMoreArtists,
-                            )
-                        }
                     }
                 }
             }
@@ -370,184 +301,6 @@ fun SearchScreen(
             },
             onDismiss = { showClearSearchHistoryConfirm = false },
         )
-    }
-}
-
-@androidx.compose.material3.ExperimentalMaterial3Api
-@Composable
-private fun ResultsList(
-    results: List<PlayableItem.YoutubeTrack>,
-    isRefreshing: Boolean,
-    onPlayTrack: (PlayableItem.YoutubeTrack) -> Unit,
-    onLoadMore: () -> Unit,
-    isLoadingMore: Boolean,
-) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        if (isRefreshing) {
-            androidx.compose.foundation.layout.Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.padding(GlassTokens.spaceSm).size(20.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    strokeWidth = 2.dp,
-                )
-            }
-        }
-        if (results.isEmpty()) {
-            EmptyTabState("No songs found")
-        } else {
-            PlayableItemsList(
-                items = results,
-                onPlayQueue = { _, index -> (results.getOrNull(index) as? PlayableItem.YoutubeTrack)?.let(onPlayTrack) },
-                modifier = Modifier.fillMaxSize(),
-                onLoadMore = onLoadMore,
-                isLoadingMore = isLoadingMore,
-            )
-        }
-    }
-}
-
-@Composable
-private fun PlaylistResultsList(
-    items: List<YoutubePlaylistResult>,
-    isAlbum: Boolean,
-    onClick: (YoutubePlaylistResult) -> Unit,
-    onLoadMore: () -> Unit,
-    isLoadingMore: Boolean,
-) {
-    if (items.isEmpty()) {
-        EmptyTabState(if (isAlbum) "No albums found" else "No playlists found")
-        return
-    }
-    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    androidx.compose.runtime.LaunchedEffect(listState, isLoadingMore, items.size) {
-            androidx.compose.runtime.snapshotFlow {
-                Triple(listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index, isLoadingMore, items.size)
-            }.collect { (lastVisibleIndex, currentlyLoadingMore, _) ->
-                    if (lastVisibleIndex != null && !currentlyLoadingMore && lastVisibleIndex >= items.lastIndex - LOAD_MORE_THRESHOLD) {
-                        onLoadMore()
-                    }
-                }
-        }
-    LazyColumn(
-        state = listState,
-        verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
-    ) {
-        items(items, key = { it.url }) { result ->
-            androidx.compose.foundation.layout.Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onClick(result) }
-                    .padding(vertical = GlassTokens.spaceSm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                GlassArtworkThumbnail(artworkUri = result.artworkUrl)
-                Column(modifier = Modifier.padding(start = GlassTokens.spaceSm).weight(1f)) {
-                    Text(
-                        text = result.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = WhiplashColors.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    val subtitle = listOfNotNull(
-                        result.uploaderName,
-                        result.trackCount?.let { "$it songs" },
-                    ).joinToString(" · ")
-                    if (subtitle.isNotBlank()) {
-                        Text(
-                            text = subtitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = WhiplashColors.textSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-        }
-        if (isLoadingMore) {
-            item(key = "__load_more_footer__") {
-                Box(modifier = Modifier.fillMaxWidth().padding(GlassTokens.spaceMd), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = WhiplashColors.accent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ArtistResultsList(
-    items: List<YoutubeArtistResult>,
-    onClick: (YoutubeArtistResult) -> Unit,
-    onLoadMore: () -> Unit,
-    isLoadingMore: Boolean,
-) {
-    if (items.isEmpty()) {
-        EmptyTabState("No artists found")
-        return
-    }
-    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    androidx.compose.runtime.LaunchedEffect(listState, isLoadingMore, items.size) {
-            androidx.compose.runtime.snapshotFlow {
-                Triple(listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index, isLoadingMore, items.size)
-            }.collect { (lastVisibleIndex, currentlyLoadingMore, _) ->
-                    if (lastVisibleIndex != null && !currentlyLoadingMore && lastVisibleIndex >= items.lastIndex - LOAD_MORE_THRESHOLD) {
-                        onLoadMore()
-                    }
-                }
-        }
-    LazyColumn(
-        state = listState,
-        verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
-    ) {
-        items(items, key = { it.channelUrl }) { result ->
-            androidx.compose.foundation.layout.Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onClick(result) }
-                    .padding(vertical = GlassTokens.spaceSm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                GlassArtworkThumbnail(artworkUri = result.artworkUrl, shape = CircleShape)
-                Column(modifier = Modifier.padding(start = GlassTokens.spaceSm).weight(1f)) {
-                    Text(
-                        text = result.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = WhiplashColors.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    result.subscriberCount?.let { count ->
-                        Text(
-                            text = "${com.whiplash.music.ui.common.formatCompactCount(count)} subscribers",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = WhiplashColors.textSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-        }
-        if (isLoadingMore) {
-            item(key = "__load_more_footer__") {
-                Box(modifier = Modifier.fillMaxWidth().padding(GlassTokens.spaceMd), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = WhiplashColors.accent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmptyTabState(message: String) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text = message, style = MaterialTheme.typography.bodyMedium, color = WhiplashColors.textSecondary)
     }
 }
 
@@ -875,49 +628,6 @@ private fun LoadingState() {
     }
 }
 
-
-/**
- * YouTube Music/Spotify-style live autocomplete suggestions — the only
- * thing shown while the user is typing but hasn't yet submitted a real
- * search (tapped a suggestion/recent search, or pressed the keyboard's
- * search action). Renders nothing while the lightweight suggestions
- * lookup for the current text is still in flight (it settles in ~150ms
- * plus one network round trip — genuinely too fast to warrant a loading
- * skeleton, which is reserved for the real, much longer multi-category
- * search once a query is actually submitted) rather than a stray flash
- * of an unrelated previous state.
- */
-@Composable
-private fun SuggestionsState(suggestions: List<String>, onSuggestionTap: (String) -> Unit) {
-    if (suggestions.isEmpty()) return
-    Column(modifier = Modifier.fillMaxSize()) {
-        suggestions.forEach { suggestion ->
-            androidx.compose.foundation.layout.Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onSuggestionTap(suggestion) }
-                    .padding(vertical = GlassTokens.spaceSm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    Icons.Filled.Search,
-                    contentDescription = null,
-                    tint = WhiplashColors.textTertiary,
-                    modifier = Modifier.size(20.dp),
-                )
-                Text(
-                    text = suggestion,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = WhiplashColors.textPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(start = GlassTokens.spaceMd),
-                )
-            }
-        }
-    }
-}
-
 @Composable
 private fun NoResultsState() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -963,15 +673,6 @@ private fun ErrorState(message: String, onRetry: () -> Unit) {
         }
     }
 }
-
-/**
- * How many items from the end of a results list to start loading the
- * next page — see the matching constant/comment in PlayableItemsList.kt
- * (the Songs tab's own list) for the full rationale; kept as a separate
- * constant here since Albums/Playlists/Artists use their own local
- * LazyColumns directly in this file rather than PlayableItemsList.
- */
-private const val LOAD_MORE_THRESHOLD = 5
 
 /**
  * Wraps [content] in pull-to-refresh only while [active]; otherwise draws
