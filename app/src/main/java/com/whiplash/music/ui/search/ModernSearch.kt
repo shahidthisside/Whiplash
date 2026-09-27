@@ -413,7 +413,7 @@ internal fun ModernCollectionGrid(
             item(key = "__load_more__", span = { GridItemSpan(maxLineSpan) }) { LoadingFooter() }
         }
     }
-    SearchCollectionSheet(menuFor, onDismiss = { menuFor = null }, onOpen = onOpen)
+    CollectionMenuSheet(menuFor, onDismiss = { menuFor = null }, onOpen = onOpen)
 }
 
 private fun collectionSubtitle(r: YoutubePlaylistResult): String {
@@ -435,7 +435,8 @@ private suspend fun loadCollectionTracks(app: WhiplashApplication, url: String):
 }
 
 /**
- * Long-press / ⋮ menu for an album or playlist result.
+ * Long-press / ⋮ menu for an album or playlist (Search results, Explore
+ * and genre pages).
  *
  * Its songs start loading when the menu opens (only then — never during a
  * search), so Play and the rest start at once and the Download row can
@@ -448,7 +449,7 @@ private suspend fun loadCollectionTracks(app: WhiplashApplication, url: String):
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun SearchCollectionSheet(
+internal fun CollectionMenuSheet(
     collection: YoutubePlaylistResult?,
     onDismiss: () -> Unit,
     onOpen: (YoutubePlaylistResult) -> Unit,

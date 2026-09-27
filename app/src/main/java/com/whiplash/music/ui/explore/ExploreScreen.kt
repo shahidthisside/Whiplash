@@ -40,6 +40,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -49,7 +50,6 @@ import com.whiplash.music.domain.model.ExploreGenre
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.domain.model.YoutubePlaylistResult
 import com.whiplash.music.ui.common.ToastController
-import com.whiplash.music.ui.home.CollectionActionsContent
 import com.whiplash.music.ui.home.HomeShelfRow
 import com.whiplash.music.ui.home.HomeViewModel.ShelfItem
 import com.whiplash.music.ui.home.ShelfSkeleton
@@ -81,7 +81,7 @@ private val TILE_COLORS = listOf(
 /**
  * 4.3 Explore, shown on Search's start screen: New releases and Charts
  * shelves, then a Moods & genres grid. Tapping an album/playlist opens it;
- * long-press gives Open / Play / Shuffle / Share; a genre opens its page.
+ * long-press opens the full album/playlist menu; a genre opens its page.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -148,7 +148,7 @@ fun ExploreSection(
         }
     }
 
-    CollectionSheet(sheetCollection, onDismiss = { sheetCollection = null }, onOpen = onOpenCollection)
+    com.whiplash.music.ui.search.CollectionMenuSheet(sheetCollection, onDismiss = { sheetCollection = null }, onOpen = onOpenCollection)
 }
 
 /**
@@ -187,49 +187,6 @@ private fun GenreTile(genre: ExploreGenre, artworkUrl: String?, onClick: () -> U
             color = Color.White,
             maxLines = 2,
             modifier = Modifier.padding(start = GlassTokens.spaceMd, end = 64.dp),
-        )
-    }
-}
-
-/** Album/playlist long-press menu (Open / Play / Shuffle / Share). */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@Composable
-private fun CollectionSheet(
-    collection: YoutubePlaylistResult?,
-    onDismiss: () -> Unit,
-    onOpen: (YoutubePlaylistResult) -> Unit,
-) {
-    if (collection == null) return
-    val context = LocalContext.current
-    val app = context.applicationContext as WhiplashApplication
-    val scope = rememberCoroutineScope()
-    fun play(shuffle: Boolean) {
-        onDismiss()
-        scope.launch {
-            ToastController.show("Loading ${collection.title}…")
-            val tracks = runCatching { app.youtubeDetailProvider.getPlaylistDetail(collection.url).tracks }.getOrNull()
-            if (tracks.isNullOrEmpty()) {
-                ToastController.show("Couldn't load ${collection.title}")
-            } else {
-                app.playbackController.playQueue(if (shuffle) tracks.shuffled() else tracks, 0)
-            }
-        }
-    }
-    GlassSheet(onDismissRequest = onDismiss) {
-        CollectionActionsContent(
-            collection = collection,
-            onOpen = { onDismiss(); onOpen(collection) },
-            onPlay = { play(false) },
-            onShuffle = { play(true) },
-            onShare = {
-                onDismiss()
-                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(android.content.Intent.EXTRA_TEXT, collection.url)
-                }
-                runCatching { context.startActivity(android.content.Intent.createChooser(send, "Share ${collection.title}")) }
-                    .onFailure { ToastController.show("Couldn't open share") }
-            },
         )
     }
 }
@@ -273,21 +230,21 @@ fun GenreScreen(
         modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd),
         header = {
             Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    PlainIconButton(contentDescription = "Back", onClick = onBack, size = 48.dp) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = WhiplashColors.textPrimary)
-                    }
-                    Text(
-                        text = genre.title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = WhiplashColors.textPrimary,
-                        modifier = Modifier
-                            .padding(start = GlassTokens.spaceXs)
-                            .semantics { contentDescription = "${genre.title} page" },
-                    )
+                PlainIconButton(contentDescription = "Back", onClick = onBack, size = 48.dp) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = WhiplashColors.textPrimary)
                 }
                 val shelf = playlists
+                val heroArt = (shelf?.items?.firstOrNull() as? ShelfItem.Collection)?.collection?.artworkUrl
+                GenreHero(
+                    genre = genre,
+                    artworkUrl = heroArt,
+                    summary = listOfNotNull(
+                        songs.size.takeIf { it > 0 }?.let { if (it == 1) "1 song" else "$it songs" },
+                        shelf?.items?.size?.takeIf { it > 0 }?.let { if (it == 1) "1 playlist" else "$it playlists" },
+                    ).joinToString(" · ").ifBlank { if (isLoading) "Loading…" else "" },
+                    onPlay = if (songs.isNotEmpty()) ({ onPlayQueue(songs, 0) }) else null,
+                    onShuffle = if (songs.isNotEmpty()) ({ onPlayQueue(songs.shuffled(), 0) }) else null,
+                )
                 when {
                     shelf != null -> HomeShelfRow(
                         shelf, shelf.items,
@@ -312,32 +269,12 @@ fun GenreScreen(
                         GlassButton(text = "Retry", onClick = viewModel::load)
                     }
                 } else if (songs.isNotEmpty()) {
-                    // Same Shuffle / Play all pair as Favorites and Playlists.
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = GlassTokens.spaceSm),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "Songs",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = WhiplashColors.textPrimary,
-                            modifier = Modifier.weight(1f),
-                        )
-                        PlainIconButton(
-                            contentDescription = "Shuffle ${genre.title} songs",
-                            onClick = { onPlayQueue(songs.shuffled(), 0) },
-                            size = 48.dp,
-                        ) {
-                            Icon(Icons.Filled.Shuffle, contentDescription = null, tint = WhiplashColors.textPrimary)
-                        }
-                        PlainIconButton(
-                            contentDescription = "Play all ${genre.title} songs",
-                            onClick = { onPlayQueue(songs, 0) },
-                            size = 48.dp,
-                        ) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = WhiplashColors.textPrimary)
-                        }
-                    }
+                    Text(
+                        text = "Songs",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = WhiplashColors.textPrimary,
+                        modifier = Modifier.padding(top = GlassTokens.spaceSm).semantics { heading() },
+                    )
                 } else if (isLoading) {
                     repeat(4) { com.whiplash.music.ui.theme.ShimmerSkeletonRow() }
                 }
@@ -346,5 +283,88 @@ fun GenreScreen(
     )
     }
 
-    CollectionSheet(sheetCollection, onDismiss = { sheetCollection = null }, onOpen = onOpenCollection)
+    com.whiplash.music.ui.search.CollectionMenuSheet(sheetCollection, onDismiss = { sheetCollection = null }, onOpen = onOpenCollection)
+}
+
+/**
+ * Genre page banner in the genre's own tile colours: its top playlist's
+ * cover tilted into the right edge (larger than on the tile), a small
+ * "Mood & genre" label, the name, what's on the page, and Play / Shuffle.
+ */
+@Composable
+private fun GenreHero(
+    genre: ExploreGenre,
+    artworkUrl: String?,
+    summary: String,
+    onPlay: (() -> Unit)?,
+    onShuffle: (() -> Unit)?,
+) {
+    val (start, end) = TILE_COLORS[genre.colorIndex % TILE_COLORS.size]
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(Brush.linearGradient(listOf(start, end))),
+    ) {
+        if (artworkUrl != null) {
+            coil.compose.AsyncImage(
+                model = coil.request.ImageRequest.Builder(LocalContext.current)
+                    .data(com.whiplash.music.ui.common.artworkAtSize(artworkUrl, 544)).crossfade(true).build(),
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 26.dp, y = 18.dp)
+                    .size(132.dp)
+                    .graphicsLayer { rotationZ = 18f }
+                    .clip(RoundedCornerShape(14.dp)),
+            )
+        }
+        Column(Modifier.fillMaxWidth().padding(18.dp)) {
+            Text(
+                text = "MOOD & GENRE",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = MaterialTheme.typography.labelSmall.letterSpacing * 1.5f,
+                ),
+                color = Color.White.copy(alpha = 0.75f),
+            )
+            Text(
+                text = genre.title,
+                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                color = Color.White,
+                maxLines = 2,
+                modifier = Modifier
+                    .padding(top = 2.dp, end = 96.dp)
+                    .semantics { heading(); contentDescription = "${genre.title} page" },
+            )
+            if (summary.isNotBlank()) {
+                Text(
+                    text = summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Row(
+                modifier = Modifier.padding(top = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                com.whiplash.music.ui.theme.CollectionPillButton(
+                    text = "Play",
+                    icon = Icons.Filled.PlayArrow,
+                    onClick = { onPlay?.invoke() },
+                    primary = true,
+                    enabled = onPlay != null,
+                )
+                com.whiplash.music.ui.theme.CollectionPillButton(
+                    text = "Shuffle",
+                    icon = Icons.Filled.Shuffle,
+                    onClick = { onShuffle?.invoke() },
+                    primary = false,
+                    enabled = onShuffle != null,
+                )
+            }
+        }
+    }
 }
