@@ -55,6 +55,10 @@ class YoutubeDetailProvider(
                 title = info.name.orEmpty(),
                 uploaderName = info.uploaderName,
                 artworkUrl = info.thumbnails.maxByOrNull { it.height }?.url,
+                // Every size YouTube lists, sharpest first. The largest
+                // (maxresdefault) doesn't exist for every album, so the page
+                // falls back down this list instead of showing nothing.
+                artworkCandidates = info.thumbnails.sortedByDescending { it.height }.mapNotNull { it.url }.distinct(),
                 tracks = tracks,
             )
         } catch (e: Exception) {

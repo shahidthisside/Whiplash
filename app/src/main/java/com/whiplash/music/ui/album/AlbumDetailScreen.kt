@@ -27,6 +27,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -191,14 +194,9 @@ private fun AlbumDetailHeader(
                     .clip(RoundedCornerShape(WhiplashRadius.extraLarge))
                     .background(WhiplashColors.surfaceElevated),
             ) {
-                if (detail.artworkUrl != null) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(context).data(detail.artworkUrl).crossfade(true).build(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
+                AlbumCover(
+                    candidates = (detail.artworkCandidates + listOfNotNull(detail.artworkUrl, detail.tracks.firstOrNull()?.artworkUri)).distinct(),
+                )
             }
         }
 
@@ -244,4 +242,43 @@ private fun shareYoutubePlaylist(context: android.content.Context, detail: com.w
         putExtra(android.content.Intent.EXTRA_TEXT, "${detail.title} — ${detail.url}")
     }
     context.startActivity(android.content.Intent.createChooser(sendIntent, "Share playlist"))
+}
+
+/**
+ * Album cover that never settles for less than it can get, and never shows
+ * nothing when any cover exists.
+ *
+ * [candidates] are sharpest first. The sharpest one still working is drawn on
+ * top; the next one down is drawn underneath it. The smaller image usually
+ * arrives first (and is often already cached from the Home card), so the
+ * cover appears straight away and then sharpens as the big one lands. If the
+ * big one doesn't exist (YouTube has no 1200px cover for some albums), it is
+ * dropped and the next size moves up, so the result is always the best
+ * available — never blank, and never a lower size than YouTube offers.
+ */
+@Composable
+private fun AlbumCover(candidates: List<String>) {
+    val context = LocalContext.current
+    var failed by remember(candidates) { mutableStateOf(emptySet<String>()) }
+    val working = candidates.filter { it !in failed }
+    val top = working.getOrNull(0)
+    val under = working.getOrNull(1)
+    if (under != null) {
+        AsyncImage(
+            model = ImageRequest.Builder(context).data(under).build(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            onError = { failed = failed + under },
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+    if (top != null) {
+        AsyncImage(
+            model = ImageRequest.Builder(context).data(top).crossfade(true).build(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            onError = { failed = failed + top },
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
 }

@@ -7,6 +7,8 @@ data class YoutubePlaylistDetail(
     val uploaderName: String?,
     val artworkUrl: String?,
     val tracks: List<PlayableItem.YoutubeTrack>,
+    /** Cover URLs, largest first (see YoutubeDetailProvider.getPlaylistDetail). */
+    val artworkCandidates: List<String> = listOfNotNull(artworkUrl),
 )
 
 /** Real detail for an artist/channel (section 40: artist page). */
