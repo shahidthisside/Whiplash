@@ -230,6 +230,32 @@ class BackupManager(
                 }
             }
 
+            // Monthly Replay's tally is listening history, so it travels with
+            // the History category (as its own key, so older app versions
+            // reading this file simply ignore it).
+            val replayJson = if (BackupCategory.HISTORY in categories) {
+                JSONArray().apply {
+                    database.replayTallyDao().getAll().forEach { r ->
+                        put(
+                            JSONObject().apply {
+                                put("monthKey", r.monthKey)
+                                put("trackId", r.trackId)
+                                put("source", r.source.name)
+                                put("title", r.title)
+                                put("artist", r.artist)
+                                put("artworkUrl", r.artworkUrl)
+                                put("durationMs", r.durationMs)
+                                put("plays", r.plays)
+                                put("listenedMs", r.listenedMs)
+                                put("lastPlayedAtEpochMs", r.lastPlayedAtEpochMs)
+                            }
+                        )
+                    }
+                }
+            } else {
+                null
+            }
+
             if (BackupCategory.PINNED in categories) {
                 val pinned = database.pinnedDao().observeAll().first()
                 pinned.forEach { if (it.source == MediaSource.YOUTUBE || it.source == MediaSource.DOWNLOAD) songIds += it.trackId }
@@ -305,6 +331,7 @@ class BackupManager(
                         put("playlistsListView", settingsRepository.playlistsListView.first())
                         put("homeShelvesEnabled", settingsRepository.homeShelvesEnabled.first())
                         put("exploreEnabled", settingsRepository.exploreEnabled.first())
+                        put("replayEnabled", settingsRepository.replayEnabled.first())
                         put("playerHeroArtwork", settingsRepository.playerHeroArtwork.first())
                         put("perNetworkQualityEnabled", settingsRepository.perNetworkQualityEnabled.first())
                         put("audioQualityWifi", settingsRepository.audioQualityWifi.first().name)
@@ -346,6 +373,7 @@ class BackupManager(
                 put("formatVersion", SELECTIVE_FORMAT_VERSION)
                 put("categories", manifest)
                 categoryPayloads.forEach { (category, payload) -> put(category.name, payload) }
+                replayJson?.let { put(REPLAY_TALLY_KEY, it) }
                 put("songs", songsJson)
             }
 
@@ -445,6 +473,9 @@ class BackupManager(
                     }
                     if (s.has("playerHeroArtwork")) {
                         runCatching { settingsRepository.setPlayerHeroArtwork(s.getBoolean("playerHeroArtwork")) }
+                    }
+                    if (s.has("replayEnabled")) {
+                        runCatching { settingsRepository.setReplayEnabled(s.getBoolean("replayEnabled")) }
                     }
                     if (s.has("exploreEnabled")) {
                         runCatching { settingsRepository.setExploreEnabled(s.getBoolean("exploreEnabled")) }
@@ -664,6 +695,29 @@ class BackupManager(
             }
         }
 
+        // Replaces each (month, song) row, so restoring the same file twice
+        // doesn't double anyone's play counts.
+        json.optJSONArray(REPLAY_TALLY_KEY)?.let { rows ->
+            val entities = (0 until rows.length()).mapNotNull { i ->
+                val r = rows.getJSONObject(i)
+                runCatching {
+                    com.whiplash.music.data.local.entity.ReplayTallyEntity(
+                        monthKey = r.getString("monthKey"),
+                        trackId = r.getString("trackId"),
+                        source = MediaSource.valueOf(r.getString("source")),
+                        title = r.getString("title"),
+                        artist = r.getString("artist"),
+                        artworkUrl = if (r.isNull("artworkUrl")) null else r.optString("artworkUrl"),
+                        durationMs = r.getLong("durationMs"),
+                        plays = r.getInt("plays"),
+                        listenedMs = r.getLong("listenedMs"),
+                        lastPlayedAtEpochMs = r.getLong("lastPlayedAtEpochMs"),
+                    )
+                }.getOrNull()
+            }
+            if (entities.isNotEmpty()) database.replayTallyDao().upsertAll(entities)
+        }
+
         json.optJSONArray(BackupCategory.PINNED.name)?.let { pinned ->
             for (i in 0 until pinned.length()) {
                 val p = pinned.getJSONObject(i)
@@ -728,6 +782,7 @@ class BackupManager(
 
         /** Distinguishes a selective (category JSON) backup zip from a legacy full-DB zip — see [isSelectiveBackup]. */
         private const val ZIP_MANIFEST_ENTRY = "whiplash_backup_manifest.json"
+        private const val REPLAY_TALLY_KEY = "replayTally"
 
         /** Bumped only if the selective JSON schema itself changes shape; not tied to [WhiplashDatabase]'s own Room schema version. */
         private const val SELECTIVE_FORMAT_VERSION = 1

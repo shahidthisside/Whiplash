@@ -103,6 +103,8 @@ fun HomeScreen(
     // Hoisted by the caller so Home keeps its scroll position while an album
     // or History is open on top of it (this screen leaves composition then).
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
+    // 4.7: Monthly Replay card, drawn after Quick Picks when non-null.
+    replayCard: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
@@ -404,6 +406,12 @@ fun HomeScreen(
                             }
                         },
                     )
+                }
+            }
+
+            if (replayCard != null) {
+                item(key = "replay-card") {
+                    Box(Modifier.padding(top = GlassTokens.spaceMd).animateItem()) { replayCard() }
                 }
             }
 

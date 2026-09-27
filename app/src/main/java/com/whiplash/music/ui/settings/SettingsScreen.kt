@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Check
@@ -119,6 +120,7 @@ fun SettingsScreen() {
     val lyricsBlurUnfocused by viewModel.lyricsBlurUnfocused.collectAsState()
     val homeShelvesEnabled by viewModel.homeShelvesEnabled.collectAsState()
     val exploreEnabled by viewModel.exploreEnabled.collectAsState()
+    val replayEnabled by viewModel.replayEnabled.collectAsState()
     val quickPicksGridCount by viewModel.quickPicksGridCount.collectAsState()
     val lyricsProviderHealth by viewModel.lyricsProviderHealth.collectAsState()
     val playerHeroArtwork by viewModel.playerHeroArtwork.collectAsState()
@@ -622,6 +624,16 @@ fun SettingsScreen() {
                             subtitle = "Show album and playlist shelves on Home, picked from the artists you play.",
                             checked = homeShelvesEnabled,
                             onCheckedChange = viewModel::setHomeShelvesEnabled,
+                        )
+                    }
+
+                    if (shown(SettingEntry.REPLAY)) {
+                        SettingToggleRow(
+                            title = "Monthly Replay",
+                            icon = Icons.Filled.Insights,
+                            subtitle = "Count what you play for a monthly recap of your top songs and artists, opened from Home. Counting stays on this device.",
+                            checked = replayEnabled,
+                            onCheckedChange = viewModel::setReplayEnabled,
                         )
                     }
 

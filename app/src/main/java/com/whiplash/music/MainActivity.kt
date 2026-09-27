@@ -238,6 +238,19 @@ private fun WhiplashApp() {
     var searchDetailStack by remember { mutableStateOf<List<SearchDestination>>(emptyList()) }
     // Search detail pages currently drawn (includes one still sliding out after Back).
     var searchLayers by remember { mutableStateOf<List<SearchDestination>>(emptyList()) }
+    // 4.7 Monthly Replay: full-screen story over everything but the full player.
+    val replayViewModel: com.whiplash.music.ui.replay.ReplayViewModel = viewModel(
+        factory = com.whiplash.music.ui.replay.ReplayViewModelFactory(app.libraryRepository, app.settingsRepository),
+    )
+    val replayEnabled by replayViewModel.enabled.collectAsState()
+    val replayTeaser by replayViewModel.teaser.collectAsState()
+    val replayCurrentMonth by replayViewModel.currentMonthKey.collectAsState()
+    var showReplay by rememberSaveable { mutableStateOf(false) }
+    // A new month can begin while the app sits in the background.
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        replayViewModel.refreshMonth()
+        onPauseOrDispose { }
+    }
     // Hoisted up from SearchScreen itself (real, reported bug: SearchScreen
     // is removed from composition entirely while an album/artist detail
     // screen is open — see the AppTab.SEARCH branch below — so a plain
@@ -353,6 +366,11 @@ private fun WhiplashApp() {
         selectedTab = AppTab.HOME
     }
 
+    // Declared after the handlers above so Replay's own Back wins while it's open.
+    BackHandler(enabled = !isPlayerExpanded && showReplay) {
+        showReplay = false
+    }
+
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { innerPadding ->
         // Single Box hosting every layer of the screen (tab content, mini
         // player, bottom nav, full player) so Compose's z-order-based hit
@@ -366,7 +384,13 @@ private fun WhiplashApp() {
         // navigation bars, with its own insets), so only the tab content,
         // mini player and bottom nav get the Scaffold's system-bar padding.
         Box(modifier = Modifier.fillMaxSize()) {
-          Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+          Box(
+              modifier = Modifier
+                  .padding(innerPadding)
+                  .fillMaxSize()
+                  // Hidden from TalkBack while the Replay story covers it.
+                  .then(if (showReplay) Modifier.clearAndSetSemantics {} else Modifier),
+          ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 com.whiplash.music.ui.theme.WhiplashAppHeader(
                     title = if (selectedTab == AppTab.HOME) "Whiplash" else selectedTab.label,
@@ -436,6 +460,20 @@ private fun WhiplashApp() {
                                                 onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
                                                 onOpenCollection = { homeCollectionUrl = it.url },
                                                 listState = homeListState,
+                                                replayCard = replayTeaser
+                                                    ?.takeIf { replayEnabled == true && !it.isEmpty }
+                                                    ?.let { teaser ->
+                                                        {
+                                                            com.whiplash.music.ui.replay.ReplayHomeCard(
+                                                                summary = teaser,
+                                                                isCurrentMonth = teaser.monthKey == replayCurrentMonth,
+                                                                onOpen = {
+                                                                    replayViewModel.refreshMonth()
+                                                                    showReplay = true
+                                                                },
+                                                            )
+                                                        }
+                                                    },
                                             )
                                         } else {
                                             com.whiplash.music.ui.home.HistoryScreen(
@@ -691,6 +729,27 @@ private fun WhiplashApp() {
             }
 
           }
+
+            // 4.7 Replay story: fades and settles in from slightly larger, like
+            // opening a story; closing reverses it. Same 380 ms as detail pages.
+            AnimatedVisibility(
+                visible = showReplay,
+                enter = if (reduceMotion) EnterTransition.None else fadeIn(tween(DETAIL_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing)) +
+                    androidx.compose.animation.scaleIn(tween(DETAIL_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing), initialScale = 1.06f),
+                exit = if (reduceMotion) ExitTransition.None else fadeOut(tween(DETAIL_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing)) +
+                    androidx.compose.animation.scaleOut(tween(DETAIL_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing), targetScale = 1.06f),
+            ) {
+                com.whiplash.music.ui.replay.ReplayScreen(
+                    viewModel = replayViewModel,
+                    onClose = { showReplay = false },
+                    onPlayQueue = { queue, index ->
+                        app.playbackController.playQueue(queue, index)
+                        com.whiplash.music.ui.common.ToastController.show("Playing your Replay songs")
+                    },
+                )
+                // Next open starts on the default month again.
+                androidx.compose.runtime.DisposableEffect(Unit) { onDispose { replayViewModel.resetMonth() } }
+            }
 
             // Full player, animated in/out (section 47: smooth transformation,
             // no abrupt visual jump). Drawn last in this Box so it is on top

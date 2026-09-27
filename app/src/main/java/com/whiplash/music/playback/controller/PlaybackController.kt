@@ -65,6 +65,14 @@ class PlaybackController(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var positionTickerJob: Job? = null
 
+    // 4.7 Monthly Replay: real listening time. The position ticker only runs
+    // while audio is actually playing, so each tick's elapsed wall time is
+    // time listened. It's batched and written every LISTEN_FLUSH_MS, on
+    // pause, and when the song changes.
+    private var listenItem: PlayableItem? = null
+    private var listenPendingMs = 0L
+    private var lastListenTickMs = 0L
+
     /** Origin/bitrate of the item most recently handed to the player (see [startMediaItem], [readAudioInfo]). */
     private var currentAudioOrigin: AudioStreamInfo.Origin = AudioStreamInfo.Origin.STREAM
     private var currentStreamBitrateBps: Int? = null
@@ -1158,6 +1166,9 @@ class PlaybackController(
             scope.launch {
                 if (item is PlayableItem.YoutubeTrack) libraryRepository.cacheSong(item)
                 libraryRepository.recordPlayed(item)
+                if (settingsRepository.replayEnabled.first()) {
+                    runCatching { libraryRepository.recordReplayPlay(item) }
+                }
             }
         }
 
@@ -1513,14 +1524,46 @@ class PlaybackController(
         }
     }
 
+    /** Counts the time since the last tick as listened to [item] (see [listenItem]). */
+    private fun trackListening(item: PlayableItem?) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val last = lastListenTickMs
+        lastListenTickMs = now
+        if (item == null || last == 0L) return
+        if (listenItem != null && listenItem?.id != item.id) flushListening()
+        listenItem = item
+        // Capped so a stalled main thread can't turn into minutes of "listening".
+        listenPendingMs += (now - last).coerceIn(0L, MAX_LISTEN_TICK_MS)
+        if (listenPendingMs >= LISTEN_FLUSH_MS) flushListening()
+    }
+
+    private fun flushListening() {
+        val item = listenItem ?: return
+        val ms = listenPendingMs
+        listenPendingMs = 0L
+        if (ms <= 0L) return
+        scope.launch {
+            if (settingsRepository.replayEnabled.first()) {
+                runCatching { libraryRepository.recordReplayListened(item, ms) }
+            }
+        }
+    }
+
     private fun updatePositionTicker(isPlaying: Boolean) {
+        if (positionTickerJob?.isActive == true) trackListening(_state.value.currentItem)
         positionTickerJob?.cancel()
-        if (!isPlaying) return
+        if (!isPlaying) {
+            flushListening()
+            lastListenTickMs = 0L
+            return
+        }
+        lastListenTickMs = android.os.SystemClock.elapsedRealtime()
         positionTickerJob = scope.launch {
             var prefetchTriggered = false
             var fadeOutTriggered = false
             while (true) {
                 refreshPositionAndDuration()
+                trackListening(_state.value.currentItem)
                 val c = controller
                 if (c != null && c.playbackState == Player.STATE_ENDED) {
                     // Safety net only: the direct onPlaybackStateChanged
@@ -1556,6 +1599,12 @@ class PlaybackController(
     }
 
     private companion object {
+        /** Replay listening time is written to the database this often while playing. */
+        private const val LISTEN_FLUSH_MS = 30_000L
+
+        /** Longest gap between two ticks still counted as listening. */
+        private const val MAX_LISTEN_TICK_MS = 2_000L
+
         /** Thumbnail sizes tried before giving up on an artwork upgrade. */
         private const val MAX_ARTWORK_ATTEMPTS = 4
 

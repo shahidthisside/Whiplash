@@ -52,6 +52,7 @@ class LibraryRepository(
     private val localSongDao: LocalSongDao,
     private val pinnedDao: PinnedDao,
     private val downloadDao: DownloadDao,
+    private val replayTallyDao: com.whiplash.music.data.local.dao.ReplayTallyDao,
 ) {
 
     /** Caches metadata for a YouTube track so it can be resolved later by id alone. */
@@ -91,7 +92,84 @@ class LibraryRepository(
             .map { it.map { h -> h.trackId to h.source.toDomain() } }
             .flatMapResolve()
 
-    suspend fun clearHistory() = historyDao.clear()
+    /**
+     * Clears play history. Replay's monthly tally is listening history too,
+     * so it's cleared with it — "clear my history" shouldn't leave a recap
+     * of the same plays behind.
+     */
+    suspend fun clearHistory() {
+        historyDao.clear()
+        replayTallyDao.clear()
+    }
+
+    // ── 4.7 Monthly Replay ───────────────────────────────────────────────
+
+    private fun PlayableItem.replayRow(nowMs: Long) = com.whiplash.music.data.local.entity.ReplayTallyEntity(
+        monthKey = com.whiplash.music.domain.model.replayMonthKey(nowMs),
+        trackId = id,
+        source = source.toEntity(),
+        title = title,
+        artist = artist,
+        artworkUrl = artworkUri,
+        durationMs = durationMs,
+        plays = 1,
+        listenedMs = 0,
+        lastPlayedAtEpochMs = nowMs,
+    )
+
+    /** Counts one play of [item] in this month's Replay. */
+    suspend fun recordReplayPlay(item: PlayableItem) {
+        replayTallyDao.recordPlay(item.replayRow(System.currentTimeMillis()))
+    }
+
+    /** Adds [ms] of real listening time for [item] to this month's Replay. */
+    suspend fun recordReplayListened(item: PlayableItem, ms: Long) {
+        if (ms <= 0) return
+        replayTallyDao.recordListened(item.replayRow(System.currentTimeMillis()), ms)
+    }
+
+    fun observeReplayMonths(): Flow<List<String>> = replayTallyDao.observeMonths()
+
+    fun observeReplayMonth(monthKey: String): Flow<List<com.whiplash.music.domain.model.ReplayTrackStat>> =
+        replayTallyDao.observeMonth(monthKey).map { rows ->
+            rows.map {
+                com.whiplash.music.domain.model.ReplayTrackStat(
+                    trackId = it.trackId,
+                    source = it.source.toDomain(),
+                    title = it.title,
+                    artist = it.artist,
+                    artworkUrl = it.artworkUrl,
+                    durationMs = it.durationMs,
+                    plays = it.plays,
+                    listenedMs = it.listenedMs,
+                    lastPlayedAtEpochMs = it.lastPlayedAtEpochMs,
+                )
+            }
+        }
+
+    /**
+     * Playable items for Replay's songs, in order. Downloads and local files
+     * resolve to their files; a streamed song that's no longer in the song
+     * cache is rebuilt from Replay's own snapshot so it still plays.
+     */
+    suspend fun resolveReplayTracks(stats: List<com.whiplash.music.domain.model.ReplayTrackStat>): List<PlayableItem> {
+        val resolved = kotlinx.coroutines.flow.flowOf(stats.map { it.trackId to it.source }).flatMapResolve().first()
+            .associateBy { "${it.source}:${it.id}" }
+        return stats.mapNotNull { stat ->
+            resolved["${stat.source}:${stat.trackId}"] ?: if (stat.source == MediaSource.LOCAL) {
+                null
+            } else {
+                PlayableItem.YoutubeTrack(
+                    id = stat.trackId,
+                    title = stat.title,
+                    artist = stat.artist,
+                    album = null,
+                    artworkUri = stat.artworkUrl,
+                    durationMs = stat.durationMs,
+                )
+            }
+        }
+    }
 
     /**
      * Removes [item] from history only (the History screen's own per-item
@@ -105,6 +183,8 @@ class LibraryRepository(
      */
     suspend fun removeFromHistory(item: PlayableItem) {
         historyDao.removeAllForTrack(item.id, item.source.toEntity())
+        // Removing a song from history also takes it out of Replay.
+        replayTallyDao.removeTrack(item.id)
     }
 
     /**

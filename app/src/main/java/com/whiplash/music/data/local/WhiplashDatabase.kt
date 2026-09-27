@@ -19,6 +19,7 @@ import com.whiplash.music.data.local.dao.ProviderHealthDao
 import com.whiplash.music.data.local.dao.SearchCacheDao
 import com.whiplash.music.data.local.dao.SearchHistoryDao
 import com.whiplash.music.data.local.dao.SongDao
+import com.whiplash.music.data.local.dao.ReplayTallyDao
 import com.whiplash.music.data.local.entity.AlbumEntity
 import com.whiplash.music.data.local.entity.ArtistEntity
 import com.whiplash.music.data.local.entity.DownloadEntity
@@ -34,6 +35,7 @@ import com.whiplash.music.data.local.entity.ProviderHealthEntity
 import com.whiplash.music.data.local.entity.SearchCacheEntity
 import com.whiplash.music.data.local.entity.SearchHistoryEntity
 import com.whiplash.music.data.local.entity.SongEntity
+import com.whiplash.music.data.local.entity.ReplayTallyEntity
 
 /**
  * Real Room migrations for [WhiplashDatabase], v1 through v4 — added as
@@ -93,6 +95,38 @@ internal val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
 }
 
 /**
+ * v6 (4.7): the Monthly Replay tally. Creates the table, then seeds it from
+ * the plays still in `history` (the most recent 200) so the current month's
+ * Replay isn't empty on day one. Those older plays never recorded how long
+ * they actually played, so each is counted as one full play of the song;
+ * everything from now on records real listened time.
+ */
+internal val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `replay_tally` (`monthKey` TEXT NOT NULL, `trackId` TEXT NOT NULL, `source` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `artworkUrl` TEXT, `durationMs` INTEGER NOT NULL, `plays` INTEGER NOT NULL, `listenedMs` INTEGER NOT NULL, `lastPlayedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`monthKey`, `trackId`))"
+        )
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO replay_tally
+                (monthKey, trackId, source, title, artist, artworkUrl, durationMs, plays, listenedMs, lastPlayedAtEpochMs)
+            SELECT strftime('%Y-%m', h.playedAtEpochMs / 1000, 'unixepoch', 'localtime'),
+                   h.trackId,
+                   CASE WHEN s.id IS NOT NULL THEN 'YOUTUBE' ELSE 'DOWNLOAD' END,
+                   COALESCE(s.title, d.title), COALESCE(s.artist, d.artist),
+                   COALESCE(s.artworkUrl, d.artworkPath), COALESCE(s.durationMs, d.durationMs),
+                   COUNT(*), COUNT(*) * COALESCE(s.durationMs, d.durationMs), MAX(h.playedAtEpochMs)
+            FROM history h
+            LEFT JOIN songs s ON s.id = h.trackId
+            LEFT JOIN downloads d ON d.id = h.trackId
+            WHERE h.source IN ('YOUTUBE', 'DOWNLOAD') AND (s.id IS NOT NULL OR d.id IS NOT NULL)
+            GROUP BY 1, h.trackId
+            """.trimIndent()
+        )
+    }
+}
+
+/**
  * Whiplash's local-first Room database (section 35, section 63).
  *
  * Holds device-local library data, cached online metadata, playlists,
@@ -116,8 +150,9 @@ internal val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
         ProviderHealthEntity::class,
         PinnedEntity::class,
         DownloadEntity::class,
+        ReplayTallyEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -137,6 +172,7 @@ abstract class WhiplashDatabase : RoomDatabase() {
     abstract fun providerHealthDao(): ProviderHealthDao
     abstract fun pinnedDao(): PinnedDao
     abstract fun downloadDao(): DownloadDao
+    abstract fun replayTallyDao(): ReplayTallyDao
 
     companion object {
         private const val DATABASE_NAME = "whiplash.db"
@@ -166,7 +202,7 @@ abstract class WhiplashDatabase : RoomDatabase() {
                     // going forward is to keep adding a new Migration_
                     // object here every time the schema changes again,
                     // never relying on this fallback for a real release.
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }
             }

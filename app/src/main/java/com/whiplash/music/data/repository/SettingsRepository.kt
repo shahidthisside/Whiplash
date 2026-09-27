@@ -217,6 +217,17 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[PLAYER_LYRIC_STRIP_KEY] = enabled }
     }
 
+    /**
+     * 4.7 Monthly Replay: the recap card on Home, and counting plays and
+     * listening time for it. Off stops counting; nothing already counted is
+     * deleted. Default on.
+     */
+    val replayEnabled: Flow<Boolean> = dataStore.data.map { prefs -> prefs[REPLAY_KEY] ?: true }
+
+    suspend fun setReplayEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[REPLAY_KEY] = enabled }
+    }
+
     /** Explore (new releases, charts, moods & genres) on Search's start screen. Default on. */
     val exploreEnabled: Flow<Boolean> = dataStore.data.map { prefs -> prefs[EXPLORE_KEY] ?: true }
 
@@ -388,6 +399,7 @@ class SettingsRepository(context: Context) {
         val PLAYER_ARTWORK_COLORS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_artwork_colors")
         val PLAYER_LYRIC_STRIP_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_lyric_strip")
         val EXPLORE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("explore_enabled")
+        val REPLAY_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("replay_enabled")
         val HOME_SHELVES_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("home_shelves_enabled")
         val PLAYLISTS_LIST_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("playlists_list_view")
         val QUICK_PICKS_GRID_COUNT_KEY: Preferences.Key<Int> = androidx.datastore.preferences.core.intPreferencesKey("quick_picks_grid_count")

@@ -91,6 +91,7 @@ class WhiplashApplication : Application() {
             localSongDao = database.localSongDao(),
             pinnedDao = database.pinnedDao(),
             downloadDao = database.downloadDao(),
+            replayTallyDao = database.replayTallyDao(),
         )
     }
 

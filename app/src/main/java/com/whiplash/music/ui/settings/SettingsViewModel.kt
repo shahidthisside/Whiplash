@@ -107,6 +107,13 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setQuickPicksGridCount(count) }
     }
 
+    val replayEnabled: StateFlow<Boolean> = repository.replayEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    fun setReplayEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setReplayEnabled(enabled) }
+    }
+
     val exploreEnabled: StateFlow<Boolean> = repository.exploreEnabled
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
