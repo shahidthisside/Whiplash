@@ -118,6 +118,10 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
     private val _trendingArtists = MutableStateFlow(FALLBACK_TRENDING_ARTISTS)
     val trendingArtists: StateFlow<List<String>> = _trendingArtists
 
+    /** The same trending artists with their photos, for Explore's artist shelf (empty until loaded). */
+    private val _trendingArtistResults = MutableStateFlow<List<YoutubeArtistResult>>(emptyList())
+    val trendingArtistResults: StateFlow<List<YoutubeArtistResult>> = _trendingArtistResults
+
     private var searchJob: Job? = null
     private var suggestionsJob: Job? = null
     private var loadMoreJob: Job? = null
@@ -143,6 +147,11 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
         viewModelScope.launch {
             val india = runCatching { repository.searchArtists(TRENDING_ARTISTS_INDIA_QUERY) }.getOrDefault(emptyList())
             val global = runCatching { repository.searchArtists(TRENDING_ARTISTS_GLOBAL_QUERY) }.getOrDefault(emptyList())
+            val results = (india.take(3) + global.take(3))
+                .filter { it.name.isNotBlank() }
+                .distinctBy { it.name }
+                .take(5)
+            if (results.size >= 3) _trendingArtistResults.value = results
             val combined = (india.take(3) + global.take(3))
                 .map { it.name }
                 .filter { it.isNotBlank() }

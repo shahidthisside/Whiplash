@@ -107,6 +107,13 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setQuickPicksGridCount(count) }
     }
 
+    val exploreEnabled: StateFlow<Boolean> = repository.exploreEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    fun setExploreEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setExploreEnabled(enabled) }
+    }
+
     val homeShelvesEnabled: StateFlow<Boolean> = repository.homeShelvesEnabled
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 

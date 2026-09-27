@@ -36,6 +36,7 @@ enum class SettingEntry(val section: SettingsSection, val title: String, val key
     LYRICS_BLUR(SettingsSection.LYRICS, "Blur other lyric lines", "focus"),
     LYRICS_SOURCE(SettingsSection.LYRICS, "Lyrics source", "lrclib lyrics.ovh provider"),
     QUICK_PICKS_GRID(SettingsSection.APPEARANCE, "Quick Picks grid size", "songs per page swipe home grid"),
+    EXPLORE(SettingsSection.APPEARANCE, "Explore in Search", "new releases charts moods genres browse"),
     HOME_SHELVES(SettingsSection.APPEARANCE, "Home shelves", "recommendations feed albums playlists for you"),
     THEME(SettingsSection.APPEARANCE, "Theme", "color colour dark palette accent"),
     REDUCE_ANIMATIONS(SettingsSection.APPEARANCE, "Reduce animations", "motion accessibility transitions"),

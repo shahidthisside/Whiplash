@@ -31,8 +31,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.requiredWidthIn
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -89,13 +93,17 @@ fun SearchScreen(
     onOpenArtist: (YoutubeArtistResult) -> Unit = {},
     selectedTab: SearchResultTab = SearchResultTab.SONGS,
     onSelectedTabChange: (SearchResultTab) -> Unit = {},
+    onOpenGenre: (com.whiplash.music.domain.model.ExploreGenre) -> Unit = {},
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: SearchViewModel = viewModel(factory = SearchViewModelFactory(app.youtubeSearchRepository))
     val state by viewModel.state.collectAsState()
     val recentSearches by viewModel.recentSearches.collectAsState()
+    // 4.3: Settings → Explore in Search. While off, Explore isn't composed, so it fetches nothing.
+    val exploreEnabled by app.settingsRepository.exploreEnabled.collectAsState(initial = false)
     val trendingArtists by viewModel.trendingArtists.collectAsState()
+    val trendingArtistResults by viewModel.trendingArtistResults.collectAsState()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     // "Clear all" recent searches is destructive and irreversible, same as
@@ -151,6 +159,17 @@ fun SearchScreen(
                 },
                 onRemoveRecentSearch = viewModel::removeRecentSearch,
                 onClearRecentSearches = { showClearSearchHistoryConfirm = true },
+                exploreEnabled = exploreEnabled,
+                trendingArtistResults = trendingArtistResults,
+                onOpenArtist = { artist -> dismissKeyboard(); onOpenArtist(artist) },
+                explore = if (!exploreEnabled) ({}) else ({
+                    com.whiplash.music.ui.explore.ExploreSection(
+                        onOpenCollection = onOpenAlbum,
+                        onOpenGenre = onOpenGenre,
+                        onPlayTrack = { track -> (track as? PlayableItem.YoutubeTrack)?.let(onPlayTrack) },
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceLg))
+                }),
             )
             // YouTube Music/Spotify-style: typing alone only ever narrows
             // live autocomplete suggestions — it never runs a real search.
@@ -458,6 +477,7 @@ private fun EmptyTabState(message: String) {
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun IdleState(
     recentSearches: List<String>,
@@ -465,13 +485,209 @@ private fun IdleState(
     onSuggestionTap: (String) -> Unit,
     onRemoveRecentSearch: (String) -> Unit,
     onClearRecentSearches: () -> Unit,
+    exploreEnabled: Boolean = false,
+    trendingArtistResults: List<YoutubeArtistResult> = emptyList(),
+    onOpenArtist: (YoutubeArtistResult) -> Unit = {},
+    explore: @Composable () -> Unit = {},
 ) {
+    // With Explore on, it takes the top of the screen and recent searches
+    // move into a sheet behind a history button. With it off, the screen is
+    // exactly the original: recent searches, then trending artists.
+    var showHistorySheet by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(top = GlassTokens.spaceLg, bottom = GlassTokens.miniPlayerReservedHeight),
     ) {
+        if (exploreEnabled) {
+            androidx.compose.foundation.layout.Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = GlassTokens.spaceSm),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Explore",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = WhiplashColors.textPrimary,
+                )
+                PlainIconButton(
+                    contentDescription = "Search history",
+                    onClick = { showHistorySheet = true },
+                    size = 48.dp,
+                ) {
+                    Icon(Icons.Filled.History, contentDescription = null, tint = WhiplashColors.textSecondary)
+                }
+            }
+        } else {
+            RecentSearchesList(recentSearches, onSuggestionTap, onRemoveRecentSearch, onClearRecentSearches)
+        }
+
+        // 4.3 Explore: new releases, charts, moods & genres. With Explore
+        // turned off in Settings this adds nothing at all, so the screen is
+        // exactly what it was before Explore existed.
+        explore()
+
+        // With Explore on, trending artists are a shelf of round artist
+        // photos like the rest of Explore (tap opens the artist page). Off,
+        // it's the original plain list of names.
+        if (exploreEnabled) {
+            TrendingArtistsShelf(
+                artists = trendingArtistResults,
+                fallbackNames = trendingArtists,
+                onOpenArtist = onOpenArtist,
+                onSearchName = onSuggestionTap,
+            )
+        } else
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = "Trending artists",
+                style = MaterialTheme.typography.labelMedium,
+                color = WhiplashColors.textSecondary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
+            // Plain vertical rows, matching the recent-searches list right
+            // above (and how Spotify/YouTube Music present this kind of
+            // "try searching" list) — a real, reported UI issue: the
+            // previous version used bordered/pill-shaped GlassChip tags in
+            // a wrapping row, which read as visually heavy/inconsistent
+            // next to the plain rows used everywhere else on this screen.
+            trendingArtists.forEach { artist ->
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSuggestionTap(artist) }
+                        .padding(vertical = GlassTokens.spaceSm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = null,
+                        tint = WhiplashColors.textTertiary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = artist,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = WhiplashColors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = GlassTokens.spaceMd),
+                    )
+                }
+            }
+        }
+    }
+
+    if (showHistorySheet) {
+        com.whiplash.music.ui.theme.GlassSheet(onDismissRequest = { showHistorySheet = false }) {
+            if (recentSearches.isEmpty()) {
+                Text(
+                    text = "No recent searches",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = WhiplashColors.textSecondary,
+                    modifier = Modifier.padding(vertical = GlassTokens.spaceLg),
+                )
+            } else {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    RecentSearchesList(
+                        recentSearches = recentSearches,
+                        onSuggestionTap = { q -> showHistorySheet = false; onSuggestionTap(q) },
+                        onRemoveRecentSearch = onRemoveRecentSearch,
+                        onClearRecentSearches = { showHistorySheet = false; onClearRecentSearches() },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Explore-style "Trending artists" shelf: round photos with names, sideways scrolling. */
+@Composable
+private fun TrendingArtistsShelf(
+    artists: List<YoutubeArtistResult>,
+    fallbackNames: List<String>,
+    onOpenArtist: (YoutubeArtistResult) -> Unit,
+    onSearchName: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+        Text(
+            text = "Trending artists",
+            style = MaterialTheme.typography.titleMedium,
+            color = WhiplashColors.textPrimary,
+        )
+        androidx.compose.foundation.lazy.LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
+        ) {
+            if (artists.isNotEmpty()) {
+                items(artists.size) { i ->
+                    val a = artists[i]
+                    ArtistCircle(a.name, a.artworkUrl) { onOpenArtist(a) }
+                }
+            } else {
+                // Before the live list loads (or if it fails): the built-in names,
+                // as letter circles that search for the artist.
+                items(fallbackNames.size) { i ->
+                    val name = fallbackNames[i]
+                    ArtistCircle(name, null) { onSearchName(name) }
+                }
+            }
+        }
+        androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
+    }
+}
+
+@Composable
+private fun ArtistCircle(name: String, artworkUrl: String?, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .then(Modifier.requiredWidthIn(max = 104.dp).widthIn(min = 104.dp))
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Open $name", onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(96.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(WhiplashColors.surfaceElevated),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = name.take(1).uppercase(),
+                style = MaterialTheme.typography.headlineSmall,
+                color = WhiplashColors.textSecondary,
+            )
+            if (artworkUrl != null) {
+                coil.compose.AsyncImage(
+                    model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                        .data(artworkUrl).crossfade(true).build(),
+                    contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Text(
+            text = name,
+            style = MaterialTheme.typography.titleSmall,
+            color = WhiplashColors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = GlassTokens.spaceSm),
+        )
+    }
+}
+
+/** The original recent-searches list (header with Clear all, then one row per search). */
+@Composable
+private fun RecentSearchesList(
+    recentSearches: List<String>,
+    onSuggestionTap: (String) -> Unit,
+    onRemoveRecentSearch: (String) -> Unit,
+    onClearRecentSearches: () -> Unit,
+) {
+    Column {
         if (recentSearches.isNotEmpty()) {
             androidx.compose.foundation.layout.Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -530,46 +746,6 @@ private fun IdleState(
                 }
             }
             androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceLg))
-        }
-
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = "Trending artists",
-                style = MaterialTheme.typography.labelMedium,
-                color = WhiplashColors.textSecondary,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
-            // Plain vertical rows, matching the recent-searches list right
-            // above (and how Spotify/YouTube Music present this kind of
-            // "try searching" list) — a real, reported UI issue: the
-            // previous version used bordered/pill-shaped GlassChip tags in
-            // a wrapping row, which read as visually heavy/inconsistent
-            // next to the plain rows used everywhere else on this screen.
-            trendingArtists.forEach { artist ->
-                androidx.compose.foundation.layout.Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSuggestionTap(artist) }
-                        .padding(vertical = GlassTokens.spaceSm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Filled.Search,
-                        contentDescription = null,
-                        tint = WhiplashColors.textTertiary,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Text(
-                        text = artist,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = WhiplashColors.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = GlassTokens.spaceMd),
-                    )
-                }
-            }
         }
     }
 }

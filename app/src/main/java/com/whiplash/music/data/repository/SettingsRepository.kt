@@ -217,6 +217,13 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[PLAYER_LYRIC_STRIP_KEY] = enabled }
     }
 
+    /** Explore (new releases, charts, moods & genres) on Search's start screen. Default on. */
+    val exploreEnabled: Flow<Boolean> = dataStore.data.map { prefs -> prefs[EXPLORE_KEY] ?: true }
+
+    suspend fun setExploreEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[EXPLORE_KEY] = enabled }
+    }
+
     /** Home recommendation shelves (albums/playlists from artists you play). Default on. */
     val homeShelvesEnabled: Flow<Boolean> = dataStore.data.map { prefs -> prefs[HOME_SHELVES_KEY] ?: true }
 
@@ -380,6 +387,7 @@ class SettingsRepository(context: Context) {
         val REDUCE_ANIMATIONS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("reduce_animations")
         val PLAYER_ARTWORK_COLORS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_artwork_colors")
         val PLAYER_LYRIC_STRIP_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_lyric_strip")
+        val EXPLORE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("explore_enabled")
         val HOME_SHELVES_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("home_shelves_enabled")
         val PLAYLISTS_LIST_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("playlists_list_view")
         val QUICK_PICKS_GRID_COUNT_KEY: Preferences.Key<Int> = androidx.datastore.preferences.core.intPreferencesKey("quick_picks_grid_count")

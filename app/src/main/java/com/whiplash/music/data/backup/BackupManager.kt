@@ -304,6 +304,7 @@ class BackupManager(
                         put("quickPicksGridCount", settingsRepository.quickPicksGridCount.first())
                         put("playlistsListView", settingsRepository.playlistsListView.first())
                         put("homeShelvesEnabled", settingsRepository.homeShelvesEnabled.first())
+                        put("exploreEnabled", settingsRepository.exploreEnabled.first())
                         put("playerHeroArtwork", settingsRepository.playerHeroArtwork.first())
                         put("perNetworkQualityEnabled", settingsRepository.perNetworkQualityEnabled.first())
                         put("audioQualityWifi", settingsRepository.audioQualityWifi.first().name)
@@ -444,6 +445,9 @@ class BackupManager(
                     }
                     if (s.has("playerHeroArtwork")) {
                         runCatching { settingsRepository.setPlayerHeroArtwork(s.getBoolean("playerHeroArtwork")) }
+                    }
+                    if (s.has("exploreEnabled")) {
+                        runCatching { settingsRepository.setExploreEnabled(s.getBoolean("exploreEnabled")) }
                     }
                     if (s.has("homeShelvesEnabled")) {
                         runCatching { settingsRepository.setHomeShelvesEnabled(s.getBoolean("homeShelvesEnabled")) }

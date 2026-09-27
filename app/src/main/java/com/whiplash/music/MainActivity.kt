@@ -155,6 +155,8 @@ private enum class AppTab(val label: String) {
 private sealed interface SearchDestination {
     data class Album(val url: String) : SearchDestination
     data class Artist(val channelUrl: String) : SearchDestination
+    /** 4.3: an Explore mood/genre page. */
+    data class Genre(val id: String) : SearchDestination
 }
 
 /**
@@ -498,6 +500,9 @@ private fun WhiplashApp() {
                                             },
                                             selectedTab = selectedSearchResultTab,
                                             onSelectedTabChange = { selectedSearchResultTab = it },
+                                            onOpenGenre = { genre ->
+                                                searchDetailStack = searchDetailStack + SearchDestination.Genre(genre.id)
+                                            },
                                         )
                                     }
                                     searchLayers.forEachIndexed { index, destination ->
@@ -519,6 +524,19 @@ private fun WhiplashApp() {
                                                         onBack = { searchDetailStack = searchDetailStack.take(index) },
                                                         onPlayQueue = { queue, i -> app.playbackController.playQueue(queue, i) },
                                                     )
+                                                    is SearchDestination.Genre -> {
+                                                        val genre = com.whiplash.music.domain.model.exploreGenre(destination.id)
+                                                        if (genre != null) {
+                                                            com.whiplash.music.ui.explore.GenreScreen(
+                                                                genre = genre,
+                                                                onBack = { searchDetailStack = searchDetailStack.take(index) },
+                                                                onOpenCollection = { album ->
+                                                                    searchDetailStack = searchDetailStack.take(index + 1) + SearchDestination.Album(album.url)
+                                                                },
+                                                                onPlayQueue = { queue, i -> app.playbackController.playQueue(queue, i) },
+                                                            )
+                                                        }
+                                                    }
                                                     is SearchDestination.Artist -> ArtistDetailScreen(
                                                         channelUrl = destination.channelUrl,
                                                         onBack = { searchDetailStack = searchDetailStack.take(index) },
