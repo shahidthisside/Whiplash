@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Icon
@@ -43,6 +45,63 @@ fun FavoritesScreen(
     val app = context.applicationContext as WhiplashApplication
     val viewModel: FavoritesViewModel = viewModel(factory = FavoritesViewModelFactory(app.libraryRepository))
     val favorites by viewModel.favorites.collectAsState()
+    val modern by app.settingsRepository.modernLibraryPages.collectAsState(initial = true)
+    if (modern) {
+        ModernFavorites(favorites, onPlayQueue)
+    } else {
+        ClassicFavorites(favorites, onPlayQueue, onBack)
+    }
+}
+
+/**
+ * Liked songs as a collection page: gradient heart cover, song count and
+ * running time, Play / Shuffle / Download, filter and sort. The system Back
+ * gesture still returns to Home, as on the other tabs.
+ */
+@androidx.compose.material3.ExperimentalMaterial3Api
+@Composable
+private fun ModernFavorites(
+    favorites: List<PlayableItem>,
+    onPlayQueue: (List<PlayableItem>, Int) -> Unit,
+) {
+    val tint = LIKED_TINT
+    com.whiplash.music.ui.common.TrackCollectionPage(
+        items = favorites,
+        eyebrow = "Collection",
+        title = "Liked songs",
+        tint = tint,
+        cover = { m -> com.whiplash.music.ui.theme.GradientIconCover(Icons.Filled.Favorite, tint, m) },
+        onPlayQueue = onPlayQueue,
+        sortKey = "favorites",
+        defaultSortLabel = "Recently liked",
+        modifier = Modifier.padding(horizontal = GlassTokens.spaceMd),
+        heroActions = {
+            if (favorites.isNotEmpty()) {
+                com.whiplash.music.ui.common.BatchDownloadIconButton(batchName = "Liked songs", tracks = favorites)
+            }
+        },
+        emptyContent = {
+            com.whiplash.music.ui.theme.CollectionEmptyState(
+                icon = Icons.Outlined.FavoriteBorder,
+                title = "No liked songs yet",
+                message = "Tap the heart in the player, or long-press any song and choose Add to favorites.",
+                tint = tint,
+            )
+        },
+    )
+}
+
+/** Pink used for Liked songs everywhere (this page and its Playlists tile). */
+internal val LIKED_TINT = androidx.compose.ui.graphics.Color(0xFFE0648B)
+
+/** The previous Favorites page, kept for the "Modern library pages" toggle's off state. */
+@androidx.compose.material3.ExperimentalMaterial3Api
+@Composable
+private fun ClassicFavorites(
+    favorites: List<PlayableItem>,
+    onPlayQueue: (List<PlayableItem>, Int) -> Unit,
+    onBack: () -> Unit,
+) {
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
         // Header row renders in both the populated and empty states, so the

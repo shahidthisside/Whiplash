@@ -16,7 +16,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.foundation.background
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
@@ -61,9 +73,20 @@ fun LocalLibraryScreen(
     onAlbumClick: (LocalAlbum) -> Unit = {},
     onArtistClick: (LocalArtist) -> Unit = {},
     onOpenHistory: (() -> Unit)? = null,
+    backEnabled: Boolean = true,
+    resetKey: Int = 0,
 ) {
     val context = LocalContext.current
     val viewModel: LocalLibraryViewModel = viewModel(factory = LocalLibraryViewModelFactory(context))
+
+    // Local album / artist page (modern pages only). Held as kind + id + name so it survives rotation.
+    var detailKind by rememberSaveable { mutableStateOf<String?>(null) }
+    var detailId by rememberSaveable { mutableStateOf(0L) }
+    var detailTitle by rememberSaveable { mutableStateOf("") }
+    var detailSubtitle by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(resetKey) { if (resetKey != 0) detailKind = null }
+    // Off while the full player covers Library, so Back closes the player first.
+    androidx.activity.compose.BackHandler(enabled = backEnabled && detailKind != null) { detailKind = null }
 
     var hasPermission by rememberSaveable { mutableStateOf(LocalMediaPermission.isGranted(context)) }
     var permissionPermanentlyDenied by rememberSaveable { mutableStateOf(false) }
@@ -92,12 +115,26 @@ fun LocalLibraryScreen(
     // own content is replaced by the permission prompt when needed (see
     // LibraryContent) — Downloads works regardless of this permission's
     // state, exactly as it should.
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
+    Box(modifier = Modifier.fillMaxSize()) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = GlassTokens.spaceMd)
+            .then(if (detailKind != null) Modifier.clearAndSetSemantics {} else Modifier),
+    ) {
         LibraryContent(
             viewModel = viewModel,
             onPlayQueue = onPlayQueue,
-            onAlbumClick = onAlbumClick,
-            onArtistClick = onArtistClick,
+            onAlbumClick = { album ->
+                onAlbumClick(album)
+                detailKind = "album"; detailId = album.id; detailTitle = album.title
+                detailSubtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · ")
+            },
+            onArtistClick = { artist ->
+                onArtistClick(artist)
+                detailKind = "artist"; detailId = artist.id; detailTitle = artist.name
+                detailSubtitle = if (artist.albumCount == 1) "1 album" else "${artist.albumCount} albums"
+            },
             hasMediaPermission = hasPermission,
             onOpenHistory = onOpenHistory,
             permissionPermanentlyDenied = permissionPermanentlyDenied,
@@ -118,6 +155,84 @@ fun LocalLibraryScreen(
                 }.onFailure {
                     com.whiplash.music.ui.common.ToastController.show("Couldn't open app settings")
                 }
+            },
+        )
+    }
+    // The list stays composed (and scrolled) underneath; the page slides over it.
+    var shownKind by remember { mutableStateOf(detailKind) }
+    if (detailKind != null) shownKind = detailKind
+    androidx.compose.animation.AnimatedVisibility(
+        visible = detailKind != null,
+        enter = androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(380, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it / 4 } +
+            androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(380)),
+        exit = androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(380, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it / 4 } +
+            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(260)),
+    ) {
+        val kind = shownKind
+        if (kind != null) {
+            Box(modifier = Modifier.fillMaxSize().background(com.whiplash.music.ui.theme.WhiplashColors.background)) {
+                LocalCollectionPage(
+                    viewModel = viewModel,
+                    isAlbum = kind == "album",
+                    id = detailId,
+                    title = detailTitle,
+                    subtitle = detailSubtitle,
+                    onBack = { detailKind = null },
+                    onPlayQueue = onPlayQueue,
+                )
+            }
+        }
+    }
+    }
+}
+
+/** A local album's or artist's page: back row, hero with cover, then its songs. */
+@androidx.compose.material3.ExperimentalMaterial3Api
+@Composable
+private fun LocalCollectionPage(
+    viewModel: LocalLibraryViewModel,
+    isAlbum: Boolean,
+    id: Long,
+    title: String,
+    subtitle: String,
+    onBack: () -> Unit,
+    onPlayQueue: (List<PlayableItem>, Int) -> Unit,
+) {
+    val songsFlow = remember(isAlbum, id) { if (isAlbum) viewModel.songsOnAlbum(id) else viewModel.songsByArtist(id) }
+    val songs by songsFlow.collectAsState(initial = null)
+    val list = songs.orEmpty()
+    val tint = com.whiplash.music.ui.theme.tintForName(title)
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceXs), verticalAlignment = Alignment.CenterVertically) {
+            com.whiplash.music.ui.theme.PlainIconButton(contentDescription = "Back", onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = com.whiplash.music.ui.theme.WhiplashColors.textPrimary)
+            }
+        }
+        if (songs == null) return@Column
+        com.whiplash.music.ui.common.TrackCollectionPage(
+            items = list,
+            eyebrow = if (isAlbum) "Album" else "Artist",
+            title = title,
+            tint = tint,
+            subtitlePrefix = subtitle.ifBlank { null },
+            cover = { m ->
+                LocalArtwork(
+                    uri = list.firstOrNull { it.artworkUri != null }?.artworkUri,
+                    name = title,
+                    fallbackIcon = if (isAlbum) Icons.Filled.Album else Icons.Filled.Person,
+                    modifier = if (isAlbum) m else m.clip(androidx.compose.foundation.shape.CircleShape),
+                )
+            },
+            onPlayQueue = onPlayQueue,
+            sortKey = "local_${if (isAlbum) "album" else "artist"}_$id",
+            defaultSortLabel = if (isAlbum) "Track order" else "Library order",
+            emptyContent = {
+                com.whiplash.music.ui.theme.CollectionEmptyState(
+                    icon = Icons.Filled.Album,
+                    title = "No songs found",
+                    message = "These songs may have been moved or deleted from this device.",
+                    tint = tint,
+                )
             },
         )
     }
@@ -156,6 +271,8 @@ private fun LibraryContent(
     val downloadSearchResults by viewModel.downloadSearchResults.collectAsState()
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val appForSettings = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.whiplash.music.WhiplashApplication
+    val modern by appForSettings.settingsRepository.modernLibraryPages.collectAsState(initial = true)
 
     androidx.compose.foundation.layout.Row(
         modifier = Modifier.fillMaxWidth(),
@@ -263,6 +380,7 @@ private fun LibraryContent(
     // by hasMediaPermission's value either way.
     when {
         selectedTab == LibraryTab.DOWNLOADS -> DownloadList(
+            modern = modern,
             downloads = downloads,
             downloadProgress = downloadProgress,
             inFlightTracks = inFlightTracks,
@@ -277,9 +395,9 @@ private fun LibraryContent(
         isScanning && isEmpty -> LoadingState()
         isEmpty -> EmptyLibraryState(onRescan = viewModel::rescan)
         else -> when (selectedTab) {
-            LibraryTab.SONGS -> SongList(songs, onPlayQueue)
-            LibraryTab.ALBUMS -> AlbumList(albums, onAlbumClick)
-            LibraryTab.ARTISTS -> ArtistList(artists, onArtistClick)
+            LibraryTab.SONGS -> SongList(songs, onPlayQueue, modern)
+            LibraryTab.ALBUMS -> if (modern) ModernAlbumGrid(albums, songs, onAlbumClick) else AlbumList(albums, onAlbumClick)
+            LibraryTab.ARTISTS -> if (modern) ModernArtistList(artists, songs, onArtistClick) else ArtistList(artists, onArtistClick)
             LibraryTab.DOWNLOADS -> Unit // handled above
         }
     }
@@ -343,7 +461,22 @@ private fun DownloadSearchResults(
 
 @androidx.compose.material3.ExperimentalMaterial3Api
 @Composable
-private fun SongList(songs: List<PlayableItem.LocalTrack>, onPlayQueue: (List<PlayableItem>, Int) -> Unit) {
+private fun SongList(songs: List<PlayableItem.LocalTrack>, onPlayQueue: (List<PlayableItem>, Int) -> Unit, modern: Boolean = false) {
+    if (modern) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            LibraryActionBar(
+                summary = com.whiplash.music.ui.theme.collectionSummary(songs),
+                onPlay = { onPlayQueue(songs, 0) },
+                onShuffle = { onPlayQueue(songs.shuffled(), 0) },
+            )
+            com.whiplash.music.ui.player.PlayableItemsList(
+                items = songs,
+                onPlayQueue = { _, index -> onPlayQueue(songs, index) },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        return
+    }
     com.whiplash.music.ui.player.PlayableItemsList(
         items = songs,
         onPlayQueue = { _, index -> onPlayQueue(songs, index) },
@@ -375,6 +508,7 @@ private fun SongList(songs: List<PlayableItem.LocalTrack>, onPlayQueue: (List<Pl
 @androidx.compose.material3.ExperimentalMaterial3Api
 @Composable
 private fun DownloadList(
+    modern: Boolean,
     downloads: List<PlayableItem.DownloadedTrack>,
     downloadProgress: Map<String, com.whiplash.music.data.download.DownloadProgress>,
     inFlightTracks: Map<String, PlayableItem.YoutubeTrack>,
@@ -392,6 +526,15 @@ private fun DownloadList(
     // states; the row's own key (source:id) would collide anyway.
     val rows: List<PlayableItem> = inFlightTracks.values.toList() + downloads
 
+    if (rows.isEmpty() && modern) {
+        com.whiplash.music.ui.theme.CollectionEmptyState(
+            icon = Icons.Filled.DownloadForOffline,
+            title = "No downloads yet",
+            message = "Download a song, album or playlist from its \u22ee menu to listen with no connection.",
+            tint = WhiplashLibraryTint,
+        )
+        return
+    }
     if (rows.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(GlassTokens.spaceLg)) {
@@ -413,7 +556,22 @@ private fun DownloadList(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
+        if (modern) LibraryActionBar(
+            summary = listOfNotNull(
+                com.whiplash.music.ui.theme.collectionSummary(downloads),
+                if (inFlightTracks.isNotEmpty()) "${inFlightTracks.size} downloading" else null,
+            ).joinToString(" · "),
+            onPlay = if (downloads.isNotEmpty()) ({ onPlayQueue(downloads, 0) }) else null,
+            onShuffle = if (downloads.isNotEmpty()) ({ onPlayQueue(downloads.shuffled(), 0) }) else null,
+        ) {
+            com.whiplash.music.ui.theme.PlainIconButton(
+                contentDescription = "Clear all downloads",
+                onClick = { showClearAllConfirm = true },
+                size = 48.dp,
+            ) {
+                Icon(Icons.Filled.DeleteOutline, contentDescription = null, tint = com.whiplash.music.ui.theme.WhiplashColors.textSecondary)
+            }
+        } else Row(
             // Horizontal padding matches GlassListItem's own row padding
             // (GlassTokens.spaceMd) so Shuffle's left edge lines up with
             // the artwork thumbnail below it, and Clear all's right edge
@@ -585,6 +743,187 @@ private fun PermissionRequestState(
             GlassButton(
                 text = if (permanentlyDenied) "Open Settings" else "Grant Access",
                 onClick = if (permanentlyDenied) onOpenSettings else onRequestPermission,
+            )
+        }
+    }
+}
+
+
+/** Accent for Library empty states and fallback covers. */
+private val WhiplashLibraryTint = androidx.compose.ui.graphics.Color(0xFF5B8DEF)
+
+/**
+ * Modern Library action bar: Play and Shuffle pills, a one-line summary
+ * ("12 songs · 48 min") that shrinks first on narrow screens, then any
+ * [trailing] icon.
+ */
+@Composable
+private fun LibraryActionBar(
+    summary: String,
+    onPlay: (() -> Unit)?,
+    onShuffle: (() -> Unit)?,
+    trailing: @Composable () -> Unit = {},
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = GlassTokens.spaceXs, top = GlassTokens.spaceXs, bottom = GlassTokens.spaceSm),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        com.whiplash.music.ui.theme.CollectionPillButton(
+            text = "Play",
+            icon = Icons.Filled.PlayArrow,
+            onClick = { onPlay?.invoke() },
+            primary = true,
+            enabled = onPlay != null,
+        )
+        com.whiplash.music.ui.theme.CollectionPillButton(
+            text = "Shuffle",
+            icon = Icons.Filled.Shuffle,
+            onClick = { onShuffle?.invoke() },
+            primary = false,
+            enabled = onShuffle != null,
+        )
+        Text(
+            text = summary,
+            style = MaterialTheme.typography.bodySmall,
+            color = com.whiplash.music.ui.theme.WhiplashColors.textSecondary,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = Modifier.weight(1f),
+        )
+        trailing()
+    }
+}
+
+
+/** First artwork found for each album title (case-insensitive), from the song list. */
+internal fun albumArtworks(songs: List<PlayableItem.LocalTrack>): Map<String, String> =
+    songs.asSequence()
+        .filter { it.album != null && it.artworkUri != null }
+        .groupBy { it.album!!.lowercase() }
+        .mapValues { (_, list) -> list.first().artworkUri!! }
+
+/** First artwork found for each artist name (case-insensitive). */
+internal fun artistArtworks(songs: List<PlayableItem.LocalTrack>): Map<String, String> =
+    songs.asSequence()
+        .filter { it.artworkUri != null }
+        .groupBy { it.artist.lowercase() }
+        .mapValues { (_, list) -> list.first().artworkUri!! }
+
+/** Artwork, or a tinted tile with [fallbackIcon] if there's none or it fails to load. */
+@Composable
+internal fun LocalArtwork(
+    uri: String?,
+    name: String,
+    fallbackIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier,
+) {
+    var failed by remember(uri) { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        com.whiplash.music.ui.theme.GradientIconCover(fallbackIcon, com.whiplash.music.ui.theme.tintForName(name), Modifier.fillMaxSize())
+        if (uri != null && !failed) {
+            coil.compose.AsyncImage(
+                model = coil.request.ImageRequest.Builder(LocalContext.current).data(uri).crossfade(true).build(),
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                onError = { failed = true },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+/** Albums as a cover grid. */
+@Composable
+private fun ModernAlbumGrid(
+    albums: List<LocalAlbum>,
+    songs: List<PlayableItem.LocalTrack>,
+    onAlbumClick: (LocalAlbum) -> Unit,
+) {
+    val art = remember(songs) { albumArtworks(songs) }
+    androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+        columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceXs),
+        horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
+        verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceLg),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(top = GlassTokens.spaceXs, bottom = GlassTokens.miniPlayerReservedHeight),
+    ) {
+        items(albums.size, key = { albums[it].id }) { i ->
+            val album = albums[i]
+            Column(
+                modifier = Modifier
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.medium))
+                    .clickable(onClickLabel = "Open album") { onAlbumClick(album) }
+                    .semantics(mergeDescendants = true) {},
+            ) {
+                LocalArtwork(
+                    uri = art[album.title.lowercase()],
+                    name = album.title,
+                    fallbackIcon = Icons.Filled.Album,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.medium)),
+                )
+                Text(
+                    text = album.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = com.whiplash.music.ui.theme.WhiplashColors.textPrimary,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = GlassTokens.spaceSm),
+                )
+                Text(
+                    text = "${album.artist} · ${com.whiplash.music.ui.theme.songCountLabel(album.songCount)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = com.whiplash.music.ui.theme.WhiplashColors.textSecondary,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** Artists with round photos (their first song's artwork). */
+@Composable
+private fun ModernArtistList(
+    artists: List<LocalArtist>,
+    songs: List<PlayableItem.LocalTrack>,
+    onArtistClick: (LocalArtist) -> Unit,
+) {
+    val art = remember(songs) { artistArtworks(songs) }
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
+    ) {
+        items(artists, key = { it.id }) { artist ->
+            GlassListItem(
+                title = artist.name,
+                subtitle = listOf(
+                    com.whiplash.music.ui.theme.songCountLabel(artist.trackCount),
+                    if (artist.albumCount == 1) "1 album" else "${artist.albumCount} albums",
+                ).joinToString(" · "),
+                onClick = { onArtistClick(artist) },
+                leading = {
+                    LocalArtwork(
+                        uri = art[artist.name.lowercase()],
+                        name = artist.name,
+                        fallbackIcon = Icons.Filled.Person,
+                        modifier = Modifier.size(56.dp).clip(androidx.compose.foundation.shape.CircleShape),
+                    )
+                },
+                trailing = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = com.whiplash.music.ui.theme.WhiplashColors.textTertiary,
+                        modifier = Modifier.padding(end = GlassTokens.spaceSm),
+                    )
+                },
             )
         }
     }

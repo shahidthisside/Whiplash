@@ -267,7 +267,30 @@ class LibraryRepository(
         playlistDao.rename(id, name, description, System.currentTimeMillis())
     }
 
-    suspend fun deletePlaylist(id: Long) = playlistDao.delete(id)
+    suspend fun deletePlaylist(id: Long) {
+        val old = playlistDao.getArtwork(id)
+        playlistDao.delete(id)
+        deleteOwnCoverFile(old)
+    }
+
+    /**
+     * Sets a playlist's cover ([PlaylistArt.Auto] clears it). A gallery
+     * picture it replaces is deleted from app storage.
+     */
+    suspend fun setPlaylistArt(id: Long, art: com.whiplash.music.domain.model.PlaylistArt) {
+        val old = playlistDao.getArtwork(id)
+        val new = com.whiplash.music.domain.model.PlaylistArt.encode(art)
+        playlistDao.setArtwork(id, new)
+        if (old != new) deleteOwnCoverFile(old)
+    }
+
+    /** Deletes a gallery cover copy, but only one inside our own playlist_covers folder. */
+    private fun deleteOwnCoverFile(stored: String?) {
+        val art = com.whiplash.music.domain.model.PlaylistArt.parse(stored) as? com.whiplash.music.domain.model.PlaylistArt.Image ?: return
+        val path = runCatching { android.net.Uri.parse(art.uri).path }.getOrNull() ?: return
+        if (!path.contains("/playlist_covers/")) return
+        runCatching { java.io.File(path).delete() }
+    }
 
     /**
      * Real, reported crash: rows already inserted before [PlaylistDao.addTrack]'s

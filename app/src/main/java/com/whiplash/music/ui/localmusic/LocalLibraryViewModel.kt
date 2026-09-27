@@ -99,6 +99,12 @@ class LocalLibraryViewModel(
         }
     }
 
+    /** Songs on one local album, for its page. */
+    fun songsOnAlbum(albumId: Long) = repository.observeSongsByAlbum(albumId)
+
+    /** Songs by one local artist, for their page. */
+    fun songsByArtist(artistId: Long) = repository.observeSongsByArtist(artistId)
+
     val songCount: StateFlow<Int> =
         repository.observeSongCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 

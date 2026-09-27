@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Check
@@ -130,6 +131,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val homeShelvesEnabled by viewModel.homeShelvesEnabled.collectAsState()
     val exploreEnabled by viewModel.exploreEnabled.collectAsState()
     val replayEnabled by viewModel.replayEnabled.collectAsState()
+    val modernLibraryPages by viewModel.modernLibraryPages.collectAsState()
     val quickPicksGridCount by viewModel.quickPicksGridCount.collectAsState()
     val lyricsProviderHealth by viewModel.lyricsProviderHealth.collectAsState()
     val playerHeroArtwork by viewModel.playerHeroArtwork.collectAsState()
@@ -713,6 +715,18 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     subtitle = "Count what you play for a monthly recap of your top songs and artists, opened from Home. Counting stays on this device.",
                                     checked = replayEnabled,
                                     onCheckedChange = viewModel::setReplayEnabled,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.MODERN_LIBRARY)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Modern library pages",
+                                    icon = Icons.Filled.LibraryMusic,
+                                    subtitle = "Cover headers, Play and Shuffle buttons, sorting, and album and artist pages in Library, Favorites and Playlists.",
+                                    checked = modernLibraryPages,
+                                    onCheckedChange = viewModel::setModernLibraryPages,
                                 )
                             }
                         }

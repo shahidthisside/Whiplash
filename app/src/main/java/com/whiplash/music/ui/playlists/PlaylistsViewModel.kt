@@ -43,6 +43,27 @@ class PlaylistsViewModel(
         }
     }
 
+    /** Sets or clears a playlist's custom cover. */
+    fun setCover(playlist: Playlist, art: com.whiplash.music.domain.model.PlaylistArt) {
+        viewModelScope.launch {
+            libraryRepository.setPlaylistArt(playlist.id, art)
+            ToastController.show(if (art == com.whiplash.music.domain.model.PlaylistArt.Auto) "Cover reset to automatic" else "Cover updated")
+        }
+    }
+
+    /** Copies a gallery picture into app storage and makes it the cover. */
+    fun setGalleryCover(context: android.content.Context, playlist: Playlist, source: android.net.Uri) {
+        viewModelScope.launch {
+            val saved = com.whiplash.music.data.repository.PlaylistCoverStore.import(context.applicationContext, playlist.id, source)
+            if (saved == null) {
+                ToastController.show("Couldn't use that picture")
+                return@launch
+            }
+            libraryRepository.setPlaylistArt(playlist.id, com.whiplash.music.domain.model.PlaylistArt.Image(saved))
+            ToastController.show("Cover updated")
+        }
+    }
+
     fun deletePlaylist(id: Long, name: String) {
         viewModelScope.launch {
             libraryRepository.deletePlaylist(id)

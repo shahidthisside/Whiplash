@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Icon
@@ -55,6 +57,11 @@ fun PlaylistDetailScreen(
         factory = PlaylistDetailViewModelFactory(app.libraryRepository, playlist.id),
     )
     val tracks by viewModel.tracks.collectAsState()
+    val modern by app.settingsRepository.modernLibraryPages.collectAsState(initial = true)
+    if (modern) {
+        ModernPlaylistDetail(playlist, tracks, onBack, onPlayQueue)
+        return
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
         Row(
@@ -114,5 +121,64 @@ fun PlaylistDetailScreen(
                 playlistContext = com.whiplash.music.ui.player.PlaylistContext(playlist.id, playlist.name),
             )
         }
+    }
+}
+
+
+/**
+ * Playlist page as a collection: back row, then a hero with the cover
+ * mosaic (or a tinted tile for an empty playlist), song count and running
+ * time, Play / Shuffle / Download, filter and sort, then the songs.
+ */
+@androidx.compose.material3.ExperimentalMaterial3Api
+@Composable
+private fun ModernPlaylistDetail(
+    playlist: Playlist,
+    tracks: List<PlayableItem>,
+    onBack: () -> Unit,
+    onPlayQueue: (List<PlayableItem>, Int) -> Unit,
+) {
+    val tint = com.whiplash.music.ui.theme.tintForName(playlist.name)
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceXs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PlainIconButton(contentDescription = "Back", onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = WhiplashColors.textPrimary)
+            }
+        }
+        com.whiplash.music.ui.common.TrackCollectionPage(
+            items = tracks,
+            eyebrow = if (playlist.pinned) "Pinned playlist" else "Playlist",
+            title = playlist.name,
+            tint = tint,
+            cover = { m ->
+                PlaylistArtwork(
+                    playlist = playlist,
+                    tracks = tracks,
+                    modifier = m,
+                    cornerRadius = com.whiplash.music.ui.theme.WhiplashRadius.medium,
+                    emptyTile = { em -> com.whiplash.music.ui.theme.GradientIconCover(Icons.AutoMirrored.Filled.QueueMusic, tint, em) },
+                )
+            },
+            onPlayQueue = onPlayQueue,
+            sortKey = "playlist_${playlist.id}",
+            defaultSortLabel = "Playlist order",
+            playlistContext = com.whiplash.music.ui.player.PlaylistContext(playlist.id, playlist.name),
+            heroActions = {
+                if (tracks.isNotEmpty()) {
+                    com.whiplash.music.ui.common.BatchDownloadIconButton(batchName = playlist.name, tracks = tracks)
+                }
+            },
+            emptyContent = {
+                com.whiplash.music.ui.theme.CollectionEmptyState(
+                    icon = Icons.AutoMirrored.Filled.QueueMusic,
+                    title = "This playlist is empty",
+                    message = "Long-press any song, or open its \u22ee menu, and choose Add to playlist.",
+                    tint = tint,
+                )
+            },
+        )
     }
 }

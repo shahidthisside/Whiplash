@@ -21,9 +21,12 @@ import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
@@ -67,7 +70,7 @@ import com.whiplash.music.ui.theme.WhiplashRadius
 @androidx.compose.material3.ExperimentalMaterial3Api
 @androidx.compose.foundation.ExperimentalFoundationApi
 @Composable
-fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
+fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit, onOpenLiked: () -> Unit = {}) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: PlaylistsViewModel = viewModel(factory = PlaylistsViewModelFactory(app.libraryRepository, app.youtubeSearchRepository))
@@ -89,12 +92,37 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
     // GlassConfirmDialog below, matching every other destructive action's
     // existing convention.
     var playlistPendingDeleteConfirm by remember { mutableStateOf<Playlist?>(null) }
+    // Custom cover: the options sheet, then the song picker or the gallery.
+    var coverTarget by remember { mutableStateOf<Playlist?>(null) }
+    var coverSongsTarget by remember { mutableStateOf<Playlist?>(null) }
+    var galleryTarget by remember { mutableStateOf<Playlist?>(null) }
+    val galleryLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        val target = galleryTarget
+        galleryTarget = null
+        if (uri != null && target != null) viewModel.setGalleryCover(context, target, uri)
+    }
     // 4.4: cover grid (default) or compact list; persisted and in backup.
     val listView by app.settingsRepository.playlistsListView.collectAsState(initial = false)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val modern by app.settingsRepository.modernLibraryPages.collectAsState(initial = true)
+    val liked by app.libraryRepository.observeFavorites().collectAsState(initial = emptyList())
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
+        if (modern) {
+            ModernPlaylistsActions(
+                isImporting = isImporting,
+                showLayoutToggle = playlists.isNotEmpty(),
+                listView = listView,
+                onNew = { showCreateDialog = true },
+                onImport = { showImportDialog = true },
+                onToggleLayout = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    scope.launch { app.settingsRepository.setPlaylistsListView(!listView) }
+                },
+            )
+        } else Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = GlassTokens.spaceMd, vertical = GlassTokens.spaceSm),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
@@ -141,7 +169,22 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
             }
         }
 
-        if (playlists.isEmpty()) {
+        if (modern && playlists.isEmpty()) {
+            if (liked.isNotEmpty()) {
+                LikedSongsRow(count = liked.size, onClick = onOpenLiked, modifier = Modifier.padding(horizontal = GlassTokens.spaceMd))
+            }
+            com.whiplash.music.ui.theme.CollectionEmptyState(
+                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                title = "No playlists yet",
+                message = "Make one for any mood, or bring one over from YouTube with its link.",
+                tint = WhiplashColors.accent,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    com.whiplash.music.ui.theme.CollectionPillButton("New playlist", Icons.Filled.Add, { showCreateDialog = true }, primary = true)
+                    com.whiplash.music.ui.theme.CollectionPillButton("Import", Icons.Filled.Link, { showImportDialog = true }, primary = false, enabled = !isImporting)
+                }
+            }
+        } else if (playlists.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd), contentAlignment = Alignment.Center) {
                 Text(
                     text = "No playlists yet. Tap + to create one.",
@@ -160,8 +203,14 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                     bottom = GlassTokens.miniPlayerReservedHeight,
                 ),
             ) {
+                if (modern && liked.isNotEmpty()) {
+                    item(key = "__liked__") {
+                        LikedSongsGridTile(count = liked.size, onClick = onOpenLiked, modifier = Modifier.animateItem())
+                    }
+                }
                 gridItems(playlists, key = { it.id }) { playlist ->
                     PlaylistGridTile(
+                        modern = modern,
                         playlist = playlist,
                         onClick = { onOpenPlaylist(playlist) },
                         onLongClick = {
@@ -177,6 +226,11 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
             ) {
+                if (modern && liked.isNotEmpty()) {
+                    item(key = "__liked__") {
+                        LikedSongsRow(count = liked.size, onClick = onOpenLiked, modifier = Modifier.animateItem())
+                    }
+                }
                 items(playlists, key = { it.id }) { playlist ->
                     val tracks by app.libraryRepository.observePlaylistTracks(playlist.id).collectAsState(initial = null)
                     GlassListItem(
@@ -188,10 +242,18 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                             playlistPendingDelete = playlist
                         },
                         leading = {
-                            PlaylistCover(
-                                artworks = tracks.orEmpty().mapNotNull { it.artworkUri }.take(4),
+                            PlaylistArtwork(
+                                playlist = playlist,
+                                tracks = tracks,
                                 modifier = Modifier.size(56.dp),
                                 cornerRadius = WhiplashRadius.small,
+                                emptyTile = if (modern) { m ->
+                                    com.whiplash.music.ui.theme.GradientIconCover(
+                                        Icons.AutoMirrored.Filled.QueueMusic,
+                                        com.whiplash.music.ui.theme.tintForName(playlist.name),
+                                        m,
+                                    )
+                                } else null,
                             )
                         },
                         trailing = {
@@ -337,6 +399,26 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                         .padding(vertical = GlassTokens.spaceSm)
                         .clickable(
                             onClick = {
+                                coverTarget = toDelete
+                                playlistPendingDelete = null
+                            },
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Image, contentDescription = null, tint = WhiplashColors.textPrimary)
+                    Text(
+                        text = "Change cover",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = WhiplashColors.textPrimary,
+                        modifier = Modifier.padding(start = GlassTokens.spaceMd),
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = GlassTokens.spaceSm)
+                        .clickable(
+                            onClick = {
                                 playlistPendingDeleteConfirm = toDelete
                                 playlistPendingDelete = null
                             },
@@ -352,6 +434,50 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                     )
                 }
             }
+        }
+    }
+
+    // Look the playlist up again so the sheets show a cover change straight away.
+    val coverFor = coverTarget?.let { t -> playlists.firstOrNull { it.id == t.id } ?: t }
+    if (coverFor != null) {
+        val coverTracks by app.libraryRepository.observePlaylistTracks(coverFor.id).collectAsState(initial = null)
+        PlaylistCoverOptionsSheet(
+            playlist = coverFor,
+            tracks = coverTracks,
+            onAutomatic = {
+                viewModel.setCover(coverFor, com.whiplash.music.domain.model.PlaylistArt.Auto)
+                coverTarget = null
+            },
+            onChooseSongs = {
+                coverSongsTarget = coverFor
+                coverTarget = null
+            },
+            onChooseGallery = {
+                galleryTarget = coverFor
+                coverTarget = null
+                galleryLauncher.launch(
+                    androidx.activity.result.PickVisualMediaRequest(
+                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                    ),
+                )
+            },
+            onDismiss = { coverTarget = null },
+        )
+    }
+
+    val songsFor = coverSongsTarget?.let { t -> playlists.firstOrNull { it.id == t.id } ?: t }
+    if (songsFor != null) {
+        val pickTracks by app.libraryRepository.observePlaylistTracks(songsFor.id).collectAsState(initial = null)
+        pickTracks?.let { list ->
+            PlaylistCoverSongPicker(
+                playlist = songsFor,
+                tracks = list,
+                onSave = { uris ->
+                    viewModel.setCover(songsFor, com.whiplash.music.domain.model.PlaylistArt.Songs(uris))
+                    coverSongsTarget = null
+                },
+                onDismiss = { coverSongsTarget = null },
+            )
         }
     }
 
@@ -432,6 +558,7 @@ private fun playlistSubtitle(playlist: Playlist, count: Int?): String? {
 @Composable
 private fun PlaylistGridTile(
     playlist: Playlist,
+    modern: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -445,10 +572,13 @@ private fun PlaylistGridTile(
             .semantics(mergeDescendants = true) {},
     ) {
         Box {
-            PlaylistCover(
-                artworks = tracks.orEmpty().mapNotNull { it.artworkUri }.take(4),
+            PlaylistArtwork(
+                playlist = playlist,
+                tracks = tracks,
                 modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                 cornerRadius = WhiplashRadius.medium,
+                // An empty playlist gets its own colour and initial rather than a grey tile.
+                emptyTile = if (modern) { m -> NamedPlaylistTile(playlist.name, m) } else null,
             )
             if (playlist.pinned) {
                 Box(
@@ -489,7 +619,7 @@ private fun PlaylistGridTile(
  * there are fewer, and a tinted music-note tile for an empty playlist.
  */
 @Composable
-private fun PlaylistCover(
+internal fun PlaylistCover(
     artworks: List<String>,
     modifier: Modifier,
     cornerRadius: androidx.compose.ui.unit.Dp,
@@ -530,4 +660,199 @@ private fun CoverImage(uri: String, modifier: Modifier) {
         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
         modifier = modifier,
     )
+}
+
+
+/** Modern Playlists header: New and Import pills, plus the grid/list switch. */
+@Composable
+private fun ModernPlaylistsActions(
+    isImporting: Boolean,
+    showLayoutToggle: Boolean,
+    listView: Boolean,
+    onNew: () -> Unit,
+    onImport: () -> Unit,
+    onToggleLayout: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = GlassTokens.spaceMd, end = GlassTokens.spaceXs, top = GlassTokens.spaceXs, bottom = GlassTokens.spaceMd),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        com.whiplash.music.ui.theme.CollectionPillButton("New", Icons.Filled.Add, onNew, primary = true)
+        Box {
+            com.whiplash.music.ui.theme.CollectionPillButton(
+                text = if (isImporting) "Importing…" else "Import",
+                icon = Icons.Filled.Link,
+                onClick = onImport,
+                primary = false,
+                enabled = !isImporting,
+                modifier = Modifier.semantics { contentDescription = "Import playlist from YouTube" },
+            )
+        }
+        if (isImporting) {
+            CircularProgressIndicator(color = WhiplashColors.accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+        }
+        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+        if (showLayoutToggle) {
+            PlainIconButton(
+                contentDescription = if (listView) "Show playlists as grid" else "Show playlists as list",
+                onClick = onToggleLayout,
+                size = 48.dp,
+            ) {
+                Icon(
+                    if (listView) Icons.Filled.GridView else Icons.AutoMirrored.Filled.ViewList,
+                    contentDescription = null,
+                    tint = WhiplashColors.textSecondary,
+                )
+            }
+        }
+    }
+}
+
+/** Colour tile with the playlist's initial, for a playlist with no songs yet. */
+@Composable
+private fun NamedPlaylistTile(name: String, modifier: Modifier) {
+    val tint = com.whiplash.music.ui.theme.tintForName(name)
+    Box(
+        modifier = modifier.background(
+            androidx.compose.ui.graphics.Brush.linearGradient(
+                listOf(
+                    androidx.compose.ui.graphics.lerp(tint, androidx.compose.ui.graphics.Color.White, 0.10f),
+                    androidx.compose.ui.graphics.lerp(tint, androidx.compose.ui.graphics.Color.Black, 0.6f),
+                ),
+            ),
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = name.trim().firstOrNull()?.uppercase() ?: "♪",
+            style = MaterialTheme.typography.displayMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+            color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.92f),
+        )
+    }
+}
+
+/** Liked songs as the first grid tile, opening the Favorites tab. */
+@Composable
+private fun LikedSongsGridTile(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clickable(onClickLabel = "Open liked songs", onClick = onClick)
+            .semantics(mergeDescendants = true) {},
+    ) {
+        com.whiplash.music.ui.theme.GradientIconCover(
+            Icons.Filled.Favorite,
+            com.whiplash.music.ui.library.LIKED_TINT,
+            Modifier.fillMaxWidth().aspectRatio(1f).clip(androidx.compose.foundation.shape.RoundedCornerShape(WhiplashRadius.medium)),
+        )
+        Text(
+            text = "Liked songs",
+            style = MaterialTheme.typography.titleSmall,
+            color = WhiplashColors.textPrimary,
+            maxLines = 1,
+            modifier = Modifier.padding(top = GlassTokens.spaceSm),
+        )
+        Text(
+            text = "Auto playlist · ${com.whiplash.music.ui.theme.songCountLabel(count)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = WhiplashColors.textSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Liked songs as the first list row. */
+@Composable
+private fun LikedSongsRow(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    GlassListItem(
+        title = "Liked songs",
+        subtitle = "Auto playlist · ${com.whiplash.music.ui.theme.songCountLabel(count)}",
+        onClick = onClick,
+        leading = {
+            com.whiplash.music.ui.theme.GradientIconCover(
+                Icons.Filled.Favorite,
+                com.whiplash.music.ui.library.LIKED_TINT,
+                Modifier.size(56.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(WhiplashRadius.small)),
+            )
+        },
+        modifier = modifier,
+    )
+}
+
+
+/**
+ * A playlist's cover, honouring a custom choice ([PlaylistArt]):
+ * a gallery picture, a mosaic of chosen song covers, or — by default — the
+ * cover built from its songs. [emptyTile] replaces the grey tile for a
+ * playlist with no artwork. A gallery picture that can't load (say, after
+ * restoring a backup on another phone) falls back to the automatic cover.
+ */
+@Composable
+internal fun PlaylistArtwork(
+    playlist: Playlist,
+    tracks: List<com.whiplash.music.domain.model.PlayableItem>?,
+    modifier: Modifier,
+    cornerRadius: androidx.compose.ui.unit.Dp,
+    emptyTile: (@Composable (Modifier) -> Unit)? = null,
+) {
+    val art = remember(playlist.artworkUrl) { com.whiplash.music.domain.model.PlaylistArt.parse(playlist.artworkUrl) }
+    var imageFailed by remember(art) { mutableStateOf(false) }
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(cornerRadius)
+    when {
+        art is com.whiplash.music.domain.model.PlaylistArt.Image && !imageFailed -> Box(
+            modifier = modifier.clip(shape).background(WhiplashColors.surfaceElevated),
+        ) {
+            coil.compose.AsyncImage(
+                model = coil.request.ImageRequest.Builder(LocalContext.current).data(art.uri).crossfade(true).build(),
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                onError = { imageFailed = true },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        art is com.whiplash.music.domain.model.PlaylistArt.Songs -> MosaicCover(art.artworks, modifier, cornerRadius)
+        else -> {
+            val arts = tracks.orEmpty().mapNotNull { it.artworkUri }.take(4)
+            if (emptyTile != null && tracks != null && arts.isEmpty()) {
+                emptyTile(modifier.clip(shape))
+            } else {
+                PlaylistCover(artworks = arts, modifier = modifier, cornerRadius = cornerRadius)
+            }
+        }
+    }
+}
+
+/**
+ * Chosen song covers: one fills the tile, two sit side by side, three put
+ * one tall cover beside two stacked, four make a 2×2 grid.
+ */
+@Composable
+internal fun MosaicCover(artworks: List<String>, modifier: Modifier, cornerRadius: androidx.compose.ui.unit.Dp) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(cornerRadius)
+    val a = artworks.take(4)
+    Box(modifier = modifier.clip(shape).background(WhiplashColors.surfaceElevated)) {
+        when (a.size) {
+            0 -> Unit
+            1 -> CoverImage(a[0], Modifier.fillMaxSize())
+            2 -> Row(Modifier.fillMaxSize()) {
+                CoverImage(a[0], Modifier.weight(1f).fillMaxSize())
+                CoverImage(a[1], Modifier.weight(1f).fillMaxSize())
+            }
+            3 -> Row(Modifier.fillMaxSize()) {
+                CoverImage(a[0], Modifier.weight(1f).fillMaxSize())
+                Column(Modifier.weight(1f).fillMaxSize()) {
+                    CoverImage(a[1], Modifier.weight(1f).fillMaxWidth())
+                    CoverImage(a[2], Modifier.weight(1f).fillMaxWidth())
+                }
+            }
+            else -> Column(Modifier.fillMaxSize()) {
+                for (row in 0 until 2) {
+                    Row(Modifier.weight(1f)) {
+                        for (col in 0 until 2) CoverImage(a[row * 2 + col], Modifier.weight(1f).fillMaxSize())
+                    }
+                }
+            }
+        }
+    }
 }

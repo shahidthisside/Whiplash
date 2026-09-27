@@ -48,6 +48,7 @@ enum class SettingEntry(val section: SettingsSection, val title: String, val key
     QUICK_PICKS_GRID(SettingsSection.APPEARANCE, "Quick Picks grid size", "songs per page swipe home grid"),
     EXPLORE(SettingsSection.APPEARANCE, "Explore in Search", "new releases charts moods genres browse"),
     REPLAY(SettingsSection.APPEARANCE, "Monthly Replay", "recap stats wrapped top songs artists minutes listened month"),
+    MODERN_LIBRARY(SettingsSection.APPEARANCE, "Modern library pages", "favorites liked playlists library albums artists design header sort"),
     HOME_SHELVES(SettingsSection.APPEARANCE, "Home shelves", "recommendations feed albums playlists for you"),
     THEME(SettingsSection.APPEARANCE, "Theme", "color colour dark palette accent"),
     REDUCE_ANIMATIONS(SettingsSection.APPEARANCE, "Reduce animations", "motion accessibility transitions"),

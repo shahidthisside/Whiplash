@@ -233,6 +233,8 @@ private fun WhiplashApp() {
     val lyricsSourceName by lyricsViewModel.lyricsProviderName.collectAsState()
 
     var isPlayerExpanded by rememberSaveable { mutableStateOf(false) }
+    // Bumped when the Library tab is tapped again, to close an album/artist page.
+    var libraryResetKey by remember { mutableStateOf(0) }
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.HOME) }
     var openPlaylist by remember { mutableStateOf<com.whiplash.music.domain.model.Playlist?>(null) }
     // Same collapse-not-exit back pattern as openPlaylist, for the Home
@@ -617,6 +619,8 @@ private fun WhiplashApp() {
                                     LocalLibraryScreen(
                                         onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
                                         onOpenHistory = { historyTab = AppTab.LOCAL },
+                                        backEnabled = !isPlayerExpanded,
+                                        resetKey = libraryResetKey,
                                     )
                                 } else {
                                     com.whiplash.music.ui.home.HistoryScreen(
@@ -645,7 +649,7 @@ private fun WhiplashApp() {
                                             .fillMaxSize()
                                             .then(if (openPlaylist != null) Modifier.clearAndSetSemantics {} else Modifier),
                                     ) {
-                                        PlaylistsScreen(onOpenPlaylist = { openPlaylist = it })
+                                        PlaylistsScreen(onOpenPlaylist = { openPlaylist = it }, onOpenLiked = { selectedTab = AppTab.FAVORITES })
                                     }
                                     val playlist = shownPlaylist
                                     if (playlist != null) {
@@ -718,6 +722,7 @@ private fun WhiplashApp() {
                             AppTab.HOME, AppTab.LOCAL -> {
                                 if (historyTab == tab) historyTab = null
                                 if (tab == AppTab.HOME) homeCollectionUrl = null
+                                if (tab == AppTab.LOCAL) libraryResetKey++
                             }
                             AppTab.SEARCH -> searchDetailStack = emptyList()
                             AppTab.PLAYLISTS -> openPlaylist = null

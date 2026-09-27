@@ -29,6 +29,12 @@ interface PlaylistDao {
     @Query("UPDATE playlists SET pinnedAtEpochMs = :pinnedAtEpochMs WHERE id = :id")
     suspend fun setPinnedAt(id: Long, pinnedAtEpochMs: Long?)
 
+    @Query("UPDATE playlists SET artworkUrl = :artworkUrl WHERE id = :id")
+    suspend fun setArtwork(id: Long, artworkUrl: String?)
+
+    @Query("SELECT artworkUrl FROM playlists WHERE id = :id")
+    suspend fun getArtwork(id: Long): String?
+
     @Query("DELETE FROM playlists WHERE id = :id")
     suspend fun delete(id: Long)
 
