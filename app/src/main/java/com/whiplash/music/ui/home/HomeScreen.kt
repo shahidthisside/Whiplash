@@ -132,7 +132,8 @@ fun HomeScreen(
     var showClearSpeedDialConfirm by remember { mutableStateOf(false) }
     // 4.2: grid ⇄ list, persisted (and in backup) so it sticks across launches.
     val speedDialListView = viewModel.speedDialListView.collectAsState().value ?: false
-    val quickPicksGridView = viewModel.quickPicksGridView.collectAsState().value ?: false
+    // Grid is the default, so assume it until the saved choice loads (no list-then-grid flash on first launch).
+    val quickPicksGridView = viewModel.quickPicksGridView.collectAsState().value ?: true
     val quickPicksGridCount = viewModel.quickPicksGridCount.collectAsState().value ?: 9
     val layoutScope = androidx.compose.runtime.rememberCoroutineScope()
     // 4.1: shelves feed (can be turned off in Settings → Home shelves).

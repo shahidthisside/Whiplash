@@ -249,8 +249,8 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[PLAYLISTS_LIST_KEY] = enabled }
     }
 
-    /** Home "Quick Picks" shown as an artwork grid instead of a list (default: list). */
-    val quickPicksGridView: Flow<Boolean> = dataStore.data.map { prefs -> prefs[QUICK_PICKS_GRID_KEY] ?: false }
+    /** Home "Quick Picks" shown as an artwork grid instead of a list (default: grid). */
+    val quickPicksGridView: Flow<Boolean> = dataStore.data.map { prefs -> prefs[QUICK_PICKS_GRID_KEY] ?: true }
 
     suspend fun setQuickPicksGridView(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[QUICK_PICKS_GRID_KEY] = enabled }
