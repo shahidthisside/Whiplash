@@ -83,6 +83,16 @@ private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
 }
 
 /**
+ * v5 (4.4): pinned playlists. A single nullable column — every existing
+ * playlist keeps all of its data and simply starts unpinned.
+ */
+internal val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `playlists` ADD COLUMN `pinnedAtEpochMs` INTEGER")
+    }
+}
+
+/**
  * Whiplash's local-first Room database (section 35, section 63).
  *
  * Holds device-local library data, cached online metadata, playlists,
@@ -107,7 +117,7 @@ private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
         PinnedEntity::class,
         DownloadEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -156,7 +166,7 @@ abstract class WhiplashDatabase : RoomDatabase() {
                     // going forward is to keep adding a new Migration_
                     // object here every time the schema changes again,
                     // never relying on this fallback for a real release.
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }
             }

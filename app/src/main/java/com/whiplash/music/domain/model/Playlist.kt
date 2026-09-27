@@ -6,4 +6,5 @@ data class Playlist(
     val name: String,
     val description: String?,
     val artworkUrl: String?,
+    val pinned: Boolean = false,
 )

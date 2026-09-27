@@ -16,4 +16,6 @@ data class PlaylistEntity(
     val artworkUrl: String? = null,
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
+    /** When the playlist was pinned to the top of the list; null = not pinned (added in DB v5). */
+    val pinnedAtEpochMs: Long? = null,
 )

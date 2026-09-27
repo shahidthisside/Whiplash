@@ -15,6 +15,7 @@ import com.whiplash.music.domain.model.MediaSource
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.domain.model.Playlist
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import com.whiplash.music.data.local.entity.MediaSource as EntityMediaSource
 
@@ -148,8 +149,27 @@ class LibraryRepository(
         }
     }
 
+    /** Pinned playlists first (in the order they were pinned), then the rest by last change. */
     fun observePlaylists(): Flow<List<Playlist>> = playlistDao.observeAll().map { entities ->
-        entities.map { Playlist(id = it.id, name = it.name, description = it.description, artworkUrl = it.artworkUrl) }
+        com.whiplash.music.domain.model.orderPlaylists(
+            entities.map { it to it.pinnedAtEpochMs },
+        ).map { Playlist(id = it.id, name = it.name, description = it.description, artworkUrl = it.artworkUrl, pinned = it.pinnedAtEpochMs != null) }
+    }
+
+    /**
+     * Pins or unpins a playlist. Returns false (and changes nothing) when
+     * pinning would exceed [com.whiplash.music.domain.model.MAX_PINNED_PLAYLISTS].
+     */
+    suspend fun setPlaylistPinned(id: Long, pinned: Boolean): Boolean {
+        if (!pinned) {
+            playlistDao.setPinnedAt(id, null)
+            return true
+        }
+        val all = playlistDao.observeAll().first()
+        if (all.firstOrNull { it.id == id }?.pinnedAtEpochMs != null) return true
+        if (!com.whiplash.music.domain.model.canPinAnother(all.count { it.pinnedAtEpochMs != null })) return false
+        playlistDao.setPinnedAt(id, System.currentTimeMillis())
+        return true
     }
 
     suspend fun createPlaylist(name: String): Long {

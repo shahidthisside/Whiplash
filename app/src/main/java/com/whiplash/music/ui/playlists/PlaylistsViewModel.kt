@@ -30,6 +30,19 @@ class PlaylistsViewModel(
         }
     }
 
+    fun setPinned(playlist: Playlist, pinned: Boolean) {
+        viewModelScope.launch {
+            val ok = libraryRepository.setPlaylistPinned(playlist.id, pinned)
+            ToastController.show(
+                when {
+                    !ok -> "You can pin up to ${com.whiplash.music.domain.model.MAX_PINNED_PLAYLISTS} playlists"
+                    pinned -> "Pinned \"${playlist.name}\""
+                    else -> "Unpinned \"${playlist.name}\""
+                },
+            )
+        }
+    }
+
     fun deletePlaylist(id: Long, name: String) {
         viewModelScope.launch {
             libraryRepository.deletePlaylist(id)

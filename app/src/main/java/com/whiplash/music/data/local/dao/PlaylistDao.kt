@@ -25,6 +25,10 @@ interface PlaylistDao {
     @Query("UPDATE playlists SET name = :name, description = :description, updatedAtEpochMs = :updatedAtEpochMs WHERE id = :id")
     suspend fun rename(id: Long, name: String, description: String?, updatedAtEpochMs: Long)
 
+    /** Pins (non-null time) or unpins (null). Deliberately leaves updatedAtEpochMs alone. */
+    @Query("UPDATE playlists SET pinnedAtEpochMs = :pinnedAtEpochMs WHERE id = :id")
+    suspend fun setPinnedAt(id: Long, pinnedAtEpochMs: Long?)
+
     @Query("DELETE FROM playlists WHERE id = :id")
     suspend fun delete(id: Long)
 
