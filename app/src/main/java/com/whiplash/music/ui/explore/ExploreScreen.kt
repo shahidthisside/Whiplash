@@ -252,8 +252,21 @@ fun GenreScreen(
     val songs by viewModel.songs.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val failed by viewModel.failed.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
     var sheetCollection by remember { mutableStateOf<YoutubePlaylistResult?>(null) }
     val haptic = LocalHapticFeedback.current
+    // Pull down to reload this genre's playlists and songs (same spinner as
+    // Home and Explore, held until the reload finishes).
+    val pullState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = viewModel::refresh,
+        state = pullState,
+        modifier = Modifier.fillMaxSize(),
+        indicator = {
+            com.whiplash.music.ui.home.HomeRefreshIndicator(pullState, isRefreshing, Modifier.align(Alignment.TopCenter))
+        },
+    ) {
     PlayableItemsList(
         items = songs,
         onPlayQueue = onPlayQueue,
@@ -331,6 +344,7 @@ fun GenreScreen(
             }
         },
     )
+    }
 
     CollectionSheet(sheetCollection, onDismiss = { sheetCollection = null }, onOpen = onOpenCollection)
 }

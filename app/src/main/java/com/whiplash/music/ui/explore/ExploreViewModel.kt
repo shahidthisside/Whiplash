@@ -101,7 +101,7 @@ class ExploreViewModel(private val search: YoutubeSearchRepository) : ViewModel(
 }
 
 /** One genre page: its playlists shelf and a song list. */
-class GenreViewModel(private val search: YoutubeSearchRepository, genre: ExploreGenre) : ViewModel() {
+class GenreViewModel(private val search: YoutubeSearchRepository, private val genre: ExploreGenre) : ViewModel() {
 
     private val _playlists = MutableStateFlow<HomeShelf?>(null)
     val playlists: StateFlow<HomeShelf?> = _playlists
@@ -118,7 +118,40 @@ class GenreViewModel(private val search: YoutubeSearchRepository, genre: Explore
     private val playlistSpec = ShelfSpec(ShelfKind.PLAYLISTS, "${genre.title} playlists", genre.playlistQuery)
     private val songQuery = genre.songQuery
 
+    /** True while a pull-to-refresh runs; the current page stays on screen meanwhile. */
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing
+
     init { load() }
+
+    /**
+     * Pull-to-refresh: reloads the playlists and songs. Each part is only
+     * replaced if its reload returned something, so a failed refresh never
+     * blanks a page that was showing fine.
+     */
+    fun refresh() {
+        if (_isLoading.value || _isRefreshing.value) return
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            try {
+                val hadContent = _playlists.value != null || _songs.value.isNotEmpty()
+                coroutineScope {
+                    val p = async { loadShelf(search, playlistSpec) }
+                    val s = async { runCatching { search.search(songQuery) }.getOrDefault(emptyList()) }
+                    val newPlaylists = p.await()
+                    val newSongs = s.await()
+                    if (newPlaylists != null) _playlists.value = newPlaylists
+                    if (newSongs.isNotEmpty()) _songs.value = newSongs
+                    if (newPlaylists == null && newSongs.isEmpty() && hadContent) {
+                        com.whiplash.music.ui.common.ToastController.show("Couldn't refresh ${genre.title}")
+                    }
+                }
+                _failed.value = _playlists.value == null && _songs.value.isEmpty()
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
+    }
 
     fun load() {
         viewModelScope.launch {
