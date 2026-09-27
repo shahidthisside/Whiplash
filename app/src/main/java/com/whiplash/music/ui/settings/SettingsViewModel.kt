@@ -100,6 +100,20 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setPlayerLyricStrip(enabled) }
     }
 
+    val quickPicksGridCount: StateFlow<Int> = repository.quickPicksGridCount
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 9)
+
+    fun setQuickPicksGridCount(count: Int) {
+        viewModelScope.launch { repository.setQuickPicksGridCount(count) }
+    }
+
+    val homeShelvesEnabled: StateFlow<Boolean> = repository.homeShelvesEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    fun setHomeShelvesEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setHomeShelvesEnabled(enabled) }
+    }
+
     val lyricsBlurUnfocused: StateFlow<Boolean> = repository.lyricsBlurUnfocused
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
