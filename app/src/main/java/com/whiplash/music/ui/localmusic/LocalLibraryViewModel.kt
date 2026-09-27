@@ -99,6 +99,9 @@ class LocalLibraryViewModel(
         }
     }
 
+    /** Space used by completed downloads, in bytes (0 if unknown). */
+    suspend fun downloadsBytes(): Long = downloadManager?.downloadsUsage()?.second ?: 0L
+
     /** Songs on one local album, for its page. */
     fun songsOnAlbum(albumId: Long) = repository.observeSongsByAlbum(albumId)
 

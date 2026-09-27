@@ -79,6 +79,15 @@ fun LocalLibraryScreen(
     val context = LocalContext.current
     val viewModel: LocalLibraryViewModel = viewModel(factory = LocalLibraryViewModelFactory(context))
 
+    val appForToggle = context.applicationContext as com.whiplash.music.WhiplashApplication
+    val modern by appForToggle.settingsRepository.modernLibraryPages.collectAsState(initial = true)
+    // Modern start page: which section page is open (null = the folder list).
+    var sectionName by rememberSaveable { mutableStateOf<String?>(null) }
+    val section = sectionName?.let { runCatching { LibrarySection.valueOf(it) }.getOrNull() }
+    LaunchedEffect(resetKey) { if (resetKey != 0) sectionName = null }
+    // Registered before the album/artist handler so that one wins while a page is open on top.
+    androidx.activity.compose.BackHandler(enabled = backEnabled && modern && section != null) { sectionName = null }
+
     // Local album / artist page (modern pages only). Held as kind + id + name so it survives rotation.
     var detailKind by rememberSaveable { mutableStateOf<String?>(null) }
     var detailId by rememberSaveable { mutableStateOf(0L) }
@@ -115,8 +124,67 @@ fun LocalLibraryScreen(
     // own content is replaced by the permission prompt when needed (see
     // LibraryContent) — Downloads works regardless of this permission's
     // state, exactly as it should.
+    val openAlbum: (LocalAlbum) -> Unit = { album ->
+        onAlbumClick(album)
+        detailKind = "album"; detailId = album.id; detailTitle = album.title
+        detailSubtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · ")
+    }
+    val openArtist: (LocalArtist) -> Unit = { artist ->
+        onArtistClick(artist)
+        detailKind = "artist"; detailId = artist.id; detailTitle = artist.name
+        detailSubtitle = if (artist.albumCount == 1) "1 album" else "${artist.albumCount} albums"
+    }
+    val requestPermission = { permissionLauncher.launch(LocalMediaPermission.permission) }
+    val openAppSettings = {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = android.net.Uri.fromParts("package", context.packageName, null)
+                }
+            )
+        }.onFailure {
+            com.whiplash.music.ui.common.ToastController.show("Couldn't open app settings")
+        }
+        Unit
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
-    Column(
+    if (modern) {
+        // Start page with folders; each section slides in over it and the list keeps its place underneath.
+        ModernLibraryHome(
+            viewModel = viewModel,
+            hasMediaPermission = hasPermission,
+            onOpenSection = { sectionName = it.name },
+            onOpenHistory = onOpenHistory,
+            onPlayQueue = onPlayQueue,
+            modifier = if (section != null || detailKind != null) Modifier.clearAndSetSemantics {} else Modifier,
+        )
+        var shownSection by remember { mutableStateOf(section) }
+        if (section != null) shownSection = section
+        LibrarySlideOverlay(visible = section != null) {
+            shownSection?.let { s ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(com.whiplash.music.ui.theme.WhiplashColors.background)
+                        .then(if (detailKind != null) Modifier.clearAndSetSemantics {} else Modifier),
+                ) {
+                    LibrarySectionPage(
+                        section = s,
+                        viewModel = viewModel,
+                        hasMediaPermission = hasPermission,
+                        permissionPermanentlyDenied = permissionPermanentlyDenied,
+                        onRequestPermission = requestPermission,
+                        onOpenSettings = openAppSettings,
+                        onBack = { sectionName = null },
+                        onPlayQueue = onPlayQueue,
+                        onAlbumClick = openAlbum,
+                        onArtistClick = openArtist,
+                    )
+                }
+            }
+        }
+    } else Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = GlassTokens.spaceMd)
@@ -161,13 +229,7 @@ fun LocalLibraryScreen(
     // The list stays composed (and scrolled) underneath; the page slides over it.
     var shownKind by remember { mutableStateOf(detailKind) }
     if (detailKind != null) shownKind = detailKind
-    androidx.compose.animation.AnimatedVisibility(
-        visible = detailKind != null,
-        enter = androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(380, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it / 4 } +
-            androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(380)),
-        exit = androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(380, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it / 4 } +
-            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(260)),
-    ) {
+    LibrarySlideOverlay(visible = detailKind != null) {
         val kind = shownKind
         if (kind != null) {
             Box(modifier = Modifier.fillMaxSize().background(com.whiplash.music.ui.theme.WhiplashColors.background)) {
@@ -184,6 +246,18 @@ fun LocalLibraryScreen(
         }
     }
     }
+}
+
+/** 380 ms slide-and-fade used for every page that opens inside Library. */
+@Composable
+private fun LibrarySlideOverlay(visible: Boolean, content: @Composable () -> Unit) {
+    androidx.compose.animation.AnimatedVisibility(
+        visible = visible,
+        enter = androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(380, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it / 4 } +
+            androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(380)),
+        exit = androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(380, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it / 4 } +
+            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(260)),
+    ) { content() }
 }
 
 /** A local album's or artist's page: back row, hero with cover, then its songs. */
@@ -672,14 +746,14 @@ private fun ArtistList(artists: List<LocalArtist>, onArtistClick: (LocalArtist) 
 }
 
 @Composable
-private fun LoadingState() {
+internal fun LoadingState() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
     }
 }
 
 @Composable
-private fun EmptyLibraryState(onRescan: () -> Unit) {
+internal fun EmptyLibraryState(onRescan: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         // Plain, borderless layout matching PermissionRequestState's own
         // style exactly (a real, reported inconsistency: this state used
@@ -714,7 +788,7 @@ private fun EmptyLibraryState(onRescan: () -> Unit) {
 }
 
 @Composable
-private fun PermissionRequestState(
+internal fun PermissionRequestState(
     permanentlyDenied: Boolean,
     onRequestPermission: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -838,7 +912,7 @@ internal fun LocalArtwork(
 
 /** Albums as a cover grid. */
 @Composable
-private fun ModernAlbumGrid(
+internal fun ModernAlbumGrid(
     albums: List<LocalAlbum>,
     songs: List<PlayableItem.LocalTrack>,
     onAlbumClick: (LocalAlbum) -> Unit,
@@ -890,7 +964,7 @@ private fun ModernAlbumGrid(
 
 /** Artists with round photos (their first song's artwork). */
 @Composable
-private fun ModernArtistList(
+internal fun ModernArtistList(
     artists: List<LocalArtist>,
     songs: List<PlayableItem.LocalTrack>,
     onArtistClick: (LocalArtist) -> Unit,
