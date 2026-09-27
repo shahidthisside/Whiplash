@@ -2,6 +2,11 @@ package com.whiplash.music.ui.playlists
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
@@ -20,6 +26,11 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import kotlinx.coroutines.launch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -78,6 +89,9 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
     // GlassConfirmDialog below, matching every other destructive action's
     // existing convention.
     var playlistPendingDeleteConfirm by remember { mutableStateOf<Playlist?>(null) }
+    // 4.4: cover grid (default) or compact list; persisted and in backup.
+    val listView by app.settingsRepository.playlistsListView.collectAsState(initial = false)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -87,6 +101,22 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
         ) {
             Text(text = "Playlists", style = MaterialTheme.typography.titleMedium, color = WhiplashColors.textPrimary)
             Row {
+                if (playlists.isNotEmpty()) {
+                    PlainIconButton(
+                        contentDescription = if (listView) "Show playlists as grid" else "Show playlists as list",
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            scope.launch { app.settingsRepository.setPlaylistsListView(!listView) }
+                        },
+                        size = 48.dp,
+                    ) {
+                        Icon(
+                            if (listView) Icons.Filled.GridView else Icons.AutoMirrored.Filled.ViewList,
+                            contentDescription = null,
+                            tint = WhiplashColors.textPrimary,
+                        )
+                    }
+                }
                 // Import from a YouTube/YouTube Music playlist link —
                 // disabled (rather than hidden) while an import is
                 // already running so a second tap can't stack another
@@ -119,25 +149,49 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                     color = WhiplashColors.textSecondary,
                 )
             }
+        } else if (!listView) {
+            androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd),
+                horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
+                verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceLg),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    top = GlassTokens.spaceXs,
+                    bottom = GlassTokens.miniPlayerReservedHeight,
+                ),
+            ) {
+                gridItems(playlists, key = { it.id }) { playlist ->
+                    PlaylistGridTile(
+                        playlist = playlist,
+                        onClick = { onOpenPlaylist(playlist) },
+                        onLongClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            playlistPendingDelete = playlist
+                        },
+                        modifier = Modifier.animateItem(),
+                    )
+                }
+            }
         } else {
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
             ) {
                 items(playlists, key = { it.id }) { playlist ->
+                    val tracks by app.libraryRepository.observePlaylistTracks(playlist.id).collectAsState(initial = null)
                     GlassListItem(
                         title = playlist.name,
-                        subtitle = null,
+                        subtitle = playlistSubtitle(playlist, tracks?.size),
                         onClick = { onOpenPlaylist(playlist) },
                         onLongClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             playlistPendingDelete = playlist
                         },
                         leading = {
-                            Icon(
-                                Icons.AutoMirrored.Filled.QueueMusic,
-                                contentDescription = null,
-                                tint = WhiplashColors.textSecondary,
+                            PlaylistCover(
+                                artworks = tracks.orEmpty().mapNotNull { it.artworkUri }.take(4),
+                                modifier = Modifier.size(56.dp),
+                                cornerRadius = WhiplashRadius.small,
                             )
                         },
                         trailing = {
@@ -149,6 +203,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                                 Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textSecondary)
                             }
                         },
+                        modifier = Modifier.animateItem(),
                     )
                 }
             }
@@ -231,6 +286,30 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                             modifier = Modifier.padding(start = GlassTokens.spaceMd),
                         )
                     }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = GlassTokens.spaceSm)
+                        .clickable(
+                            onClick = {
+                                viewModel.setPinned(toDelete, !toDelete.pinned)
+                                playlistPendingDelete = null
+                            },
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (toDelete.pinned) Icons.Outlined.PushPin else Icons.Filled.PushPin,
+                        contentDescription = null,
+                        tint = WhiplashColors.textPrimary,
+                    )
+                    Text(
+                        text = if (toDelete.pinned) "Unpin from top" else "Pin to top",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = WhiplashColors.textPrimary,
+                        modifier = Modifier.padding(start = GlassTokens.spaceMd),
+                    )
                 }
                 Row(
                     modifier = Modifier
@@ -333,4 +412,122 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
             }
         }
     }
+}
+
+private fun playlistSubtitle(playlist: Playlist, count: Int?): String? {
+    val songs = when (count) {
+        null -> null
+        1 -> "1 song"
+        else -> "$count songs"
+    }
+    return when {
+        playlist.pinned && songs != null -> "Pinned · $songs"
+        playlist.pinned -> "Pinned"
+        else -> songs
+    }
+}
+
+/** 4.4: cover-first grid card — mosaic artwork, name, song count, pin badge. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PlaylistGridTile(
+    playlist: Playlist,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val app = LocalContext.current.applicationContext as WhiplashApplication
+    val tracks by app.libraryRepository.observePlaylistTracks(playlist.id).collectAsState(initial = null)
+    val subtitle = playlistSubtitle(playlist, tracks?.size)
+    Column(
+        modifier = modifier
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "Playlist options")
+            .semantics(mergeDescendants = true) {},
+    ) {
+        Box {
+            PlaylistCover(
+                artworks = tracks.orEmpty().mapNotNull { it.artworkUri }.take(4),
+                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                cornerRadius = WhiplashRadius.medium,
+            )
+            if (playlist.pinned) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(GlassTokens.spaceSm)
+                        .size(28.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.PushPin, contentDescription = "Pinned", tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+        Text(
+            text = playlist.name,
+            style = MaterialTheme.typography.titleSmall,
+            color = WhiplashColors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = GlassTokens.spaceSm),
+        )
+        if (subtitle != null) {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = WhiplashColors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * Playlist artwork: a 2×2 mosaic when there are four covers, one cover when
+ * there are fewer, and a tinted music-note tile for an empty playlist.
+ */
+@Composable
+private fun PlaylistCover(
+    artworks: List<String>,
+    modifier: Modifier,
+    cornerRadius: androidx.compose.ui.unit.Dp,
+) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(cornerRadius)
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(WhiplashColors.surfaceElevated),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            artworks.size >= 4 -> Column {
+                for (row in 0 until 2) {
+                    Row(modifier = Modifier.weight(1f)) {
+                        for (col in 0 until 2) {
+                            CoverImage(artworks[row * 2 + col], Modifier.weight(1f).fillMaxSize())
+                        }
+                    }
+                }
+            }
+            artworks.isNotEmpty() -> CoverImage(artworks.first(), Modifier.fillMaxSize())
+            else -> Icon(
+                Icons.AutoMirrored.Filled.QueueMusic,
+                contentDescription = null,
+                tint = WhiplashColors.textSecondary,
+                modifier = Modifier.fillMaxSize(0.4f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CoverImage(uri: String, modifier: Modifier) {
+    coil.compose.AsyncImage(
+        model = coil.request.ImageRequest.Builder(LocalContext.current).data(uri).crossfade(true).build(),
+        contentDescription = null,
+        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        modifier = modifier,
+    )
 }
