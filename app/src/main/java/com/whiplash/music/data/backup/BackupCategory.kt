@@ -21,5 +21,5 @@ enum class BackupCategory(val displayName: String, val description: String) {
     HISTORY("History", "Your recently played history"),
     PINNED("Pinned", "Songs pinned to your Home screen's Speed dial"),
     DOWNLOADS("Downloads", "Records of what you've downloaded (not the audio files themselves)"),
-    SETTINGS("Settings", "Theme, playback, and other app preferences"),
+    SETTINGS("Settings", "Accent colour, playback, and other app preferences"),
 }

@@ -49,7 +49,7 @@ enum class SettingEntry(val section: SettingsSection, val title: String, val key
     EXPLORE(SettingsSection.APPEARANCE, "Explore in Search", "new releases charts moods genres browse"),
     REPLAY(SettingsSection.APPEARANCE, "Monthly Replay", "recap stats wrapped top songs artists minutes listened month"),
     HOME_SHELVES(SettingsSection.APPEARANCE, "Home shelves", "recommendations feed albums playlists for you"),
-    THEME(SettingsSection.APPEARANCE, "Theme", "color colour dark palette accent"),
+    THEME(SettingsSection.APPEARANCE, "Accent colour", "accents color colour theme dark palette tint"),
     REDUCE_ANIMATIONS(SettingsSection.APPEARANCE, "Reduce animations", "motion accessibility transitions"),
     CACHE_SONGS(SettingsSection.STORAGE, "Cache Songs", "offline storage space"),
     DOWNLOADED_DATA(SettingsSection.STORAGE, "Downloaded songs", "offline downloads delete clear remove space storage size"),

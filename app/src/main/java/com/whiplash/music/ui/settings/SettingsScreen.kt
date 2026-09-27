@@ -685,9 +685,9 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                             SettingItem(divider = rows.next()) {
                                 Column {
                                     SettingRow(
-                                        title = "Theme",
+                                        title = "Accent colour",
                                         icon = Icons.Filled.Palette,
-                                        subtitle = "Currently using ${themeVariant.displayName}.",
+                                        subtitle = "Colours buttons and highlights, with a faint matching tint in the background. Currently ${themeVariant.displayName}.",
                                     )
                                     Spacer(Modifier.height(GlassTokens.spaceMd))
                                     ThemeGrid(selected = themeVariant, onSelect = viewModel::setThemeVariant)
