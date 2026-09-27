@@ -143,8 +143,25 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
     private var playlistsSession: PaginatedSearchSession<YoutubePlaylistResult>? = null
     private var artistsSession: PaginatedSearchSession<YoutubeArtistResult>? = null
 
+    /** True while a manual Explore refresh is reloading trending artists. */
+    private val _isRefreshingTrending = MutableStateFlow(false)
+    val isRefreshingTrending: StateFlow<Boolean> = _isRefreshingTrending
+
     init {
+        viewModelScope.launch { loadTrendingArtists() }
+    }
+
+    /** Reloads trending artists (Explore's refresh). Keeps the current list if the reload fails. */
+    fun refreshTrending() {
+        if (_isRefreshingTrending.value) return
         viewModelScope.launch {
+            _isRefreshingTrending.value = true
+            try { loadTrendingArtists() } finally { _isRefreshingTrending.value = false }
+        }
+    }
+
+    private suspend fun loadTrendingArtists() {
+        run {
             val india = runCatching { repository.searchArtists(TRENDING_ARTISTS_INDIA_QUERY) }.getOrDefault(emptyList())
             val global = runCatching { repository.searchArtists(TRENDING_ARTISTS_GLOBAL_QUERY) }.getOrDefault(emptyList())
             val results = (india.take(3) + global.take(3))

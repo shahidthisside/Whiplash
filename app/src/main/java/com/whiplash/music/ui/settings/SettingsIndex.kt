@@ -52,6 +52,7 @@ enum class SettingEntry(val section: SettingsSection, val title: String, val key
     THEME(SettingsSection.APPEARANCE, "Theme", "color colour dark palette accent"),
     REDUCE_ANIMATIONS(SettingsSection.APPEARANCE, "Reduce animations", "motion accessibility transitions"),
     CACHE_SONGS(SettingsSection.STORAGE, "Cache Songs", "offline storage space"),
+    DOWNLOADED_DATA(SettingsSection.STORAGE, "Downloaded songs", "offline downloads delete clear remove space storage size"),
     CACHED_DATA(SettingsSection.STORAGE, "Cached data", "clear cache storage size space"),
     BACKUP(SettingsSection.BACKUP, "Local backup", "restore export import file"),
 }

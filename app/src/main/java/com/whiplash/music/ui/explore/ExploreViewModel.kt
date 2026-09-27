@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-/** Loads Explore's two fixed shelves once; [retry] reloads any that came back empty. */
+/** Loads Explore's two fixed shelves once; [retry] reloads any that came back empty, [refresh] reloads everything. */
 class ExploreViewModel(private val search: YoutubeSearchRepository) : ViewModel() {
 
     private val _shelves = MutableStateFlow<List<HomeShelf>>(emptyList())
@@ -52,6 +52,37 @@ class ExploreViewModel(private val search: YoutubeSearchRepository) : ViewModel(
     }
 
     init { retry() }
+
+    /** True while a manual refresh (button or pull-down) is running; shelves stay on screen meanwhile. */
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing
+
+    /**
+     * Manual refresh: reloads new releases and charts, and retries any genre
+     * artwork that didn't load. What's on screen stays put until the new
+     * shelves arrive; if the reload fails, the old shelves are kept.
+     */
+    fun refresh() {
+        if (_isRefreshing.value || _isLoading.value) return
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            try {
+                val specs = listOf(com.whiplash.music.domain.model.EXPLORE_NEW_RELEASES, com.whiplash.music.domain.model.EXPLORE_CHARTS)
+                val loaded = runCatching {
+                    coroutineScope { specs.map { async { loadShelf(search, it) } }.map { it.await() } }.filterNotNull()
+                }.getOrDefault(emptyList())
+                if (loaded.isNotEmpty()) {
+                    _shelves.value = loaded
+                } else {
+                    com.whiplash.music.ui.common.ToastController.show("Couldn't refresh Explore")
+                }
+                // Genre tiles that never got a cover ask again when next drawn.
+                requestedArt.retainAll(_genreArt.value.keys)
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
+    }
 
     fun retry() {
         if (_isLoading.value) return

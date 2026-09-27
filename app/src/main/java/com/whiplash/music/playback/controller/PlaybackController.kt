@@ -346,6 +346,18 @@ class PlaybackController(
         )
     }
 
+    /**
+     * Settings → Quit: saves listening time counted so far, stops playback,
+     * empties the player and lets go of the session so the service can stop.
+     */
+    fun stopForQuit() {
+        trackListening(_state.value.currentItem)
+        flushListening()
+        controller?.stop()
+        controller?.clearMediaItems()
+        release()
+    }
+
     fun release() {
         positionTickerJob?.cancel()
         controller?.removeListener(playerListener)

@@ -53,6 +53,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.SdStorage
+import androidx.compose.material.icons.filled.DownloadForOffline
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.semantics.heading
@@ -106,7 +108,7 @@ private const val EQUALIZER_REQUEST_CODE = 4242
 fun SettingsScreen(resetKey: Int = 0) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
-    val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository, app.audioCacheManager, app.backupManager, app.lyricsCache, app.lyricsProviderChain))
+    val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository, app.audioCacheManager, app.backupManager, app.lyricsCache, app.lyricsProviderChain, app.downloadManager))
 
     val audioQuality by viewModel.audioQuality.collectAsState()
     val downloadQuality by viewModel.downloadQuality.collectAsState()
@@ -135,6 +137,9 @@ fun SettingsScreen(resetKey: Int = 0) {
     val audioQualityWifi by viewModel.audioQualityWifi.collectAsState()
     val audioQualityCellular by viewModel.audioQualityCellular.collectAsState()
     val cacheSizeBytes by viewModel.cacheSizeBytes.collectAsState()
+    val downloadsUsage by viewModel.downloadsUsage.collectAsState()
+    var showClearDownloadsConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showQuitConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val lastBackupTimeMs by viewModel.lastBackupTimeMs.collectAsState()
     val backupResult by viewModel.backupResult.collectAsState()
 
@@ -176,6 +181,33 @@ fun SettingsScreen(resetKey: Int = 0) {
     val restoreLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
     ) { uri -> if (uri != null) showRestoreConfirm = uri }
+
+    if (showClearDownloadsConfirm) {
+        val (count, bytes) = downloadsUsage
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Delete all downloads?",
+            message = "This removes ${if (count == 1) "1 downloaded song" else "$count downloaded songs"} (${formatBytes(bytes)}) from this device and cancels any download in progress. They won't play offline until you download them again.",
+            confirmLabel = "Delete",
+            onConfirm = {
+                showClearDownloadsConfirm = false
+                viewModel.clearDownloads()
+            },
+            onDismiss = { showClearDownloadsConfirm = false },
+        )
+    }
+
+    if (showQuitConfirm) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Quit Whiplash?",
+            message = "Playback stops, the current queue is cleared and any download in progress is cancelled. Your library, playlists and settings are kept.",
+            confirmLabel = "Quit",
+            onConfirm = {
+                showQuitConfirm = false
+                (context as? android.app.Activity)?.let { quitApp(it) }
+            },
+            onDismiss = { showQuitConfirm = false },
+        )
+    }
 
     if (showRestoreConfirm != null) {
         com.whiplash.music.ui.theme.GlassConfirmDialog(
@@ -753,6 +785,31 @@ fun SettingsScreen(resetKey: Int = 0) {
                             }
                         }
 
+                        if (shown(SettingEntry.DOWNLOADED_DATA)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Offline downloads size + delete all ---
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        SettingRow(
+                                            title = "Downloaded songs",
+                                            icon = Icons.Filled.DownloadForOffline,
+                                            subtitle = formatDownloadsUsage(downloadsUsage),
+                                        )
+                                    }
+                                    Spacer(Modifier.width(GlassTokens.spaceSm))
+                                    GlassButton(
+                                        text = "Clear",
+                                        onClick = { showClearDownloadsConfirm = true },
+                                        enabled = downloadsUsage.first > 0,
+                                    )
+                                }
+                            }
+                        }
+
                         if (shown(SettingEntry.CACHED_DATA)) {
                             SettingItem(divider = rows.next()) {
                                 // --- Cache size + clear ---
@@ -767,7 +824,7 @@ fun SettingsScreen(resetKey: Int = 0) {
                                         subtitle = formatCacheSize(cacheSizeBytes),
                                     )
                                     GlassButton(
-                                        text = "Clear cache",
+                                        text = "Clear",
                                         onClick = viewModel::clearCache,
                                         // Bright/pressable only when there's actually
                                         // something to clear — GlassButton's own
@@ -933,11 +990,16 @@ fun SettingsScreen(resetKey: Int = 0) {
                                     if (playerArtworkColors) " · Artwork colours" else ""
                                 SettingsSection.LYRICS -> "Source: ${lyricsSource.label}"
                                 SettingsSection.APPEARANCE -> themeVariant.displayName
-                                SettingsSection.STORAGE -> formatCacheSize(cacheSizeBytes).removeSuffix(".")
+                                SettingsSection.STORAGE -> {
+                                    val cache = if (cacheSizeBytes > 0L) "Cache ${formatBytes(cacheSizeBytes)}" else "No cache"
+                                    val downloads = if (downloadsUsage.first > 0) "Downloads ${formatBytes(downloadsUsage.second)}" else "No downloads"
+                                    "$cache · $downloads"
+                                }
                                 SettingsSection.BACKUP -> formatLastBackupSubtitle(lastBackupTimeMs).removeSuffix(".")
                             }
                         },
                         onOpen = { openSection = it },
+                        onQuit = { showQuitConfirm = true },
                         modifier = Modifier.weight(1f),
                     )
                 } else {
@@ -1616,6 +1678,7 @@ private fun SettingsFolderList(
     state: androidx.compose.foundation.lazy.LazyListState,
     summary: (SettingsSection) -> String,
     onOpen: (SettingsSection) -> Unit,
+    onQuit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val cardColor = settingsCardColor()
@@ -1665,6 +1728,18 @@ private fun SettingsFolderList(
                         }
                     }
                 }
+            }
+        }
+        // Quit: its own card at the end, styled like the folders but red and
+        // without a chevron, since it's an action rather than a page.
+        item(key = "quit") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(cardColor),
+            ) {
+                SettingsQuitRow(onClick = onQuit)
             }
         }
         item(key = "footer") {
@@ -1809,4 +1884,75 @@ private fun SettingItem(divider: Boolean, content: @Composable () -> Unit) {
     ) {
         content()
     }
+}
+
+private fun formatBytes(bytes: Long): String {
+    val mb = bytes / (1024.0 * 1024.0)
+    return if (mb >= 1024.0) "%.1f GB".format(mb / 1024.0) else "%.1f MB".format(mb)
+}
+
+/** "12 songs · 84.2 MB used", or a plain empty state. */
+private fun formatDownloadsUsage(usage: Pair<Int, Long>): String {
+    val (count, bytes) = usage
+    if (count == 0) return "No downloaded songs."
+    val songs = if (count == 1) "1 song" else "$count songs"
+    return "$songs · ${formatBytes(bytes)} used"
+}
+
+/** Red "Quit Whiplash" row for the Settings start page, same shape as a folder row. */
+@Composable
+private fun SettingsQuitRow(onClick: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    val red = androidx.compose.ui.graphics.Color(0xFFFF6B6B)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                .background(red.copy(alpha = 0.16f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(imageVector = Icons.Filled.PowerSettingsNew, contentDescription = null, tint = red, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = "Quit Whiplash", style = MaterialTheme.typography.titleSmall, color = red)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "Stop playback and close the app completely",
+                style = MaterialTheme.typography.bodySmall,
+                color = WhiplashColors.textSecondary,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * Fully quits: stops playback and the playback service (which removes the
+ * media notification), closes the task, then ends the process a moment
+ * later so pending small writes (like Replay listening time) can land.
+ */
+private fun quitApp(activity: android.app.Activity) {
+    val app = activity.application as WhiplashApplication
+    runCatching { app.playbackController.stopForQuit() }
+    runCatching {
+        activity.stopService(
+            android.content.Intent(activity, com.whiplash.music.playback.service.WhiplashPlaybackService::class.java),
+        )
+    }
+    activity.finishAndRemoveTask()
+    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        android.os.Process.killProcess(android.os.Process.myPid())
+    }, 600L)
 }

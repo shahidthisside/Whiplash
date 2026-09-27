@@ -800,7 +800,7 @@ private fun SpeedDialTile(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HomeRefreshIndicator(
+internal fun HomeRefreshIndicator(
     state: androidx.compose.material3.pulltorefresh.PullToRefreshState,
     isRefreshing: Boolean,
     modifier: Modifier = Modifier,

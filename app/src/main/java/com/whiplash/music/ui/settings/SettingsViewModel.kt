@@ -21,6 +21,7 @@ class SettingsViewModel(
     private val backupManager: com.whiplash.music.data.backup.BackupManager,
     private val lyricsCache: com.whiplash.music.data.lyrics.LyricsCache,
     private val lyricsProviderChain: com.whiplash.music.data.lyrics.LyricsProviderChain,
+    private val downloadManager: com.whiplash.music.data.download.DownloadManager,
 ) : ViewModel() {
 
     /**
@@ -258,6 +259,10 @@ class SettingsViewModel(
     private val _cacheSizeBytes = MutableStateFlow(0L)
     val cacheSizeBytes: StateFlow<Long> = _cacheSizeBytes
 
+    /** Completed offline downloads: count and real bytes on disk (refreshed with the cache size). */
+    private val _downloadsUsage = MutableStateFlow(0 to 0L)
+    val downloadsUsage: StateFlow<Pair<Int, Long>> = _downloadsUsage
+
     init {
         refreshCacheSize()
     }
@@ -265,6 +270,18 @@ class SettingsViewModel(
     fun refreshCacheSize() {
         viewModelScope.launch {
             _cacheSizeBytes.value = withContext(Dispatchers.IO) { cacheManager.currentCacheSizeBytes() + lyricsCache.diskSizeBytes() }
+        }
+        viewModelScope.launch {
+            _downloadsUsage.value = runCatching { downloadManager.downloadsUsage() }.getOrDefault(_downloadsUsage.value)
+        }
+    }
+
+    /** Deletes every offline download (files and library entries), as the Downloads tab's Clear all does. */
+    fun clearDownloads() {
+        viewModelScope.launch {
+            val ok = runCatching { downloadManager.clearAllDownloads() }.isSuccess
+            refreshCacheSize()
+            com.whiplash.music.ui.common.ToastController.show(if (ok) "Downloads deleted" else "Couldn't delete downloads")
         }
     }
 

@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -104,6 +105,13 @@ fun SearchScreen(
     val exploreEnabled by app.settingsRepository.exploreEnabled.collectAsState(initial = false)
     val trendingArtists by viewModel.trendingArtists.collectAsState()
     val trendingArtistResults by viewModel.trendingArtistResults.collectAsState()
+    val trendingRefreshing by viewModel.isRefreshingTrending.collectAsState()
+    // Same activity-scoped instance ExploreSection uses. Only created while
+    // Explore is on, since creating it starts loading.
+    val exploreViewModel: com.whiplash.music.ui.explore.ExploreViewModel? = if (exploreEnabled) {
+        viewModel(factory = com.whiplash.music.ui.explore.ExploreViewModelFactory(app.youtubeSearchRepository))
+    } else null
+    val exploreRefreshing = (exploreViewModel?.isRefreshing?.collectAsState()?.value ?: false) || trendingRefreshing
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     // "Clear all" recent searches is destructive and irreversible, same as
@@ -160,6 +168,11 @@ fun SearchScreen(
                 onRemoveRecentSearch = viewModel::removeRecentSearch,
                 onClearRecentSearches = { showClearSearchHistoryConfirm = true },
                 exploreEnabled = exploreEnabled,
+                exploreRefreshing = exploreRefreshing,
+                onRefreshExplore = {
+                    exploreViewModel?.refresh()
+                    viewModel.refreshTrending()
+                },
                 trendingArtistResults = trendingArtistResults,
                 onOpenArtist = { artist -> dismissKeyboard(); onOpenArtist(artist) },
                 explore = if (!exploreEnabled) ({}) else ({
@@ -486,6 +499,8 @@ private fun IdleState(
     onRemoveRecentSearch: (String) -> Unit,
     onClearRecentSearches: () -> Unit,
     exploreEnabled: Boolean = false,
+    exploreRefreshing: Boolean = false,
+    onRefreshExplore: () -> Unit = {},
     trendingArtistResults: List<YoutubeArtistResult> = emptyList(),
     onOpenArtist: (YoutubeArtistResult) -> Unit = {},
     explore: @Composable () -> Unit = {},
@@ -494,6 +509,15 @@ private fun IdleState(
     // move into a sheet behind a history button. With it off, the screen is
     // exactly the original: recent searches, then trending artists.
     var showHistorySheet by remember { mutableStateOf(false) }
+    // With Explore on, pulling the screen down refreshes it (same spinner
+    // as Home, held until the reload really finishes). Off, no pull at all.
+    val pullState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+    PullToRefreshIf(
+        active = exploreEnabled,
+        isRefreshing = exploreRefreshing,
+        onRefresh = onRefreshExplore,
+        state = pullState,
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -511,12 +535,31 @@ private fun IdleState(
                     style = MaterialTheme.typography.titleMedium,
                     color = WhiplashColors.textPrimary,
                 )
-                PlainIconButton(
-                    contentDescription = "Search history",
-                    onClick = { showHistorySheet = true },
-                    size = 48.dp,
-                ) {
-                    Icon(Icons.Filled.History, contentDescription = null, tint = WhiplashColors.textSecondary)
+                androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Spinner while a refresh runs, and disabled so taps can't stack reloads.
+                    PlainIconButton(
+                        contentDescription = if (exploreRefreshing) "Refreshing Explore" else "Refresh Explore",
+                        onClick = onRefreshExplore,
+                        size = 48.dp,
+                        enabled = !exploreRefreshing,
+                    ) {
+                        if (exploreRefreshing) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                color = WhiplashColors.accent,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        } else {
+                            Icon(Icons.Filled.Refresh, contentDescription = null, tint = WhiplashColors.textSecondary)
+                        }
+                    }
+                    PlainIconButton(
+                        contentDescription = "Search history",
+                        onClick = { showHistorySheet = true },
+                        size = 48.dp,
+                    ) {
+                        Icon(Icons.Filled.History, contentDescription = null, tint = WhiplashColors.textSecondary)
+                    }
                 }
             }
         } else {
@@ -578,6 +621,7 @@ private fun IdleState(
                 }
             }
         }
+    }
     }
 
     if (showHistorySheet) {
@@ -867,3 +911,31 @@ private fun ErrorState(message: String, onRetry: () -> Unit) {
  * LazyColumns directly in this file rather than PlayableItemsList.
  */
 private const val LOAD_MORE_THRESHOLD = 5
+
+/**
+ * Wraps [content] in pull-to-refresh only while [active]; otherwise draws
+ * it bare, so the screen behaves exactly as it did without the gesture.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun PullToRefreshIf(
+    active: Boolean,
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit,
+    state: androidx.compose.material3.pulltorefresh.PullToRefreshState,
+    content: @Composable () -> Unit,
+) {
+    if (active) {
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh,
+            state = state,
+            modifier = Modifier.fillMaxSize(),
+            indicator = {
+                com.whiplash.music.ui.home.HomeRefreshIndicator(state, isRefreshing, Modifier.align(Alignment.TopCenter))
+            },
+        ) { content() }
+    } else {
+        content()
+    }
+}

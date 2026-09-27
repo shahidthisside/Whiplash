@@ -493,6 +493,16 @@ class DownloadManager(
         downloadDao.delete(id)
     }
 
+    /** Completed downloads: how many, and the bytes their audio and artwork files take on disk. */
+    suspend fun downloadsUsage(): Pair<Int, Long> = withContext(Dispatchers.IO) {
+        val done = downloadDao.getAll().filter { it.status == com.whiplash.music.data.local.entity.DownloadStatus.COMPLETED }
+        val bytes = done.sumOf { entity ->
+            runCatching { File(entity.filePath).length() }.getOrDefault(0L) +
+                (entity.artworkPath?.let { runCatching { File(it).length() }.getOrDefault(0L) } ?: 0L)
+        }
+        done.size to bytes
+    }
+
     /**
      * Cancels every in-flight download and deletes every completed
      * download's audio/artwork files and Room rows — the Downloads tab's
