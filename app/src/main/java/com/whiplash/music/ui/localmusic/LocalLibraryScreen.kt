@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
@@ -59,6 +60,7 @@ fun LocalLibraryScreen(
     onPlayQueue: (queue: List<PlayableItem>, startIndex: Int) -> Unit = { _, _ -> },
     onAlbumClick: (LocalAlbum) -> Unit = {},
     onArtistClick: (LocalArtist) -> Unit = {},
+    onOpenHistory: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val viewModel: LocalLibraryViewModel = viewModel(factory = LocalLibraryViewModelFactory(context))
@@ -97,6 +99,7 @@ fun LocalLibraryScreen(
             onAlbumClick = onAlbumClick,
             onArtistClick = onArtistClick,
             hasMediaPermission = hasPermission,
+            onOpenHistory = onOpenHistory,
             permissionPermanentlyDenied = permissionPermanentlyDenied,
             onRequestPermission = { permissionLauncher.launch(LocalMediaPermission.permission) },
             onOpenSettings = {
@@ -132,6 +135,7 @@ private fun LibraryContent(
     permissionPermanentlyDenied: Boolean,
     onRequestPermission: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenHistory: (() -> Unit)? = null,
 ) {
     // Defaults to Downloads (not Songs) — Downloads is the only tab that
     // never needs the local-media permission (see LocalLibraryScreen's
@@ -153,12 +157,31 @@ private fun LibraryContent(
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
-    GlassSearchField(
-        query = searchQuery,
-        onQueryChange = viewModel::onSearchQueryChanged,
-        placeholder = if (selectedTab == LibraryTab.DOWNLOADS) "Search downloads..." else "Search your music...",
+    androidx.compose.foundation.layout.Row(
         modifier = Modifier.fillMaxWidth(),
-    )
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        GlassSearchField(
+            query = searchQuery,
+            onQueryChange = viewModel::onSearchQueryChanged,
+            placeholder = if (selectedTab == LibraryTab.DOWNLOADS) "Search downloads..." else "Search your music...",
+            modifier = Modifier.weight(1f),
+        )
+        // 4.5: History is its own destination, reachable from Library too.
+        if (onOpenHistory != null) {
+            com.whiplash.music.ui.theme.PlainIconButton(
+                contentDescription = "Listening history",
+                onClick = onOpenHistory,
+                size = 48.dp,
+            ) {
+                androidx.compose.material3.Icon(
+                    Icons.Filled.History,
+                    contentDescription = null,
+                    tint = com.whiplash.music.ui.theme.WhiplashColors.textSecondary,
+                )
+            }
+        }
+    }
 
     androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
 

@@ -28,6 +28,9 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import kotlinx.coroutines.launch
@@ -219,11 +222,20 @@ private fun WhiplashApp() {
     // Same collapse-not-exit back pattern as openPlaylist, for the Home
     // tab's "see full History" screen (reached via Speed dial's History
     // button — see HomeScreen/SectionHeader).
-    var showHistory by rememberSaveable { mutableStateOf(false) }
+    // 4.5: History is its own destination, opened from Home or Library.
+    // Remembers which tab opened it, so it stays inside that tab (switching
+    // tabs and back keeps it open there, like the other nested screens).
+    var historyTab by rememberSaveable { mutableStateOf<AppTab?>(null) }
+    val showHistory = historyTab != null && historyTab == selectedTab
+    // 4.1: album/playlist opened from a Home shelf (its YouTube URL).
+    var homeCollectionUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
     // Simple back-stack for Search tab detail navigation (album/artist),
     // since an artist page can itself open an album (section 40 "albums"
     // tab), needing more than one level of "open detail" state.
     var searchDetailStack by remember { mutableStateOf<List<SearchDestination>>(emptyList()) }
+    // Search detail pages currently drawn (includes one still sliding out after Back).
+    var searchLayers by remember { mutableStateOf<List<SearchDestination>>(emptyList()) }
     // Hoisted up from SearchScreen itself (real, reported bug: SearchScreen
     // is removed from composition entirely while an album/artist detail
     // screen is open — see the AppTab.SEARCH branch below — so a plain
@@ -301,7 +313,12 @@ private fun WhiplashApp() {
 
     // Same pattern for the Home tab's History screen.
     BackHandler(enabled = !isPlayerExpanded && showHistory) {
-        showHistory = false
+        historyTab = null
+    }
+
+    // Same pattern for an album/playlist opened from a Home shelf.
+    BackHandler(enabled = !isPlayerExpanded && !showHistory && selectedTab == AppTab.HOME && homeCollectionUrl != null) {
+        homeCollectionUrl = null
     }
 
     // Same pattern for Search tab's album/artist detail navigation — pops
@@ -388,61 +405,90 @@ private fun WhiplashApp() {
                                 // whole app rather than a plain fade here
                                 // and a slide there for conceptually the
                                 // same kind of navigation.
-                                AnimatedContent(
-                                    targetState = showHistory,
-                                    transitionSpec = {
-                                        val forward = targetState && !initialState
-                                        val enter = slideInHorizontally(animationSpec = tween(GlassTokens.animRegular)) { w -> if (forward) w / 3 else -w / 3 } +
-                                            fadeIn(animationSpec = tween(GlassTokens.animRegular))
-                                        val exit = slideOutHorizontally(animationSpec = tween(GlassTokens.animFast)) { w -> if (forward) -w / 3 else w / 3 } +
-                                            fadeOut(animationSpec = tween(GlassTokens.animFast))
-                                        if (reduceMotion) instantContentTransform() else enter.togetherWith(exit)
-                                    },
-                                    label = "homeHistoryContent",
-                                ) { isHistory ->
-                                    if (!isHistory) {
-                                        HomeScreen(
-                                            onPlayTrack = { track -> app.playbackController.playNow(track) },
-                                            onOpenHistory = { showHistory = true },
-                                            onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
-                                        )
-                                    } else {
-                                        com.whiplash.music.ui.home.HistoryScreen(
-                                            onBack = { showHistory = false },
-                                            onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
-                                        )
+                                // Home and History swap like before. An album/playlist opened
+                                // from a shelf is drawn *over* Home instead, so Home stays
+                                // composed (and scrolled) underneath and Back only has to slide
+                                // the album away — nothing is rebuilt mid-animation. (The old
+                                // version swapped the outgoing album for a second Home halfway
+                                // through the back animation, which is what stuttered.)
+                                val homeFirstFrame = remember { mutableStateOf(true) }
+                                androidx.compose.runtime.SideEffect { homeFirstFrame.value = false }
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    val albumOpen = homeCollectionUrl != null
+                                    AnimatedContent(
+                                        targetState = historyTab == AppTab.HOME,
+                                        transitionSpec = {
+                                            val forward = targetState && !initialState
+                                            if (reduceMotion) instantContentTransform() else detailNavTransform(forward)
+                                        },
+                                        label = "homeHistoryContent",
+                                        modifier = Modifier.then(
+                                            // Hidden from TalkBack while an album covers it.
+                                            if (albumOpen) Modifier.clearAndSetSemantics {} else Modifier,
+                                        ),
+                                    ) { isHistory ->
+                                        if (!isHistory) {
+                                            HomeScreen(
+                                                onPlayTrack = { track -> app.playbackController.playNow(track) },
+                                                onOpenHistory = { historyTab = AppTab.HOME },
+                                                onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                                                onOpenCollection = { homeCollectionUrl = it.url },
+                                                listState = homeListState,
+                                            )
+                                        } else {
+                                            com.whiplash.music.ui.home.HistoryScreen(
+                                                onBack = { historyTab = null },
+                                                onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                                            )
+                                        }
+                                    }
+                                    // Keeps the last URL so the album stays on screen while it
+                                    // slides out after Back has cleared homeCollectionUrl.
+                                    var shownCollectionUrl by remember { mutableStateOf(homeCollectionUrl) }
+                                    if (homeCollectionUrl != null) shownCollectionUrl = homeCollectionUrl
+                                    val url = shownCollectionUrl
+                                    if (url != null) {
+                                        androidx.compose.runtime.key(url) {
+                                            DetailOverlay(
+                                                visible = albumOpen,
+                                                reduceMotion = reduceMotion,
+                                                coveredAbove = false,
+                                                startVisible = homeFirstFrame.value,
+                                                onExitFinished = { if (homeCollectionUrl == null) shownCollectionUrl = null },
+                                            ) {
+                                                AlbumDetailScreen(
+                                                    url = url,
+                                                    onBack = { homeCollectionUrl = null },
+                                                    onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
                             AppTab.SEARCH -> {
-                                val topDestination = searchDetailStack.lastOrNull()
-                                // Keyed on stack depth + which destination
-                                // is on top, so pushing a second-level
-                                // destination (artist -> album) animates
-                                // too, not just the null <-> first-level
-                                // transition. Direction (slide left when
-                                // pushing deeper, right when popping back)
-                                // follows the stack depth actually
-                                // growing/shrinking, not just "which
-                                // destination" — going from Album back to
-                                // null and from null to a *different*
-                                // Album should read as backward/forward
-                                // respectively regardless of the specific
-                                // destination values involved.
-                                AnimatedContent(
-                                    targetState = searchDetailStack.size,
-                                    transitionSpec = {
-                                        val forward = targetState >= initialState
-                                        val enter = slideInHorizontally(animationSpec = tween(GlassTokens.animRegular)) { w -> if (forward) w / 3 else -w / 3 } +
-                                            fadeIn(animationSpec = tween(GlassTokens.animRegular))
-                                        val exit = slideOutHorizontally(animationSpec = tween(GlassTokens.animFast)) { w -> if (forward) -w / 3 else w / 3 } +
-                                            fadeOut(animationSpec = tween(GlassTokens.animFast))
-                                        if (reduceMotion) instantContentTransform() else enter.togetherWith(exit)
-                                    },
-                                    label = "searchDetailContent",
-                                ) { _ ->
-                                    when (topDestination) {
-                                        null -> SearchScreen(
+                                // Same approach as albums opened from Home: Search results
+                                // stay composed (and scrolled) underneath, and every album /
+                                // artist page is its own layer sliding over them. Back only
+                                // slides the top layer away — nothing underneath is rebuilt
+                                // mid-animation, which is what made the old swap stutter.
+                                // A popped layer stays in [searchLayers] until its exit
+                                // animation finishes, then is dropped.
+                                if (!(searchLayers.size >= searchDetailStack.size &&
+                                        searchLayers.take(searchDetailStack.size) == searchDetailStack)
+                                ) {
+                                    searchLayers = searchDetailStack
+                                }
+                                // True only on the frame the Search tab (re)appears.
+                                val searchFirstFrame = remember { mutableStateOf(true) }
+                                androidx.compose.runtime.SideEffect { searchFirstFrame.value = false }
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .then(if (searchDetailStack.isNotEmpty()) Modifier.clearAndSetSemantics {} else Modifier),
+                                    ) {
+                                        SearchScreen(
                                             onPlayTrack = { track -> app.playbackController.playNow(track) },
                                             onOpenAlbum = { album ->
                                                 searchDetailStack = searchDetailStack + SearchDestination.Album(album.url)
@@ -453,88 +499,99 @@ private fun WhiplashApp() {
                                             selectedTab = selectedSearchResultTab,
                                             onSelectedTabChange = { selectedSearchResultTab = it },
                                         )
-                                        is SearchDestination.Album -> AlbumDetailScreen(
-                                            url = topDestination.url,
-                                            onBack = { searchDetailStack = searchDetailStack.dropLast(1) },
-                                            onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
-                                        )
-                                        is SearchDestination.Artist -> ArtistDetailScreen(
-                                            channelUrl = topDestination.channelUrl,
-                                            onBack = { searchDetailStack = searchDetailStack.dropLast(1) },
-                                            onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
-                                            onOpenAlbum = { album ->
-                                                searchDetailStack = searchDetailStack + SearchDestination.Album(album.url)
-                                            },
-                                        )
+                                    }
+                                    searchLayers.forEachIndexed { index, destination ->
+                                        androidx.compose.runtime.key(index, destination) {
+                                            val visible = index < searchDetailStack.size
+                                            DetailOverlay(
+                                                visible = visible,
+                                                reduceMotion = reduceMotion,
+                                                // Layers under the top one are hidden from TalkBack.
+                                                coveredAbove = index < searchDetailStack.size - 1,
+                                                startVisible = searchFirstFrame.value,
+                                                onExitFinished = {
+                                                    if (index >= searchDetailStack.size) searchLayers = searchLayers.take(index)
+                                                },
+                                            ) {
+                                                when (destination) {
+                                                    is SearchDestination.Album -> AlbumDetailScreen(
+                                                        url = destination.url,
+                                                        onBack = { searchDetailStack = searchDetailStack.take(index) },
+                                                        onPlayQueue = { queue, i -> app.playbackController.playQueue(queue, i) },
+                                                    )
+                                                    is SearchDestination.Artist -> ArtistDetailScreen(
+                                                        channelUrl = destination.channelUrl,
+                                                        onBack = { searchDetailStack = searchDetailStack.take(index) },
+                                                        onPlayQueue = { queue, i -> app.playbackController.playQueue(queue, i) },
+                                                        onOpenAlbum = { album ->
+                                                            searchDetailStack = searchDetailStack.take(index + 1) + SearchDestination.Album(album.url)
+                                                        },
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
-                            AppTab.LOCAL -> LocalLibraryScreen(
-                                onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
-                            )
+                            AppTab.LOCAL -> AnimatedContent(
+                                targetState = historyTab == AppTab.LOCAL,
+                                transitionSpec = {
+                                    val forward = targetState && !initialState
+                                    if (reduceMotion) instantContentTransform() else detailNavTransform(forward)
+                                },
+                                label = "libraryHistoryContent",
+                            ) { isHistory ->
+                                if (!isHistory) {
+                                    LocalLibraryScreen(
+                                        onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                                        onOpenHistory = { historyTab = AppTab.LOCAL },
+                                    )
+                                } else {
+                                    com.whiplash.music.ui.home.HistoryScreen(
+                                        onBack = { historyTab = null },
+                                        onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                                    )
+                                }
+                            }
                             AppTab.FAVORITES -> FavoritesScreen(
                                 onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
                                 onBack = { selectedTab = AppTab.HOME },
                             )
                             AppTab.PLAYLISTS -> {
-                                val currentPlaylist = openPlaylist
-                                AnimatedContent(
-                                    targetState = currentPlaylist != null,
-                                    transitionSpec = {
-                                        // No animation: the playlist list and the playlist
-                                        // detail swap instantly, in both directions.
-                                        //
-                                        // This is a deliberate choice, not an omission.
-                                        // Opening a playlist has to compose the whole
-                                        // detail screen for the first time, and that costs
-                                        // one long frame — measured on-device with a
-                                        // 250-track imported playlist, ~95-165ms depending
-                                        // on how cold the ViewModel and Room query are.
-                                        // Because tween is driven by the clock rather than
-                                        // by frames, that lost frame doesn't pause an
-                                        // animation; the animation advances up to 40-70% of
-                                        // its duration with nothing drawn and the next
-                                        // frame lands already that far through. Every
-                                        // animated property therefore jumps rather than
-                                        // moves, and each variant failed in its own way:
-                                        //
-                                        //  - a w/3 slide snapped ~148px across and then
-                                        //    slid the remainder ("racing")
-                                        //  - adding a scale made two transforms jump at
-                                        //    once ("shaking")
-                                        //  - a cross-fade dipped the total opacity, because
-                                        //    two partly transparent layers over a dark
-                                        //    background composite to roughly 75% coverage
-                                        //    at the midpoint, so the background flashed
-                                        //    through ("blinking")
-                                        //  - sliding both children by a third of the width
-                                        //    left a band that neither covered mid-slide,
-                                        //    flashing the background again
-                                        //
-                                        // An instant swap has no property to interpolate,
-                                        // so a dropped frame cannot show up as movement, a
-                                        // reflow or a flash. sizeTransform is still pinned
-                                        // to null: left at its default, AnimatedContent
-                                        // animates its container between the two children's
-                                        // measured heights and clips to that size each
-                                        // frame, which reflowed the content even with no
-                                        // enter/exit transition at all.
-                                        ContentTransform(
-                                            targetContentEnter = EnterTransition.None,
-                                            initialContentExit = ExitTransition.None,
-                                            sizeTransform = null,
-                                        )
-                                    },
-                                    label = "playlistDetailContent",
-                                ) { _ ->
-                                    if (currentPlaylist == null) {
+                                // The playlist page slides over the list (see DetailOverlay):
+                                // the list stays composed and scrolled underneath, and the
+                                // page is built before its slide starts, so even a big
+                                // imported playlist's heavy first frame can't make it jump.
+                                // (This used to be an instant swap for exactly that reason.)
+                                var shownPlaylist by remember { mutableStateOf(openPlaylist) }
+                                if (openPlaylist != null) shownPlaylist = openPlaylist
+                                val playlistsFirstFrame = remember { mutableStateOf(true) }
+                                androidx.compose.runtime.SideEffect { playlistsFirstFrame.value = false }
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .then(if (openPlaylist != null) Modifier.clearAndSetSemantics {} else Modifier),
+                                    ) {
                                         PlaylistsScreen(onOpenPlaylist = { openPlaylist = it })
-                                    } else {
-                                        PlaylistDetailScreen(
-                                            playlist = currentPlaylist,
-                                            onBack = { openPlaylist = null },
-                                            onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
-                                        )
+                                    }
+                                    val playlist = shownPlaylist
+                                    if (playlist != null) {
+                                        androidx.compose.runtime.key(playlist.id) {
+                                            DetailOverlay(
+                                                visible = openPlaylist?.id == playlist.id,
+                                                reduceMotion = reduceMotion,
+                                                coveredAbove = false,
+                                                startVisible = playlistsFirstFrame.value,
+                                                onExitFinished = { if (openPlaylist == null) shownPlaylist = null },
+                                            ) {
+                                                PlaylistDetailScreen(
+                                                    playlist = playlist,
+                                                    onBack = { openPlaylist = null },
+                                                    onPlayQueue = { queue, index -> app.playbackController.playQueue(queue, index) },
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -586,7 +643,10 @@ private fun WhiplashApp() {
                         // always-correct plain tab switch.
                         if (tab == selectedTab) {
                             when (tab) {
-                                AppTab.HOME -> showHistory = false
+                                AppTab.HOME, AppTab.LOCAL -> {
+                                    if (historyTab == tab) historyTab = null
+                                    if (tab == AppTab.HOME) homeCollectionUrl = null
+                                }
                                 AppTab.SEARCH -> searchDetailStack = emptyList()
                                 AppTab.PLAYLISTS -> openPlaylist = null
                                 else -> {}
@@ -738,3 +798,85 @@ private fun instantContentTransform(): ContentTransform = ContentTransform(
     initialContentExit = ExitTransition.None,
     sizeTransform = null,
 )
+
+/**
+ * Push/pop transition for detail screens (album, playlist from Home, History,
+ * search detail). Same length both ways, with Material's standard easing: the
+ * new screen slides a quarter of the width while crossfading, and the old one
+ * drifts the other way and fades out. The exit used to be twice as fast as the
+ * entry, which made going back look abrupt.
+ */
+private fun detailNavTransform(forward: Boolean): androidx.compose.animation.ContentTransform {
+    val slide = tween<androidx.compose.ui.unit.IntOffset>(DETAIL_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+    val enter = slideInHorizontally(slide) { w -> if (forward) w / 4 else -w / 4 } +
+        fadeIn(tween(DETAIL_NAV_MS, delayMillis = DETAIL_NAV_MS / 6, easing = androidx.compose.animation.core.LinearOutSlowInEasing))
+    val exit = slideOutHorizontally(slide) { w -> if (forward) -w / 6 else w / 6 } +
+        fadeOut(tween(DETAIL_NAV_MS / 2, easing = androidx.compose.animation.core.FastOutLinearInEasing))
+    return enter.togetherWith(exit).apply { targetContentZIndex = if (forward) 1f else -1f }
+}
+
+private const val DETAIL_NAV_MS = 380
+
+/** Album-over-Home push: slides in a quarter width while fading in. */
+private fun detailOverlayEnter(): androidx.compose.animation.EnterTransition =
+    slideInHorizontally(tween(DETAIL_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { w -> w / 4 } +
+        fadeIn(tween(DETAIL_NAV_MS, easing = androidx.compose.animation.core.LinearOutSlowInEasing))
+
+/** The exact reverse of [detailOverlayEnter], same length and easing, so Back feels like entry played backwards. */
+private fun detailOverlayExit(): androidx.compose.animation.ExitTransition =
+    slideOutHorizontally(tween(DETAIL_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { w -> w / 4 } +
+        fadeOut(tween(DETAIL_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+
+/**
+ * One detail page drawn over the screen beneath it: slides a quarter of the
+ * width and fades, in when [visible] turns true and back out when it turns
+ * false, same length and easing both ways. Opaque and touch-blocking, so
+ * nothing underneath reacts. [onExitFinished] runs once it has fully left.
+ *
+ * The page is composed (invisibly) before the slide starts, and the slide
+ * only begins two frames later. Building a page for the first time can take
+ * one long frame (a big playlist measured 95-165 ms); an animation already
+ * running would skip ahead through that frame and visibly jump, so the work
+ * is done first and the motion afterwards.
+ */
+@Composable
+private fun DetailOverlay(
+    visible: Boolean,
+    reduceMotion: Boolean,
+    coveredAbove: Boolean,
+    onExitFinished: () -> Unit,
+    startVisible: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val progress = remember { androidx.compose.animation.core.Animatable(if (startVisible && visible) 1f else 0f) }
+    val latestOnExit by androidx.compose.runtime.rememberUpdatedState(onExitFinished)
+    androidx.compose.runtime.LaunchedEffect(visible, reduceMotion) {
+        if (visible) {
+            if (progress.value < 1f) {
+                androidx.compose.runtime.withFrameNanos { }
+                androidx.compose.runtime.withFrameNanos { }
+                if (reduceMotion) progress.snapTo(1f) else progress.animateTo(1f, detailNavSpec())
+            }
+        } else {
+            if (reduceMotion) progress.snapTo(0f) else progress.animateTo(0f, detailNavSpec())
+            latestOnExit()
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                val p = progress.value
+                translationX = (1f - p) * size.width / 4f
+                alpha = p
+            }
+            .background(MaterialTheme.colorScheme.background)
+            .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }
+            .then(if (coveredAbove) Modifier.clearAndSetSemantics {} else Modifier),
+    ) {
+        content()
+    }
+}
+
+private fun detailNavSpec() =
+    tween<Float>(DETAIL_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing)
