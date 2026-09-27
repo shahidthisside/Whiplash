@@ -39,4 +39,11 @@ class SettingsIndexTest {
     fun `every section has entries`() {
         SettingsSection.entries.forEach { s -> assertTrue(s.name, SettingEntry.entries.any { it.section == s }) }
     }
+
+    @Test
+    fun `every section is in exactly one folder group`() {
+        val grouped = SettingsGroup.entries.flatMap { it.sections }
+        assertEquals(SettingsSection.entries.size, grouped.size)
+        assertEquals(SettingsSection.entries.toSet(), grouped.toSet())
+    }
 }

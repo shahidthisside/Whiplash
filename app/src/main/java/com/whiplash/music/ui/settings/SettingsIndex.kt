@@ -17,6 +17,16 @@ enum class SettingsSection(val label: String) {
     BACKUP("Backup & Restore"),
 }
 
+/**
+ * How the section folders are grouped on the Settings start page, in order.
+ * Every section appears in exactly one group.
+ */
+enum class SettingsGroup(val label: String, val sections: List<SettingsSection>) {
+    LISTENING("Listening", listOf(SettingsSection.AUDIO_QUALITY, SettingsSection.PLAYBACK, SettingsSection.DOWNLOADS)),
+    LOOK_AND_FEEL("Look & feel", listOf(SettingsSection.NOW_PLAYING, SettingsSection.LYRICS, SettingsSection.APPEARANCE)),
+    YOUR_DATA("Your data", listOf(SettingsSection.STORAGE, SettingsSection.BACKUP)),
+}
+
 enum class SettingEntry(val section: SettingsSection, val title: String, val keywords: String) {
     AUDIO_QUALITY(SettingsSection.AUDIO_QUALITY, "Audio Quality", "streaming bitrate sound"),
     PER_NETWORK(SettingsSection.AUDIO_QUALITY, "Per-Network Audio Quality", "wifi wi-fi cellular mobile data plan"),

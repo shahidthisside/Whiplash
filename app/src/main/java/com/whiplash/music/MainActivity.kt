@@ -260,6 +260,8 @@ private fun WhiplashApp() {
     val replayTeaser by replayViewModel.teaser.collectAsState()
     val replayCurrentMonth by replayViewModel.currentMonthKey.collectAsState()
     var showReplay by rememberSaveable { mutableStateOf(false) }
+    // Bumped when the Settings tab is re-tapped, to return it to its start page.
+    var settingsResetKey by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     // A new month can begin while the app sits in the background.
     androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
         replayViewModel.refreshMonth()
@@ -665,7 +667,7 @@ private fun WhiplashApp() {
                                     }
                                 }
                             }
-                            AppTab.SETTINGS -> SettingsScreen()
+                            AppTab.SETTINGS -> SettingsScreen(resetKey = settingsResetKey)
                         }
                     }
 
@@ -719,6 +721,7 @@ private fun WhiplashApp() {
                             }
                             AppTab.SEARCH -> searchDetailStack = emptyList()
                             AppTab.PLAYLISTS -> openPlaylist = null
+                            AppTab.SETTINGS -> settingsResetKey++
                             else -> {}
                         }
                     }

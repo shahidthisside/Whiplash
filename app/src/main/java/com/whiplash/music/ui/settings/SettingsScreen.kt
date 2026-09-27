@@ -50,6 +50,13 @@ import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.SdStorage
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -96,7 +103,7 @@ private const val EQUALIZER_REQUEST_CODE = 4242
 
 @androidx.compose.foundation.layout.ExperimentalLayoutApi
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(resetKey: Int = 0) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository, app.audioCacheManager, app.backupManager, app.lyricsCache, app.lyricsProviderChain))
@@ -208,606 +215,763 @@ fun SettingsScreen() {
     }
 
     var settingsQuery by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
-    val sections = androidx.compose.runtime.remember(settingsQuery) { visibleSections(settingsQuery) }
-    val shown: (SettingEntry) -> Boolean = { settingMatches(it, settingsQuery) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val settingsScope = androidx.compose.runtime.rememberCoroutineScope()
+    // Folder mode: the section page that's open (null = the start page).
+    var openSection by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<SettingsSection?>(null) }
+    // Re-tapping the Settings tab returns to the start page.
+    androidx.compose.runtime.LaunchedEffect(resetKey) { if (resetKey > 0) openSection = null }
+    androidx.activity.compose.BackHandler(enabled = openSection != null) { openSection = null }
+    val reduceMotion = com.whiplash.music.ui.common.isReducedMotionEnabled()
+    val rootListState = androidx.compose.foundation.lazy.rememberLazyListState()
 
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd),
-        // Sections must be separated by more than the rows inside them, or the
-        // whole screen reads as one continuous list. This was previously 24dp
-        // between sections while rows within a section sat 32dp apart — the
-        // groups were more tightly packed than their own contents, so nothing
-        // marked where "Playback" ended and "Storage" began. With the cards and
-        // dividers gone this gap is the only thing carrying that boundary, so it
-        // is deliberately larger than spaceXl rather than a token value.
-        verticalArrangement = Arrangement.spacedBy(SETTINGS_SECTION_GAP),
-        // Matches the breathing room Home leaves between its title and its
-        // first section label. Home's "Quick Picks" label sits inside a 48dp
-        // row (it shares that row with the Play all / Refresh buttons) so its
-        // text is pushed down about 22dp; Settings' plain SectionLabel has no
-        // such row, which left "Playback" 62px tighter under the title than
-        // "Quick Picks" is under "Whiplash". Adding the inset here affects only
-        // the space above the first section, rather than compounding with the
-        // gap between sections.
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            top = GlassTokens.spaceLg,
-            bottom = GlassTokens.miniPlayerReservedHeight,
-        ),
+    // The settings rows for [sections], filtered by [query]. [flat] is the
+    // original single page (section titles and footer); a folder page leaves
+    // both out because its header already names the section.
+    @Composable
+    fun SettingsList(
+        state: androidx.compose.foundation.lazy.LazyListState,
+        sections: List<SettingsSection>,
+        query: String,
+        flat: Boolean,
+        topPadding: androidx.compose.ui.unit.Dp,
+        modifier: Modifier = Modifier,
+        top: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
     ) {
-        // 4.6: search box + jump chips, then the settings in focused groups.
-        item(key = "search") {
-            GlassSearchField(
-                query = settingsQuery,
-                onQueryChange = { settingsQuery = it },
-                placeholder = "Search settings",
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (settingsQuery.isBlank()) {
-                androidx.compose.foundation.lazy.LazyRow(
-                    modifier = Modifier.fillMaxWidth().padding(top = GlassTokens.spaceMd),
-                    horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
-                ) {
-                    items(SettingsSection.entries.size) { i ->
-                        val section = SettingsSection.entries[i]
-                        com.whiplash.music.ui.theme.GlassChip(
-                            text = section.label,
-                            selected = false,
-                            onClick = {
-                                // Search item is index 0; sections follow in order.
-                                settingsScope.launch { listState.animateScrollToItem(1 + i) }
-                            },
-                        )
+        val shown: (SettingEntry) -> Boolean = { settingMatches(it, query) }
+        LazyColumn(
+            state = state,
+            modifier = modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd),
+            // Sections must be separated by more than the rows inside them, or the
+            // whole screen reads as one continuous list. This was previously 24dp
+            // between sections while rows within a section sat 32dp apart — the
+            // groups were more tightly packed than their own contents, so nothing
+            // marked where "Playback" ended and "Storage" began. With the cards and
+            // dividers gone this gap is the only thing carrying that boundary, so it
+            // is deliberately larger than spaceXl rather than a token value.
+            verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceLg),
+            // Matches the breathing room Home leaves between its title and its
+            // first section label. Home's "Quick Picks" label sits inside a 48dp
+            // row (it shares that row with the Play all / Refresh buttons) so its
+            // text is pushed down about 22dp; Settings' plain SectionLabel has no
+            // such row, which left "Playback" 62px tighter under the title than
+            // "Quick Picks" is under "Whiplash". Adding the inset here affects only
+            // the space above the first section, rather than compounding with the
+            // gap between sections.
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                top = topPadding,
+                bottom = GlassTokens.miniPlayerReservedHeight,
+            ),
+    ) {
+            top()
+
+            if (SettingsSection.AUDIO_QUALITY in sections) {
+                item(key = "section:AUDIO_QUALITY") {
+                    if (flat) {
+                        SectionLabel(SettingsSection.AUDIO_QUALITY.label)
+                        Spacer(Modifier.height(GlassTokens.spaceSm))
                     }
-                }
-            }
-        }
-
-        if (sections.isEmpty()) {
-            item(key = "no-results") {
-                Text(
-                    text = "No settings match \u201C${settingsQuery.trim()}\u201D",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = WhiplashColors.textSecondary,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceXl),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                )
-            }
-        }
-
-        if (SettingsSection.AUDIO_QUALITY in sections) {
-            item(key = "section:AUDIO_QUALITY") {
-                SectionLabel(SettingsSection.AUDIO_QUALITY.label)
-                Spacer(Modifier.height(GlassTokens.spaceLg))
-                Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXl)) {
-                    if (shown(SettingEntry.AUDIO_QUALITY)) {
-                        // --- Audio Quality ---
-                        SettingRow(
-                            title = "Audio Quality",
-                            icon = Icons.Filled.GraphicEq,
-                            subtitle = "Applies to playback. Higher quality uses more data.",
-                        )
-                        // Only rendered once the real persisted value is known
-                        // (audioQuality is null for at most one frame right
-                        // after this screen is first created) — this is what
-                        // actually prevents the "flashes Auto, then jumps to
-                        // the real saved value" glitch, rather than merely
-                        // shortening it.
-                        audioQuality?.let { quality ->
-                            AudioQualitySelector(
-                                selected = quality,
-                                onSelect = viewModel::setAudioQuality,
-                            )
-                        }
-                    }
-
-                    if (shown(SettingEntry.PER_NETWORK)) {
-                        // --- Per-network audio quality (adapted from BitChord) ---
-                        // Off by default so the single Audio Quality control above
-                        // keeps working exactly as before for anyone who never
-                        // opens this; turning it on lets Wi-Fi and cellular each
-                        // keep their own ceiling, so a data plan isn't spent at
-                        // the same bitrate used at home.
-                        SettingToggleRow(
-                            title = "Per-Network Audio Quality",
-                            icon = Icons.Filled.NetworkCheck,
-                            subtitle = "Use separate quality ceilings for Wi-Fi and mobile data, instead of one setting for both.",
-                            checked = perNetworkQualityEnabled,
-                            onCheckedChange = viewModel::setPerNetworkQualityEnabled,
-                        )
-                        if (perNetworkQualityEnabled) {
-                            SettingRow(
-                                title = "Wi-Fi Quality",
-                                icon = Icons.Filled.Wifi,
-                                subtitle = "Used only when connected to Wi-Fi.",
-                            )
-                            AudioQualitySelector(
-                                selected = audioQualityWifi,
-                                onSelect = viewModel::setAudioQualityWifi,
-                            )
-                            SettingRow(
-                                title = "Cellular Quality",
-                                icon = Icons.Filled.SignalCellularAlt,
-                                subtitle = "Used only on mobile data. Lower this to save your data plan.",
-                            )
-                            AudioQualitySelector(
-                                selected = audioQualityCellular,
-                                onSelect = viewModel::setAudioQualityCellular,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        if (SettingsSection.PLAYBACK in sections) {
-            item(key = "section:PLAYBACK") {
-                SectionLabel(SettingsSection.PLAYBACK.label)
-                Spacer(Modifier.height(GlassTokens.spaceLg))
-                Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXl)) {
-                    if (shown(SettingEntry.AUTOPLAY)) {
-                        // --- Autoplay ---
-                        SettingToggleRow(
-                            title = "Autoplay",
-                            icon = Icons.Filled.PlaylistPlay,
-                            subtitle = "Automatically queue related songs when your queue is about to end.",
-                            checked = autoplayEnabled,
-                            onCheckedChange = viewModel::setAutoplayEnabled,
-                        )
-                    }
-
-                    if (shown(SettingEntry.GAPLESS)) {
-                        // --- Gapless ---
-                        SettingToggleRow(
-                            title = "Gapless Playback",
-                            icon = Icons.Filled.FastForward,
-                            subtitle = "Pre-load the next track so there's no pause between songs.",
-                            checked = gaplessEnabled,
-                            onCheckedChange = viewModel::setGaplessEnabled,
-                        )
-                    }
-
-                    if (shown(SettingEntry.SKIP_SILENCE)) {
-                        // --- Skip Silence (adapted from BitChord) ---
-                        // Uses Media3's own built-in SilenceSkippingAudioProcessor
-                        // (no custom DSP) — genuinely shortens silent passages
-                        // during playback rather than just detecting them, so
-                        // this is off by default like every other setting that
-                        // audibly changes what's heard.
-                        SettingToggleRow(
-                            title = "Skip Silence",
-                            icon = Icons.Filled.VolumeOff,
-                            subtitle = "Automatically speed through quiet passages during playback.",
-                            checked = skipSilenceEnabled,
-                            onCheckedChange = viewModel::setSkipSilenceEnabled,
-                        )
-                    }
-
-                    if (shown(SettingEntry.CROSSFADE)) {
-                        // --- Crossfade / fade duration ---
-                        SettingRow(
-                            title = "Crossfade",
-                            icon = Icons.Filled.Tune,
-                            subtitle = if (crossfadeDurationMs == 0) {
-                                "Off — songs switch instantly."
-                            } else {
-                                "Fades out the current song and fades in the next over ${crossfadeDurationMs / 1000}s."
-                            },
-                        )
-                        com.whiplash.music.ui.common.CrossfadeSlider(
-                            selectedMs = crossfadeDurationMs,
-                            onSelect = viewModel::setCrossfadeDurationMs,
-                        )
-                    }
-
-                    if (shown(SettingEntry.SPEED)) {
-                        // --- Playback speed ---
-                        SettingRow(
-                            title = "Playback Speed",
-                            icon = Icons.Filled.Speed,
-                            subtitle = "Applies to the currently playing track immediately.",
-                        )
-                        com.whiplash.music.ui.common.PlaybackSpeedControl(
-                            selected = playbackSpeed,
-                            onSelect = { speed ->
-                                viewModel.setPlaybackSpeed(speed)
-                                app.playbackController.setPlaybackSpeed(speed)
-                            },
-                        )
-                    }
-
-                    if (shown(SettingEntry.EQUALIZER)) {
-                        // --- System Equalizer (adapted from BitChord) ---
-                        // Hands off to whichever equalizer app is installed
-                        // (system EQ, Wavelet, Poweramp EQ, etc.) rather than
-                        // building custom DSP — the standard, documented way
-                        // for a media app to support this at all.
-                        SettingActionRow(
-                            title = "Equalizer",
-                            icon = Icons.Filled.Equalizer,
-                            subtitle = "Open the system or a third-party equalizer app for this audio session.",
-                            onClick = onClick@{
-                                val sessionId = app.playbackController.audioSessionId()
-                                if (sessionId == androidx.media3.common.C.AUDIO_SESSION_ID_UNSET) {
-                                    com.whiplash.music.ui.common.ToastController.show("Start playing a song first")
-                                    return@onClick
+                    SettingsCardColumn(SettingsSection.AUDIO_QUALITY) {
+                        val rows = SettingsRowCounter()
+                        if (shown(SettingEntry.AUDIO_QUALITY)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Audio Quality ---
+                                SettingRow(
+                                    title = "Audio Quality",
+                                    icon = Icons.Filled.GraphicEq,
+                                    subtitle = "Applies to playback. Higher quality uses more data.",
+                                )
+                                // Only rendered once the real persisted value is known
+                                // (audioQuality is null for at most one frame right
+                                // after this screen is first created) — this is what
+                                // actually prevents the "flashes Auto, then jumps to
+                                // the real saved value" glitch, rather than merely
+                                // shortening it.
+                                audioQuality?.let { quality ->
+                                    AudioQualitySelector(
+                                        selected = quality,
+                                        onSelect = viewModel::setAudioQuality,
+                                    )
                                 }
-                                val intent = android.content.Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
-                                    putExtra(android.media.audiofx.AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
-                                    putExtra(android.media.audiofx.AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
-                                    putExtra(android.media.audiofx.AudioEffect.EXTRA_CONTENT_TYPE, android.media.audiofx.AudioEffect.CONTENT_TYPE_MUSIC)
+                            }
+                        }
+
+                        if (shown(SettingEntry.PER_NETWORK)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Per-network audio quality (adapted from BitChord) ---
+                                // Off by default so the single Audio Quality control above
+                                // keeps working exactly as before for anyone who never
+                                // opens this; turning it on lets Wi-Fi and cellular each
+                                // keep their own ceiling, so a data plan isn't spent at
+                                // the same bitrate used at home.
+                                SettingToggleRow(
+                                    title = "Per-Network Audio Quality",
+                                    icon = Icons.Filled.NetworkCheck,
+                                    subtitle = "Use separate quality ceilings for Wi-Fi and mobile data, instead of one setting for both.",
+                                    checked = perNetworkQualityEnabled,
+                                    onCheckedChange = viewModel::setPerNetworkQualityEnabled,
+                                )
+                                if (perNetworkQualityEnabled) {
+                                    SettingRow(
+                                        title = "Wi-Fi Quality",
+                                        icon = Icons.Filled.Wifi,
+                                        subtitle = "Used only when connected to Wi-Fi.",
+                                    )
+                                    AudioQualitySelector(
+                                        selected = audioQualityWifi,
+                                        onSelect = viewModel::setAudioQualityWifi,
+                                    )
+                                    SettingRow(
+                                        title = "Cellular Quality",
+                                        icon = Icons.Filled.SignalCellularAlt,
+                                        subtitle = "Used only on mobile data. Lower this to save your data plan.",
+                                    )
+                                    AudioQualitySelector(
+                                        selected = audioQualityCellular,
+                                        onSelect = viewModel::setAudioQualityCellular,
+                                    )
                                 }
-                                runCatching {
-                                    // Some equalizer apps (confirmed on-device: AOSP's own
-                                    // MusicFX) derive the calling package from the launching
-                                    // Activity's own identity via startActivityForResult
-                                    // rather than trusting EXTRA_PACKAGE_NAME alone — a plain
-                                    // startActivity() left MusicFX logging "Package name is
-                                    // null" even though the intent otherwise launched
-                                    // correctly. Prefer startActivityForResult when this
-                                    // context is (or wraps) a real Activity; fall back to
-                                    // plain startActivity if it's some other Context type.
-                                    val activity = context as? android.app.Activity
-                                        ?: (context as? android.content.ContextWrapper)?.baseContext as? android.app.Activity
-                                    if (activity != null) {
-                                        activity.startActivityForResult(intent, EQUALIZER_REQUEST_CODE)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (SettingsSection.PLAYBACK in sections) {
+                item(key = "section:PLAYBACK") {
+                    if (flat) {
+                        SectionLabel(SettingsSection.PLAYBACK.label)
+                        Spacer(Modifier.height(GlassTokens.spaceSm))
+                    }
+                    SettingsCardColumn(SettingsSection.PLAYBACK) {
+                        val rows = SettingsRowCounter()
+                        if (shown(SettingEntry.AUTOPLAY)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Autoplay ---
+                                SettingToggleRow(
+                                    title = "Autoplay",
+                                    icon = Icons.Filled.PlaylistPlay,
+                                    subtitle = "Automatically queue related songs when your queue is about to end.",
+                                    checked = autoplayEnabled,
+                                    onCheckedChange = viewModel::setAutoplayEnabled,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.GAPLESS)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Gapless ---
+                                SettingToggleRow(
+                                    title = "Gapless Playback",
+                                    icon = Icons.Filled.FastForward,
+                                    subtitle = "Pre-load the next track so there's no pause between songs.",
+                                    checked = gaplessEnabled,
+                                    onCheckedChange = viewModel::setGaplessEnabled,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.SKIP_SILENCE)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Skip Silence (adapted from BitChord) ---
+                                // Uses Media3's own built-in SilenceSkippingAudioProcessor
+                                // (no custom DSP) — genuinely shortens silent passages
+                                // during playback rather than just detecting them, so
+                                // this is off by default like every other setting that
+                                // audibly changes what's heard.
+                                SettingToggleRow(
+                                    title = "Skip Silence",
+                                    icon = Icons.Filled.VolumeOff,
+                                    subtitle = "Automatically speed through quiet passages during playback.",
+                                    checked = skipSilenceEnabled,
+                                    onCheckedChange = viewModel::setSkipSilenceEnabled,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.CROSSFADE)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Crossfade / fade duration ---
+                                SettingRow(
+                                    title = "Crossfade",
+                                    icon = Icons.Filled.Tune,
+                                    subtitle = if (crossfadeDurationMs == 0) {
+                                        "Off — songs switch instantly."
                                     } else {
-                                        context.startActivity(intent)
-                                    }
-                                }.onFailure { com.whiplash.music.ui.common.ToastController.show("No equalizer app found") }
-                            },
-                        )
-                    }
-                }
-            }
-        }
-
-        if (SettingsSection.DOWNLOADS in sections) {
-            item(key = "section:DOWNLOADS") {
-                SectionLabel(SettingsSection.DOWNLOADS.label)
-                Spacer(Modifier.height(GlassTokens.spaceLg))
-                Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXl)) {
-                    if (shown(SettingEntry.DOWNLOAD_QUALITY)) {
-                        // --- Download Quality ---
-                        // Deliberately separate from Audio Quality above: a
-                        // download is a one-time, permanent fetch (storage +
-                        // one-time data cost) rather than a repeated streaming
-                        // cost, so a user may reasonably want a different
-                        // quality for offline downloads than for live
-                        // streaming playback (e.g. small downloads for
-                        // offline listening while still streaming at a
-                        // higher quality when online).
-                        SettingRow(
-                            title = "Download Quality",
-                            icon = Icons.Filled.Download,
-                            subtitle = "Applies to new downloads. Higher quality uses more storage.",
-                        )
-                        downloadQuality?.let { quality ->
-                            AudioQualitySelector(
-                                selected = quality,
-                                onSelect = viewModel::setDownloadQuality,
-                            )
+                                        "Fades out the current song and fades in the next over ${crossfadeDurationMs / 1000}s."
+                                    },
+                                )
+                                com.whiplash.music.ui.common.CrossfadeSlider(
+                                    selectedMs = crossfadeDurationMs,
+                                    onSelect = viewModel::setCrossfadeDurationMs,
+                                )
+                            }
                         }
-                    }
 
-                    if (shown(SettingEntry.DOWNLOAD_WIFI)) {
-                        // --- Download on Wi-Fi only ---
-                        // Sits with Download Quality because both decide what a
-                        // download costs; streaming has its own per-network quality.
-                        SettingToggleRow(
-                            title = "Download on Wi-Fi only",
-                            icon = Icons.Filled.Wifi,
-                            subtitle = "Don't start downloads on mobile data or metered networks.",
-                            checked = downloadWifiOnly,
-                            onCheckedChange = viewModel::setDownloadWifiOnly,
-                        )
-                    }
-                }
-            }
-        }
-
-        if (SettingsSection.NOW_PLAYING in sections) {
-            item(key = "section:NOW_PLAYING") {
-                SectionLabel(SettingsSection.NOW_PLAYING.label)
-                Spacer(Modifier.height(GlassTokens.spaceLg))
-                Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXl)) {
-                    if (shown(SettingEntry.SEEK_BAR)) {
-                        Column {
-                            SettingRow(
-                                title = "Progress Bar Style",
-                                icon = Icons.Filled.LinearScale,
-                                subtitle = "Choose how the full player's seek bar looks. Currently using ${seekBarStyle.displayName}.",
-                            )
-                            Spacer(Modifier.height(GlassTokens.spaceMd))
-                            SeekBarStylePicker(selected = seekBarStyle, onSelect = viewModel::setSeekBarStyle)
-                        }
-                    }
-
-                    if (shown(SettingEntry.ARTWORK_COLOURS)) {
-                        SettingToggleRow(
-                            title = "Artwork colours in player",
-                            icon = Icons.Filled.ColorLens,
-                            subtitle = "Tint the Now Playing screen with colours from the album art.",
-                            checked = playerArtworkColors,
-                            onCheckedChange = viewModel::setPlayerArtworkColors,
-                        )
-                    }
-
-                    if (shown(SettingEntry.FULL_BLEED)) {
-                        SettingToggleRow(
-                            title = "Full-bleed artwork",
-                            icon = Icons.Filled.Fullscreen,
-                            subtitle = "Show the album art edge to edge across the top of the full player.",
-                            checked = playerHeroArtwork,
-                            onCheckedChange = viewModel::setPlayerHeroArtwork,
-                        )
-                    }
-
-                    if (shown(SettingEntry.STATS)) {
-                        SettingToggleRow(
-                            title = "Stats for Nerds",
-                            icon = Icons.Filled.Info,
-                            subtitle = "Show the codec, sample rate and bitrate of what's playing under the artwork.",
-                            checked = statsForNerdsEnabled,
-                            onCheckedChange = viewModel::setStatsForNerdsEnabled,
-                        )
-                    }
-                }
-            }
-        }
-
-        if (SettingsSection.LYRICS in sections) {
-            item(key = "section:LYRICS") {
-                SectionLabel(SettingsSection.LYRICS.label)
-                Spacer(Modifier.height(GlassTokens.spaceLg))
-                Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXl)) {
-                    if (shown(SettingEntry.LYRIC_LINE)) {
-                        SettingToggleRow(
-                            title = "Lyric line in player",
-                            icon = Icons.Filled.Lyrics,
-                            subtitle = "Show the current lyric above the seek bar in the full player.",
-                            checked = playerLyricStrip,
-                            onCheckedChange = viewModel::setPlayerLyricStrip,
-                        )
-                    }
-
-                    if (shown(SettingEntry.LYRICS_BLUR)) {
-                        SettingToggleRow(
-                            title = "Blur other lyric lines",
-                            icon = Icons.Filled.Lyrics,
-                            subtitle = if (android.os.Build.VERSION.SDK_INT >= 31) {
-                                "Softly blur the lines around the one being sung. Clears while you scroll."
-                            } else {
-                                "Needs Android 12 or newer; other lines are dimmed instead."
-                            },
-                            checked = lyricsBlurUnfocused,
-                            onCheckedChange = viewModel::setLyricsBlurUnfocused,
-                        )
-                    }
-
-                    if (shown(SettingEntry.LYRICS_SOURCE)) {
-                        SettingRow(
-                            title = "Lyrics source",
-                            icon = Icons.Filled.Lyrics,
-                            subtitle = "Automatic tries LRCLIB (synced) first, then lyrics.ovh (plain text).",
-                        )
-                        LyricsSourceSelector(selected = lyricsSource, onSelect = viewModel::setLyricsSource)
-                        LyricsProviderHealthLine(lyricsProviderHealth)
-                    }
-                }
-            }
-        }
-
-        if (SettingsSection.APPEARANCE in sections) {
-            item(key = "section:APPEARANCE") {
-                SectionLabel(SettingsSection.APPEARANCE.label)
-                Spacer(Modifier.height(GlassTokens.spaceLg))
-                Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXl)) {
-                    if (shown(SettingEntry.THEME)) {
-                        Column {
-                            SettingRow(
-                                title = "Theme",
-                                icon = Icons.Filled.Palette,
-                                subtitle = "Currently using ${themeVariant.displayName}.",
-                            )
-                            Spacer(Modifier.height(GlassTokens.spaceMd))
-                            ThemeGrid(selected = themeVariant, onSelect = viewModel::setThemeVariant)
-                        }
-                    }
-
-                    if (shown(SettingEntry.HOME_SHELVES)) {
-                        SettingToggleRow(
-                            title = "Home shelves",
-                            icon = Icons.Filled.ViewCarousel,
-                            subtitle = "Show album and playlist shelves on Home, picked from the artists you play.",
-                            checked = homeShelvesEnabled,
-                            onCheckedChange = viewModel::setHomeShelvesEnabled,
-                        )
-                    }
-
-                    if (shown(SettingEntry.REPLAY)) {
-                        SettingToggleRow(
-                            title = "Monthly Replay",
-                            icon = Icons.Filled.Insights,
-                            subtitle = "Count what you play for a monthly recap of your top songs and artists, opened from Home. Counting stays on this device.",
-                            checked = replayEnabled,
-                            onCheckedChange = viewModel::setReplayEnabled,
-                        )
-                    }
-
-                    if (shown(SettingEntry.EXPLORE)) {
-                        SettingToggleRow(
-                            title = "Explore in Search",
-                            icon = Icons.Filled.Explore,
-                            subtitle = "Show new releases, charts and moods & genres on the Search screen.",
-                            checked = exploreEnabled,
-                            onCheckedChange = viewModel::setExploreEnabled,
-                        )
-                    }
-
-                    if (shown(SettingEntry.QUICK_PICKS_GRID)) {
-                        Column {
-                            SettingRow(
-                                title = "Quick Picks grid size",
-                                icon = Icons.Filled.GridView,
-                                subtitle = if (quickPicksGridCount == 0) {
-                                    "Grid view shows every song at once."
-                                } else {
-                                    "Grid view shows $quickPicksGridCount songs at a time; swipe sideways for more."
-                                },
-                            )
-                            Spacer(Modifier.height(GlassTokens.spaceMd))
-                            QuickPicksGridCountSelector(quickPicksGridCount, viewModel::setQuickPicksGridCount)
-                        }
-                    }
-
-                    if (shown(SettingEntry.REDUCE_ANIMATIONS)) {
-                        // --- Reduce animations ---
-                        // Same effect as the system's "Remove animations", but just
-                        // for this app: screen transitions become instant and
-                        // decorative motion (shimmer, artwork shrink) stops.
-                        SettingToggleRow(
-                            title = "Reduce animations",
-                            icon = Icons.Filled.Animation,
-                            subtitle = "Turn off screen transitions and decorative motion in the app.",
-                            checked = reduceAnimations,
-                            onCheckedChange = viewModel::setReduceAnimations,
-                        )
-                    }
-                }
-            }
-        }
-
-        if (SettingsSection.STORAGE in sections) {
-            item(key = "section:STORAGE") {
-                SectionLabel(SettingsSection.STORAGE.label)
-                Spacer(Modifier.height(GlassTokens.spaceLg))
-                Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXl)) {
-                    if (shown(SettingEntry.CACHE_SONGS)) {
-                        // --- Audio cache toggle ---
-                        SettingToggleRow(
-                            title = "Cache Songs",
-                            icon = Icons.Filled.Storage,
-                            subtitle = "Store recently played songs on this device so they start instantly next time, instead of streaming again. Off frees up storage but replays always re-download.",
-                            checked = audioCacheEnabled,
-                            onCheckedChange = viewModel::setAudioCacheEnabled,
-                        )
-                    }
-
-                    if (shown(SettingEntry.CACHED_DATA)) {
-                        // --- Cache size + clear ---
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            SettingRow(
-                                title = "Cached data",
-                                icon = Icons.Filled.DataUsage,
-                                subtitle = formatCacheSize(cacheSizeBytes),
-                            )
-                            GlassButton(
-                                text = "Clear cache",
-                                onClick = viewModel::clearCache,
-                                // Bright/pressable only when there's actually
-                                // something to clear — GlassButton's own
-                                // enabled=false state already fades it out via
-                                // GlassTokens.opacityDisabled, giving a real
-                                // "not currently actionable" affordance instead
-                                // of a button that always looks clickable but
-                                // silently does nothing when the cache is empty.
-                                enabled = cacheSizeBytes > 0L,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        if (SettingsSection.BACKUP in sections) {
-            item(key = "section:BACKUP") {
-                SectionLabel(SettingsSection.BACKUP.label)
-                Spacer(Modifier.height(GlassTokens.spaceLg))
-                Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXl)) {
-                    if (shown(SettingEntry.BACKUP)) {
-                        SettingRow(
-                            title = "Local backup",
-                            icon = Icons.Filled.Backup,
-                            subtitle = "Choose what to back up below, then save it to a file you choose.\n" +
-                                formatLastBackupSubtitle(lastBackupTimeMs),
-                        )
-                        // Per-category selector — between the description
-                        // above and the action buttons below, per explicit
-                        // steering on positioning. Uses GlassChip (this app's
-                        // own existing filter/tag component, already used for
-                        // Search's result tabs) in a wrapping FlowRow rather
-                        // than a tall stack of full checkbox rows with
-                        // descriptions — 6 categories' descriptions each on
-                        // their own line pushed this card, and everything
-                        // below it on the Settings screen, considerably
-                        // further down with comparatively little benefit
-                        // (the categories are largely self-explanatory from
-                        // their names alone). All chips selected by default
-                        // so "Back up now" still backs up everything with
-                        // zero extra taps, exactly matching the old always-
-                        // full behavior for anyone who doesn't touch these.
-                        androidx.compose.foundation.layout.FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
-                            verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
-                        ) {
-                            val allSelected = selectedBackupCategories.size == com.whiplash.music.data.backup.BackupCategory.entries.size
-                            BackupCategoryChip(
-                                text = "All",
-                                selected = allSelected,
-                                onClick = {
-                                    selectedBackupCategories = if (allSelected) {
-                                        emptySet()
-                                    } else {
-                                        com.whiplash.music.data.backup.BackupCategory.entries.toSet()
-                                    }
-                                },
-                            )
-                            com.whiplash.music.data.backup.BackupCategory.entries.forEach { category ->
-                                val checked = category in selectedBackupCategories
-                                BackupCategoryChip(
-                                    text = category.displayName,
-                                    selected = checked,
-                                    onClick = {
-                                        selectedBackupCategories = if (checked) {
-                                            selectedBackupCategories - category
-                                        } else {
-                                            selectedBackupCategories + category
-                                        }
+                        if (shown(SettingEntry.SPEED)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Playback speed ---
+                                SettingRow(
+                                    title = "Playback Speed",
+                                    icon = Icons.Filled.Speed,
+                                    subtitle = "Applies to the currently playing track immediately.",
+                                )
+                                com.whiplash.music.ui.common.PlaybackSpeedControl(
+                                    selected = playbackSpeed,
+                                    onSelect = { speed ->
+                                        viewModel.setPlaybackSpeed(speed)
+                                        app.playbackController.setPlaybackSpeed(speed)
                                     },
                                 )
                             }
                         }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
-                        ) {
-                            GlassButton(
-                                text = "Back up now",
-                                modifier = Modifier.weight(1f),
-                                enabled = selectedBackupCategories.isNotEmpty(),
-                                onClick = { backupLauncher.launch(com.whiplash.music.data.backup.BackupManager.suggestedFileName()) },
-                            )
-                            GlassButton(
-                                text = "Restore",
-                                modifier = Modifier.weight(1f),
-                                onClick = { restoreLauncher.launch(arrayOf("application/zip", "application/octet-stream")) },
-                            )
+
+                        if (shown(SettingEntry.EQUALIZER)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- System Equalizer (adapted from BitChord) ---
+                                // Hands off to whichever equalizer app is installed
+                                // (system EQ, Wavelet, Poweramp EQ, etc.) rather than
+                                // building custom DSP — the standard, documented way
+                                // for a media app to support this at all.
+                                SettingActionRow(
+                                    title = "Equalizer",
+                                    icon = Icons.Filled.Equalizer,
+                                    subtitle = "Open the system or a third-party equalizer app for this audio session.",
+                                    onClick = onClick@{
+                                        val sessionId = app.playbackController.audioSessionId()
+                                        if (sessionId == androidx.media3.common.C.AUDIO_SESSION_ID_UNSET) {
+                                            com.whiplash.music.ui.common.ToastController.show("Start playing a song first")
+                                            return@onClick
+                                        }
+                                        val intent = android.content.Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
+                                            putExtra(android.media.audiofx.AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
+                                            putExtra(android.media.audiofx.AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+                                            putExtra(android.media.audiofx.AudioEffect.EXTRA_CONTENT_TYPE, android.media.audiofx.AudioEffect.CONTENT_TYPE_MUSIC)
+                                        }
+                                        runCatching {
+                                            // Some equalizer apps (confirmed on-device: AOSP's own
+                                            // MusicFX) derive the calling package from the launching
+                                            // Activity's own identity via startActivityForResult
+                                            // rather than trusting EXTRA_PACKAGE_NAME alone — a plain
+                                            // startActivity() left MusicFX logging "Package name is
+                                            // null" even though the intent otherwise launched
+                                            // correctly. Prefer startActivityForResult when this
+                                            // context is (or wraps) a real Activity; fall back to
+                                            // plain startActivity if it's some other Context type.
+                                            val activity = context as? android.app.Activity
+                                                ?: (context as? android.content.ContextWrapper)?.baseContext as? android.app.Activity
+                                            if (activity != null) {
+                                                activity.startActivityForResult(intent, EQUALIZER_REQUEST_CODE)
+                                            } else {
+                                                context.startActivity(intent)
+                                            }
+                                        }.onFailure { com.whiplash.music.ui.common.ToastController.show("No equalizer app found") }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
             }
-        }
 
-        item {
-            GithubFooter()
+            if (SettingsSection.DOWNLOADS in sections) {
+                item(key = "section:DOWNLOADS") {
+                    if (flat) {
+                        SectionLabel(SettingsSection.DOWNLOADS.label)
+                        Spacer(Modifier.height(GlassTokens.spaceSm))
+                    }
+                    SettingsCardColumn(SettingsSection.DOWNLOADS) {
+                        val rows = SettingsRowCounter()
+                        if (shown(SettingEntry.DOWNLOAD_QUALITY)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Download Quality ---
+                                // Deliberately separate from Audio Quality above: a
+                                // download is a one-time, permanent fetch (storage +
+                                // one-time data cost) rather than a repeated streaming
+                                // cost, so a user may reasonably want a different
+                                // quality for offline downloads than for live
+                                // streaming playback (e.g. small downloads for
+                                // offline listening while still streaming at a
+                                // higher quality when online).
+                                SettingRow(
+                                    title = "Download Quality",
+                                    icon = Icons.Filled.Download,
+                                    subtitle = "Applies to new downloads. Higher quality uses more storage.",
+                                )
+                                downloadQuality?.let { quality ->
+                                    AudioQualitySelector(
+                                        selected = quality,
+                                        onSelect = viewModel::setDownloadQuality,
+                                    )
+                                }
+                            }
+                        }
+
+                        if (shown(SettingEntry.DOWNLOAD_WIFI)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Download on Wi-Fi only ---
+                                // Sits with Download Quality because both decide what a
+                                // download costs; streaming has its own per-network quality.
+                                SettingToggleRow(
+                                    title = "Download on Wi-Fi only",
+                                    icon = Icons.Filled.Wifi,
+                                    subtitle = "Don't start downloads on mobile data or metered networks.",
+                                    checked = downloadWifiOnly,
+                                    onCheckedChange = viewModel::setDownloadWifiOnly,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (SettingsSection.NOW_PLAYING in sections) {
+                item(key = "section:NOW_PLAYING") {
+                    if (flat) {
+                        SectionLabel(SettingsSection.NOW_PLAYING.label)
+                        Spacer(Modifier.height(GlassTokens.spaceSm))
+                    }
+                    SettingsCardColumn(SettingsSection.NOW_PLAYING) {
+                        val rows = SettingsRowCounter()
+                        if (shown(SettingEntry.SEEK_BAR)) {
+                            SettingItem(divider = rows.next()) {
+                                Column {
+                                    SettingRow(
+                                        title = "Progress Bar Style",
+                                        icon = Icons.Filled.LinearScale,
+                                        subtitle = "Choose how the full player's seek bar looks. Currently using ${seekBarStyle.displayName}.",
+                                    )
+                                    Spacer(Modifier.height(GlassTokens.spaceMd))
+                                    SeekBarStylePicker(selected = seekBarStyle, onSelect = viewModel::setSeekBarStyle)
+                                }
+                            }
+                        }
+
+                        if (shown(SettingEntry.ARTWORK_COLOURS)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Artwork colours in player",
+                                    icon = Icons.Filled.ColorLens,
+                                    subtitle = "Tint the Now Playing screen with colours from the album art.",
+                                    checked = playerArtworkColors,
+                                    onCheckedChange = viewModel::setPlayerArtworkColors,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.FULL_BLEED)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Full-bleed artwork",
+                                    icon = Icons.Filled.Fullscreen,
+                                    subtitle = "Show the album art edge to edge across the top of the full player.",
+                                    checked = playerHeroArtwork,
+                                    onCheckedChange = viewModel::setPlayerHeroArtwork,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.STATS)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Stats for Nerds",
+                                    icon = Icons.Filled.Info,
+                                    subtitle = "Show the codec, sample rate and bitrate of what's playing under the artwork.",
+                                    checked = statsForNerdsEnabled,
+                                    onCheckedChange = viewModel::setStatsForNerdsEnabled,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (SettingsSection.LYRICS in sections) {
+                item(key = "section:LYRICS") {
+                    if (flat) {
+                        SectionLabel(SettingsSection.LYRICS.label)
+                        Spacer(Modifier.height(GlassTokens.spaceSm))
+                    }
+                    SettingsCardColumn(SettingsSection.LYRICS) {
+                        val rows = SettingsRowCounter()
+                        if (shown(SettingEntry.LYRIC_LINE)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Lyric line in player",
+                                    icon = Icons.Filled.Lyrics,
+                                    subtitle = "Show the current lyric above the seek bar in the full player.",
+                                    checked = playerLyricStrip,
+                                    onCheckedChange = viewModel::setPlayerLyricStrip,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.LYRICS_BLUR)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Blur other lyric lines",
+                                    icon = Icons.Filled.Lyrics,
+                                    subtitle = if (android.os.Build.VERSION.SDK_INT >= 31) {
+                                        "Softly blur the lines around the one being sung. Clears while you scroll."
+                                    } else {
+                                        "Needs Android 12 or newer; other lines are dimmed instead."
+                                    },
+                                    checked = lyricsBlurUnfocused,
+                                    onCheckedChange = viewModel::setLyricsBlurUnfocused,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.LYRICS_SOURCE)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingRow(
+                                    title = "Lyrics source",
+                                    icon = Icons.Filled.Lyrics,
+                                    subtitle = "Automatic tries LRCLIB (synced) first, then lyrics.ovh (plain text).",
+                                )
+                                LyricsSourceSelector(selected = lyricsSource, onSelect = viewModel::setLyricsSource)
+                                LyricsProviderHealthLine(lyricsProviderHealth)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (SettingsSection.APPEARANCE in sections) {
+                item(key = "section:APPEARANCE") {
+                    if (flat) {
+                        SectionLabel(SettingsSection.APPEARANCE.label)
+                        Spacer(Modifier.height(GlassTokens.spaceSm))
+                    }
+                    SettingsCardColumn(SettingsSection.APPEARANCE) {
+                        val rows = SettingsRowCounter()
+                        if (shown(SettingEntry.THEME)) {
+                            SettingItem(divider = rows.next()) {
+                                Column {
+                                    SettingRow(
+                                        title = "Theme",
+                                        icon = Icons.Filled.Palette,
+                                        subtitle = "Currently using ${themeVariant.displayName}.",
+                                    )
+                                    Spacer(Modifier.height(GlassTokens.spaceMd))
+                                    ThemeGrid(selected = themeVariant, onSelect = viewModel::setThemeVariant)
+                                }
+                            }
+                        }
+
+                        if (shown(SettingEntry.HOME_SHELVES)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Home shelves",
+                                    icon = Icons.Filled.ViewCarousel,
+                                    subtitle = "Show album and playlist shelves on Home, picked from the artists you play.",
+                                    checked = homeShelvesEnabled,
+                                    onCheckedChange = viewModel::setHomeShelvesEnabled,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.REPLAY)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Monthly Replay",
+                                    icon = Icons.Filled.Insights,
+                                    subtitle = "Count what you play for a monthly recap of your top songs and artists, opened from Home. Counting stays on this device.",
+                                    checked = replayEnabled,
+                                    onCheckedChange = viewModel::setReplayEnabled,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.EXPLORE)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Explore in Search",
+                                    icon = Icons.Filled.Explore,
+                                    subtitle = "Show new releases, charts and moods & genres on the Search screen.",
+                                    checked = exploreEnabled,
+                                    onCheckedChange = viewModel::setExploreEnabled,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.QUICK_PICKS_GRID)) {
+                            SettingItem(divider = rows.next()) {
+                                Column {
+                                    SettingRow(
+                                        title = "Quick Picks grid size",
+                                        icon = Icons.Filled.GridView,
+                                        subtitle = if (quickPicksGridCount == 0) {
+                                            "Grid view shows every song at once."
+                                        } else {
+                                            "Grid view shows $quickPicksGridCount songs at a time; swipe sideways for more."
+                                        },
+                                    )
+                                    Spacer(Modifier.height(GlassTokens.spaceMd))
+                                    QuickPicksGridCountSelector(quickPicksGridCount, viewModel::setQuickPicksGridCount)
+                                }
+                            }
+                        }
+
+                        if (shown(SettingEntry.REDUCE_ANIMATIONS)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Reduce animations ---
+                                // Same effect as the system's "Remove animations", but just
+                                // for this app: screen transitions become instant and
+                                // decorative motion (shimmer, artwork shrink) stops.
+                                SettingToggleRow(
+                                    title = "Reduce animations",
+                                    icon = Icons.Filled.Animation,
+                                    subtitle = "Turn off screen transitions and decorative motion in the app.",
+                                    checked = reduceAnimations,
+                                    onCheckedChange = viewModel::setReduceAnimations,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (SettingsSection.STORAGE in sections) {
+                item(key = "section:STORAGE") {
+                    if (flat) {
+                        SectionLabel(SettingsSection.STORAGE.label)
+                        Spacer(Modifier.height(GlassTokens.spaceSm))
+                    }
+                    SettingsCardColumn(SettingsSection.STORAGE) {
+                        val rows = SettingsRowCounter()
+                        if (shown(SettingEntry.CACHE_SONGS)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Audio cache toggle ---
+                                SettingToggleRow(
+                                    title = "Cache Songs",
+                                    icon = Icons.Filled.Storage,
+                                    subtitle = "Store recently played songs on this device so they start instantly next time, instead of streaming again. Off frees up storage but replays always re-download.",
+                                    checked = audioCacheEnabled,
+                                    onCheckedChange = viewModel::setAudioCacheEnabled,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.CACHED_DATA)) {
+                            SettingItem(divider = rows.next()) {
+                                // --- Cache size + clear ---
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    SettingRow(
+                                        title = "Cached data",
+                                        icon = Icons.Filled.DataUsage,
+                                        subtitle = formatCacheSize(cacheSizeBytes),
+                                    )
+                                    GlassButton(
+                                        text = "Clear cache",
+                                        onClick = viewModel::clearCache,
+                                        // Bright/pressable only when there's actually
+                                        // something to clear — GlassButton's own
+                                        // enabled=false state already fades it out via
+                                        // GlassTokens.opacityDisabled, giving a real
+                                        // "not currently actionable" affordance instead
+                                        // of a button that always looks clickable but
+                                        // silently does nothing when the cache is empty.
+                                        enabled = cacheSizeBytes > 0L,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (SettingsSection.BACKUP in sections) {
+                item(key = "section:BACKUP") {
+                    if (flat) {
+                        SectionLabel(SettingsSection.BACKUP.label)
+                        Spacer(Modifier.height(GlassTokens.spaceSm))
+                    }
+                    SettingsCardColumn(SettingsSection.BACKUP) {
+                        val rows = SettingsRowCounter()
+                        if (shown(SettingEntry.BACKUP)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingRow(
+                                    title = "Local backup",
+                                    icon = Icons.Filled.Backup,
+                                    subtitle = "Choose what to back up below, then save it to a file you choose.\n" +
+                                        formatLastBackupSubtitle(lastBackupTimeMs),
+                                )
+                                // Per-category selector — between the description
+                                // above and the action buttons below, per explicit
+                                // steering on positioning. Uses GlassChip (this app's
+                                // own existing filter/tag component, already used for
+                                // Search's result tabs) in a wrapping FlowRow rather
+                                // than a tall stack of full checkbox rows with
+                                // descriptions — 6 categories' descriptions each on
+                                // their own line pushed this card, and everything
+                                // below it on the Settings screen, considerably
+                                // further down with comparatively little benefit
+                                // (the categories are largely self-explanatory from
+                                // their names alone). All chips selected by default
+                                // so "Back up now" still backs up everything with
+                                // zero extra taps, exactly matching the old always-
+                                // full behavior for anyone who doesn't touch these.
+                                androidx.compose.foundation.layout.FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+                                    verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+                                ) {
+                                    val allSelected = selectedBackupCategories.size == com.whiplash.music.data.backup.BackupCategory.entries.size
+                                    BackupCategoryChip(
+                                        text = "All",
+                                        selected = allSelected,
+                                        onClick = {
+                                            selectedBackupCategories = if (allSelected) {
+                                                emptySet()
+                                            } else {
+                                                com.whiplash.music.data.backup.BackupCategory.entries.toSet()
+                                            }
+                                        },
+                                    )
+                                    com.whiplash.music.data.backup.BackupCategory.entries.forEach { category ->
+                                        val checked = category in selectedBackupCategories
+                                        BackupCategoryChip(
+                                            text = category.displayName,
+                                            selected = checked,
+                                            onClick = {
+                                                selectedBackupCategories = if (checked) {
+                                                    selectedBackupCategories - category
+                                                } else {
+                                                    selectedBackupCategories + category
+                                                }
+                                            },
+                                        )
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
+                                ) {
+                                    GlassButton(
+                                        text = "Back up now",
+                                        modifier = Modifier.weight(1f),
+                                        enabled = selectedBackupCategories.isNotEmpty(),
+                                        onClick = { backupLauncher.launch(com.whiplash.music.data.backup.BackupManager.suggestedFileName()) },
+                                    )
+                                    GlassButton(
+                                        text = "Restore",
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { restoreLauncher.launch(arrayOf("application/zip", "application/octet-stream")) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (flat) {
+                item {
+                    GithubFooter()
+                }
+            }
+        }
+    }
+
+    val noResults: androidx.compose.foundation.lazy.LazyListScope.(List<SettingsSection>) -> Unit = { sections ->
+            if (sections.isEmpty()) {
+                item(key = "no-results") {
+                    Text(
+                        text = "No settings match \u201C${settingsQuery.trim()}\u201D",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = WhiplashColors.textSecondary,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceXl),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+            }
+
+    }
+
+    run {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // Hidden from TalkBack while a section page covers it.
+                    .then(if (openSection != null) Modifier.clearAndSetSemantics {} else Modifier),
+            ) {
+                // Pinned above both the folders and the results so typing
+                // never loses focus when the list underneath swaps.
+                GlassSearchField(
+                    query = settingsQuery,
+                    onQueryChange = { settingsQuery = it },
+                    placeholder = "Search settings",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = GlassTokens.spaceMd)
+                        .padding(top = GlassTokens.spaceLg),
+                )
+                if (settingsQuery.isBlank()) {
+                    SettingsFolderList(
+                        state = rootListState,
+                        summary = { section ->
+                            when (section) {
+                                SettingsSection.AUDIO_QUALITY -> if (perNetworkQualityEnabled) {
+                                    "Wi-Fi ${audioQualityWifi.shortLabel()} · Mobile ${audioQualityCellular.shortLabel()}"
+                                } else {
+                                    "Streaming ${audioQuality?.shortLabel() ?: "Auto"}"
+                                }
+                                SettingsSection.PLAYBACK -> listOf(
+                                    if (autoplayEnabled) "Autoplay on" else "Autoplay off",
+                                    if (crossfadeDurationMs > 0) "Crossfade ${crossfadeDurationMs / 1000}s" else "No crossfade",
+                                    "${formatSpeed(playbackSpeed)} speed",
+                                ).joinToString(" · ")
+                                SettingsSection.DOWNLOADS -> "Quality ${downloadQuality?.shortLabel() ?: "Auto"}" +
+                                    if (downloadWifiOnly) " · Wi-Fi only" else ""
+                                SettingsSection.NOW_PLAYING -> "${seekBarStyle.displayName} progress bar" +
+                                    if (playerArtworkColors) " · Artwork colours" else ""
+                                SettingsSection.LYRICS -> "Source: ${lyricsSource.label}"
+                                SettingsSection.APPEARANCE -> themeVariant.displayName
+                                SettingsSection.STORAGE -> formatCacheSize(cacheSizeBytes).removeSuffix(".")
+                                SettingsSection.BACKUP -> formatLastBackupSubtitle(lastBackupTimeMs).removeSuffix(".")
+                            }
+                        },
+                        onOpen = { openSection = it },
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    val sections = androidx.compose.runtime.remember(settingsQuery) { visibleSections(settingsQuery) }
+                    SettingsList(
+                        listState, sections, settingsQuery, flat = true,
+                        topPadding = GlassTokens.spaceLg, modifier = Modifier.weight(1f),
+                    ) { noResults(sections) }
+                }
+            }
+
+            // Section page slides over the start page, which stays composed
+            // (and scrolled) underneath, so Back lands exactly where you were.
+            var shownSection by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(openSection) }
+            if (openSection != null) shownSection = openSection
+            val navSpec = androidx.compose.animation.core.tween<androidx.compose.ui.unit.IntOffset>(SETTINGS_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+            val fadeSpec = androidx.compose.animation.core.tween<Float>(SETTINGS_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+            androidx.compose.animation.AnimatedVisibility(
+                visible = openSection != null,
+                enter = if (reduceMotion) androidx.compose.animation.EnterTransition.None else
+                    androidx.compose.animation.slideInHorizontally(navSpec) { it } + androidx.compose.animation.fadeIn(fadeSpec),
+                exit = if (reduceMotion) androidx.compose.animation.ExitTransition.None else
+                    androidx.compose.animation.slideOutHorizontally(navSpec) { it } + androidx.compose.animation.fadeOut(fadeSpec),
+            ) {
+                val section = shownSection
+                if (section != null) {
+                    SettingsSectionPage(section = section, onBack = { openSection = null }) {
+                        androidx.compose.runtime.key(section) {
+                            val pageState = androidx.compose.foundation.lazy.rememberLazyListState()
+                            SettingsList(pageState, listOf(section), "", flat = false, topPadding = GlassTokens.spaceSm) {}
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1031,10 +1195,15 @@ private fun SeekBarStylePreview(style: com.whiplash.music.ui.theme.SeekBarStyle,
 
 @Composable
 private fun SectionLabel(text: String) {
+    // Same small caps label as the folder groups on the start page.
     Text(
-        text = text,
-        style = MaterialTheme.typography.titleMedium,
-        color = WhiplashColors.textPrimary,
+        text = text.uppercase(),
+        style = MaterialTheme.typography.labelMedium.copy(
+            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            letterSpacing = androidx.compose.ui.unit.TextUnit(1.2f, androidx.compose.ui.unit.TextUnitType.Sp),
+        ),
+        color = WhiplashColors.textSecondary,
+        modifier = Modifier.padding(start = GlassTokens.spaceXs).semantics { heading() },
     )
 }
 
@@ -1054,7 +1223,7 @@ private fun formatLastBackupSubtitle(lastBackupTimeMs: Long?): String {
 
 @Composable
 private fun SettingRow(title: String, subtitle: String, icon: ImageVector? = null) {
-    Row(verticalAlignment = Alignment.Top) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         SettingLeadingIcon(icon)
         Column {
             Text(text = title, style = MaterialTheme.typography.titleSmall, color = WhiplashColors.textPrimary)
@@ -1080,49 +1249,40 @@ private fun SettingRow(title: String, subtitle: String, icon: ImageVector? = nul
  */
 @Composable
 private fun androidx.compose.foundation.layout.RowScope.SettingLeadingIcon(icon: ImageVector?) {
-    // align(Top) is load-bearing. The toggle and action rows centre their
-    // contents vertically so the Switch sits in the middle of a two-line row,
-    // which also dragged the icon down to that centre — leaving icons at a
-    // different height relative to their titles depending on whether the row
-    // happened to have a toggle. Pinning the icon to the top makes every icon
-    // sit on its own title line, which is what stops the column reading as
-    // ragged.
-    Box(
-        modifier = Modifier
-            .align(Alignment.Top)
-            .padding(top = SETTING_ICON_TOP_ALIGN)
-            .width(SETTING_ICON_SLOT),
-        contentAlignment = Alignment.TopStart,
-    ) {
+    // A small tinted tile in the section's colour, the same shape as the
+    // folder icons on the Settings start page. The slot is reserved even
+    // without an icon so text in a card always lines up.
+    val tint = LocalSettingTint.current
+    Box(modifier = Modifier.width(SETTING_ICON_SLOT), contentAlignment = Alignment.CenterStart) {
         if (icon != null) {
-            androidx.compose.material3.Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = WhiplashColors.textSecondary,
-                modifier = Modifier.size(SETTING_ICON_SIZE),
-            )
+            Box(
+                modifier = Modifier
+                    .size(SETTING_TILE_SIZE)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
+                    .background(tint.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.material3.Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(SETTING_ICON_SIZE),
+                )
+            }
         }
     }
 }
 
 /** Width reserved for [SettingLeadingIcon] — icon plus the gap to the text. */
-private val SETTING_ICON_SLOT = 36.dp
+private val SETTING_ICON_SLOT = 46.dp
+
+/** Tinted tile behind each row icon. */
+private val SETTING_TILE_SIZE = 32.dp
 
 /** Drawn icon size — matches the app's other row-level icons. */
-private val SETTING_ICON_SIZE = 22.dp
+private val SETTING_ICON_SIZE = 18.dp
 
-/** Nudges the icon down onto the title's cap height rather than its text-box top. */
-private val SETTING_ICON_TOP_ALIGN = 2.dp
 
-/**
- * Gap between top-level settings sections.
- *
- * Intentionally 1.5x the 32dp spacing used between rows inside a section: with
- * no cards or dividers, this difference in rhythm is the only cue separating
- * one group from the next, so it has to be unmistakable rather than merely
- * present.
- */
-private val SETTINGS_SECTION_GAP = 48.dp
 
 /** A tappable settings row with no toggle/selector — just a title/subtitle that launches [onClick] (section 57: accessible 48dp+ touch target via the Row's own padding). */
 @Composable
@@ -1410,5 +1570,243 @@ private fun ThemeSwatch(variant: ThemeVariant, isSelected: Boolean, onClick: () 
             modifier = Modifier.width(64.dp),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
+    }
+}
+
+/** Same slide as the app's detail pages (MainActivity's DETAIL_NAV_MS). */
+private const val SETTINGS_NAV_MS = 380
+
+private fun formatSpeed(speed: Float): String {
+    val rounded = (speed * 100).toInt() / 100f
+    return if (rounded % 1f == 0f) "${rounded.toInt()}x" else "${rounded}x"
+}
+
+/** Icon and tile colour for each section's folder row. */
+private fun SettingsSection.folderIcon(): ImageVector = when (this) {
+    SettingsSection.AUDIO_QUALITY -> Icons.Filled.GraphicEq
+    SettingsSection.PLAYBACK -> Icons.Filled.PlayCircle
+    SettingsSection.DOWNLOADS -> Icons.Filled.Download
+    SettingsSection.NOW_PLAYING -> Icons.Filled.Album
+    SettingsSection.LYRICS -> Icons.Filled.Lyrics
+    SettingsSection.APPEARANCE -> Icons.Filled.Palette
+    SettingsSection.STORAGE -> Icons.Filled.SdStorage
+    SettingsSection.BACKUP -> Icons.Filled.Backup
+}
+
+private fun SettingsSection.folderTint(): androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color(
+    when (this) {
+        SettingsSection.AUDIO_QUALITY -> 0xFF8FA8FF
+        SettingsSection.PLAYBACK -> 0xFF6FD6A8
+        SettingsSection.DOWNLOADS -> 0xFF6CC8F0
+        SettingsSection.NOW_PLAYING -> 0xFFFF9A76
+        SettingsSection.LYRICS -> 0xFFF2CC60
+        SettingsSection.APPEARANCE -> 0xFFC29BFF
+        SettingsSection.STORAGE -> 0xFF9DB0BA
+        SettingsSection.BACKUP -> 0xFFF59BBE
+    },
+)
+
+/**
+ * The folder start page: sections in rounded cards grouped under small
+ * labels, each row showing its current values so most people never need
+ * to open it.
+ */
+@Composable
+private fun SettingsFolderList(
+    state: androidx.compose.foundation.lazy.LazyListState,
+    summary: (SettingsSection) -> String,
+    onOpen: (SettingsSection) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val cardColor = settingsCardColor()
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.large)
+    LazyColumn(
+        state = state,
+        modifier = modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceLg),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            start = GlassTokens.spaceMd,
+            end = GlassTokens.spaceMd,
+            top = GlassTokens.spaceLg,
+            bottom = GlassTokens.miniPlayerReservedHeight,
+        ),
+    ) {
+        SettingsGroup.entries.forEach { group ->
+            item(key = "group:${group.name}") {
+                Column {
+                    Text(
+                        text = group.label.uppercase(),
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                            letterSpacing = androidx.compose.ui.unit.TextUnit(1.2f, androidx.compose.ui.unit.TextUnitType.Sp),
+                        ),
+                        color = WhiplashColors.textSecondary,
+                        modifier = Modifier
+                            .padding(start = GlassTokens.spaceXs, bottom = GlassTokens.spaceSm)
+                            .semantics { heading() },
+                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(shape)
+                            .background(cardColor),
+                    ) {
+                        group.sections.forEachIndexed { index, section ->
+                            if (index > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(start = FOLDER_TEXT_INSET)
+                                        .fillMaxWidth()
+                                        .height(0.5.dp)
+                                        .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.07f)),
+                                )
+                            }
+                            SettingsFolderRow(section = section, summary = summary(section), onClick = { onOpen(section) })
+                        }
+                    }
+                }
+            }
+        }
+        item(key = "footer") {
+            Box(Modifier.padding(top = GlassTokens.spaceSm)) { GithubFooter() }
+        }
+    }
+}
+
+/** Where a folder row's text starts: row padding + icon tile + gap. Dividers start here too. */
+private val FOLDER_TEXT_INSET = 16.dp + 36.dp + 14.dp
+
+@Composable
+private fun SettingsFolderRow(section: SettingsSection, summary: String, onClick: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    val tint = section.folderTint()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Open") {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                .background(tint.copy(alpha = 0.16f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(imageVector = section.folderIcon(), contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = section.label, style = MaterialTheme.typography.titleSmall, color = WhiplashColors.textPrimary)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = WhiplashColors.textSecondary,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(GlassTokens.spaceSm))
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = WhiplashColors.textTertiary,
+        )
+    }
+}
+
+/** A section's own page: a back row naming the section, then its settings. */
+@Composable
+private fun SettingsSectionPage(section: SettingsSection, onBack: () -> Unit, content: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(WhiplashColors.background),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = GlassTokens.spaceXs, end = GlassTokens.spaceMd, top = GlassTokens.spaceSm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back to all settings",
+                    tint = WhiplashColors.textPrimary,
+                )
+            }
+            Text(
+                text = section.label,
+                style = MaterialTheme.typography.titleLarge,
+                color = WhiplashColors.textPrimary,
+                modifier = Modifier.semantics { heading() },
+            )
+        }
+        Box(modifier = Modifier.weight(1f)) { content() }
+    }
+}
+
+/** Colour of the icon tiles inside a settings card (its section's folder colour). */
+private val LocalSettingTint = androidx.compose.runtime.staticCompositionLocalOf { androidx.compose.ui.graphics.Color.White }
+
+/** Card fill shared by the folder start page and the section pages. */
+@Composable
+private fun settingsCardColor(): androidx.compose.ui.graphics.Color =
+    androidx.compose.ui.graphics.lerp(WhiplashColors.background, androidx.compose.ui.graphics.Color.White, 0.05f)
+
+/**
+ * One rounded card holding a section's settings, separated by hairlines —
+ * the same card as the folder start page.
+ */
+@Composable
+private fun SettingsCardColumn(section: SettingsSection, content: @Composable () -> Unit) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalSettingTint provides section.folderTint()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.large))
+                .background(settingsCardColor()),
+        ) {
+            content()
+        }
+    }
+}
+
+/**
+ * Hands out "draw a divider above me" for each visible row of a card: false
+ * for the first, true after. A fresh one is made every time the card's
+ * content runs, and it's read at the call site, so rows hidden by search
+ * never leave a stray line at the top.
+ */
+private class SettingsRowCounter {
+    private var count = 0
+    fun next(): Boolean = count++ > 0
+}
+
+/** One setting inside a card: its row plus any control beneath it. */
+@Composable
+private fun SettingItem(divider: Boolean, content: @Composable () -> Unit) {
+    if (divider) {
+        Box(
+            modifier = Modifier
+                .padding(start = 16.dp + SETTING_ICON_SLOT)
+                .fillMaxWidth()
+                .height(0.5.dp)
+                .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.07f)),
+        )
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
+    ) {
+        content()
     }
 }
