@@ -39,6 +39,23 @@ class ThemesTest {
     }
 
     @Test
+    fun randomCustomAccentsAreReadableOnEveryAccentTheme() {
+        val rnd = Random(7)
+        val themes = AppTheme.entries.filter { it.usesAccentChoice }
+        repeat(300) {
+            val accent = Color(rnd.nextFloat(), rnd.nextFloat(), rnd.nextFloat())
+            for (theme in themes) for (bg in GlassBackground.entries) {
+                val c = CustomThemeColors(accentColor = accent, glassBackground = bg)
+                val p = resolvePalette(theme, ThemeVariant.CUSTOM, c)
+                assertReadable(p, "custom accent $accent on $theme/$bg")
+            }
+        }
+        // Actually uses the picked colour when it's already readable.
+        val blue = Color(0xFF5AC8FA)
+        assertTrue(resolvePalette(AppTheme.DARK, ThemeVariant.CUSTOM, CustomThemeColors(accentColor = blue)).accent == blue)
+    }
+
+    @Test
     fun everyGlassBackgroundIsReadable() {
         for (bg in GlassBackground.entries) for (accent in ThemeVariant.entries) {
             val c = CustomThemeColors(glassBackground = bg, glassColor = Color(0xFF3060FF))

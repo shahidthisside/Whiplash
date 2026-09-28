@@ -105,6 +105,7 @@ class SettingsRepository(context: Context) {
                 runCatching { com.whiplash.music.ui.theme.GlassBackground.valueOf(stored) }.getOrNull()
             } ?: d.glassBackground,
             glassColor = prefs[GLASS_BG_COLOR_KEY]?.let { androidx.compose.ui.graphics.Color(it) } ?: d.glassColor,
+            accentColor = prefs[ACCENT_CUSTOM_COLOR_KEY]?.let { androidx.compose.ui.graphics.Color(it) } ?: d.accentColor,
         )
     }
 
@@ -114,6 +115,7 @@ class SettingsRepository(context: Context) {
             prefs[CUSTOM_ACCENT_KEY] = colors.accent.toArgbInt()
             prefs[GLASS_BG_KEY] = colors.glassBackground.name
             prefs[GLASS_BG_COLOR_KEY] = colors.glassColor.toArgbInt()
+            prefs[ACCENT_CUSTOM_COLOR_KEY] = colors.accentColor.toArgbInt()
         }
     }
 
@@ -445,6 +447,7 @@ class SettingsRepository(context: Context) {
         val GLASS_LENS_KEY: Preferences.Key<Float> = floatPreferencesKey("glass_lens")
         val GLASS_BG_KEY: Preferences.Key<String> = stringPreferencesKey("glass_background")
         val GLASS_BG_COLOR_KEY: Preferences.Key<Int> = intPreferencesKey("glass_background_color")
+        val ACCENT_CUSTOM_COLOR_KEY: Preferences.Key<Int> = intPreferencesKey("accent_custom_color")
         val SEEK_BAR_STYLE_KEY: Preferences.Key<String> = stringPreferencesKey("seek_bar_style")
         val CROSSFADE_KEY: Preferences.Key<Int> = intPreferencesKey("crossfade_duration_ms")
         val GAPLESS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("gapless_enabled")

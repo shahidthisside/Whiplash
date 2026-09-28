@@ -348,6 +348,11 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setCustomThemeColors(colors) }
     }
 
+    /** Live while dragging a colour slider; [setCustomThemeColors] saves it on release. */
+    fun previewCustomThemeColors(colors: com.whiplash.music.ui.theme.CustomThemeColors) {
+        WhiplashColors.applyTheme(custom = colors)
+    }
+
     /** Live while dragging; the value is saved by [saveGlassOpacity] on release. */
     fun previewGlassOpacity(value: Float) {
         WhiplashColors.applyTheme(glassOpacity = value)

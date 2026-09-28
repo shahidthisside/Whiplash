@@ -78,6 +78,10 @@ class PlayerViewModel(
     val playbackSpeed: StateFlow<Float> = settingsRepository.playbackSpeed
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 1.0f)
 
+    fun previewPlaybackSpeed(speed: Float) {
+        controller.previewPlaybackSpeed(speed)
+    }
+
     fun setPlaybackSpeed(speed: Float) {
         controller.setPlaybackSpeed(speed)
     }

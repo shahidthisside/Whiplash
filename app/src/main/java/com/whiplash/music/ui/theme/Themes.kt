@@ -39,6 +39,8 @@ data class CustomThemeColors(
     val accent: Color = Color(0xFF7FB8FF),
     val glassBackground: GlassBackground = GlassBackground.NOW_PLAYING,
     val glassColor: Color = Color(0xFF1A2230),
+    /** The "Custom" choice in the Accent colour setting (Dark, OLED, Light, Liquid Glass). */
+    val accentColor: Color = Color(0xFF5AC8FA),
 )
 
 /**
@@ -124,8 +126,10 @@ fun inkOn(bg: Color): Color =
     if (contrastRatio(Color.Black, bg) >= contrastRatio(Color.White, bg)) Color(0xFF111114) else Color.White
 
 /** Accent for light backgrounds: neutral accents become ink; coloured ones deepen slightly. */
-private fun lightAccent(v: ThemeVariant): Color = when (v) {
+private fun lightAccent(v: ThemeVariant, custom: CustomThemeColors): Color = when (v) {
     ThemeVariant.CLASSIC, ThemeVariant.PURE_MONO -> Color(0xFF1C1C1E)
+    // The user's own colour, used as picked; the contrast pass deepens it only if needed.
+    ThemeVariant.CUSTOM -> custom.accentColor.copy(alpha = 1f)
     else -> lerp(v.palette.accent, Color.Black, 0.35f)
 }
 
@@ -166,7 +170,11 @@ private fun derivePalette(
  * that use the Accent colour setting; [custom] feeds the Custom theme.
  */
 fun resolvePalette(theme: AppTheme, accentVariant: ThemeVariant, custom: CustomThemeColors): GlassPalette {
-    val chosen = accentVariant.palette
+    val chosen = if (accentVariant == ThemeVariant.CUSTOM) {
+        custom.accentColor.copy(alpha = 1f).let { c -> ThemeVariant.CLASSIC.palette.copy(accent = c, onAccent = inkOn(c)) }
+    } else {
+        accentVariant.palette
+    }
     val raw = when (theme) {
         // Dark keeps the Accent colour setting's full tinted palette, exactly as before.
         AppTheme.DARK -> chosen
@@ -178,12 +186,12 @@ fun resolvePalette(theme: AppTheme, accentVariant: ThemeVariant, custom: CustomT
         )
         // The neutral accents (a pale cream/white meant for dark pages) become
         // near-black ink on light, instead of being darkened into mud grey.
-        AppTheme.LIGHT -> derivePalette(Color(0xFFF4F4F6), lightAccent(accentVariant), Color(0xFF15151A), 0.045f)
+        AppTheme.LIGHT -> derivePalette(Color(0xFFF4F4F6), lightAccent(accentVariant, custom), Color(0xFF15151A), 0.045f)
             .copy(surfaceSheet = Color(0xFFFFFFFF))
         // Deep blue-black base; the glass layers and wallpaper sit over it.
         AppTheme.LIQUID_GLASS -> glassBaseColor(custom).let { base ->
             val light = base.luminance() > 0.4f
-            derivePalette(base, if (light) lightAccent(accentVariant) else chosen.accent, surfaceStep = 0.07f)
+            derivePalette(base, if (light) lightAccent(accentVariant, custom) else chosen.accent, surfaceStep = 0.07f)
         }
         AppTheme.CATPPUCCIN -> GlassPalette(
             background = Color(0xFF1E1E2E), surfaceGlass = Color(0xFF26263A), surfaceElevated = Color(0xFF313244),

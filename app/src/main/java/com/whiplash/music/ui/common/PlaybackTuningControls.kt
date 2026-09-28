@@ -77,7 +77,13 @@ private fun crossfadeLabel(ms: Int): String = if (ms <= 0) "Off" else "${ms / 10
  * [CrossfadeSlider]; presets commit immediately.
  */
 @Composable
-fun PlaybackSpeedControl(selected: Float, onSelect: (Float) -> Unit, modifier: Modifier = Modifier) {
+fun PlaybackSpeedControl(
+    selected: Float,
+    onSelect: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    /** Called on every drag step so the song speeds up/slows down live; [onSelect] saves on release. */
+    onPreview: (Float) -> Unit = {},
+) {
     var pending by remember { mutableStateOf<Float?>(null) }
     LaunchedEffect(selected) { pending = null }
     val shown = pending ?: PlaybackTuning.normalizeSpeed(selected)
@@ -95,7 +101,13 @@ fun PlaybackSpeedControl(selected: Float, onSelect: (Float) -> Unit, modifier: M
         }
         Slider(
             value = shown,
-            onValueChange = { pending = PlaybackTuning.normalizeSpeed(it) },
+            onValueChange = { v ->
+                val s = PlaybackTuning.normalizeSpeed(v)
+                if (s != pending) {
+                    pending = s
+                    onPreview(s)
+                }
+            },
             onValueChangeFinished = { pending?.let(onSelect) },
             valueRange = PlaybackTuning.SPEED_MIN..PlaybackTuning.SPEED_MAX,
             steps = ((PlaybackTuning.SPEED_MAX - PlaybackTuning.SPEED_MIN) / PlaybackTuning.SPEED_STEP).roundToInt() - 1,

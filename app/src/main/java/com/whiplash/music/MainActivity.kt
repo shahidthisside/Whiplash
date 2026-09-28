@@ -932,6 +932,7 @@ private fun WhiplashApp() {
                         onResetLyricOffset = lyricsViewModel::resetLyricOffset,
                         playbackSpeed = playbackSpeed,
                         onSetPlaybackSpeed = playerViewModel::setPlaybackSpeed,
+                        onPreviewPlaybackSpeed = playerViewModel::previewPlaybackSpeed,
                         showStatsForNerds = statsForNerdsEnabled,
                         artworkColorsEnabled = playerArtworkColors,
                         showLyricStrip = playerLyricStrip,

@@ -21,7 +21,7 @@ import com.whiplash.music.ui.theme.WhiplashColors
  * repeatedly while listening; dismissing it is a normal swipe/tap outside.
  */
 @Composable
-fun PlaybackSpeedContent(selected: Float, onSelect: (Float) -> Unit) {
+fun PlaybackSpeedContent(selected: Float, onSelect: (Float) -> Unit, onPreview: (Float) -> Unit = {}) {
     Column {
         Text(
             text = "Playback speed",
@@ -29,7 +29,7 @@ fun PlaybackSpeedContent(selected: Float, onSelect: (Float) -> Unit) {
             color = WhiplashColors.textPrimary,
             modifier = Modifier.padding(bottom = GlassTokens.spaceMd),
         )
-        PlaybackSpeedControl(selected = selected, onSelect = onSelect)
+        PlaybackSpeedControl(selected = selected, onSelect = onSelect, onPreview = onPreview)
         Spacer(Modifier.padding(top = GlassTokens.spaceSm))
     }
 }

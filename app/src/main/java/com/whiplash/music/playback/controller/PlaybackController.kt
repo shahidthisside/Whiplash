@@ -1192,6 +1192,12 @@ class PlaybackController(
     }
 
     /** Sets playback speed (section 18), applied immediately to the live player. */
+    /** Applies [speed] to the player right away without saving it (live slider drag). */
+    fun previewPlaybackSpeed(speed: Float) {
+        val safe = com.whiplash.music.domain.model.PlaybackTuning.normalizeSpeed(speed)
+        controller?.setPlaybackParameters(androidx.media3.common.PlaybackParameters(safe))
+    }
+
     fun setPlaybackSpeed(speed: Float) {
         val safe = com.whiplash.music.domain.model.PlaybackTuning.normalizeSpeed(speed)
         controller?.setPlaybackParameters(androidx.media3.common.PlaybackParameters(safe))

@@ -296,13 +296,23 @@ private val CUSTOM_ACCENTS = listOf(
  * colour is derived and contrast-checked, so any pick stays readable.
  */
 @Composable
-internal fun CustomThemeEditor(colors: CustomThemeColors, onChange: (CustomThemeColors) -> Unit) {
+internal fun CustomThemeEditor(
+    colors: CustomThemeColors,
+    onChange: (CustomThemeColors) -> Unit,
+    onPreview: (CustomThemeColors) -> Unit = {},
+) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
-        ColorRow("Background", colors.background, CUSTOM_BACKGROUNDS) { onChange(colors.copy(background = it)) }
-        HueToneSliders("Background", colors.background) { onChange(colors.copy(background = it)) }
+        ColorRow("Background", colors.background, CUSTOM_BACKGROUNDS, onPreview = { onPreview(colors.copy(background = it)) }) { onChange(colors.copy(background = it)) }
+        HueToneSliders(
+            "Background", colors.background,
+            onPreview = { onPreview(colors.copy(background = it)) },
+        ) { onChange(colors.copy(background = it)) }
         Spacer(Modifier.height(GlassTokens.spaceXs))
-        ColorRow("Accent", colors.accent, CUSTOM_ACCENTS) { onChange(colors.copy(accent = it)) }
-        HueToneSliders("Accent", colors.accent) { onChange(colors.copy(accent = it)) }
+        ColorRow("Accent", colors.accent, CUSTOM_ACCENTS, onPreview = { onPreview(colors.copy(accent = it)) }) { onChange(colors.copy(accent = it)) }
+        HueToneSliders(
+            "Accent", colors.accent,
+            onPreview = { onPreview(colors.copy(accent = it)) },
+        ) { onChange(colors.copy(accent = it)) }
         Text(
             "Text and icon colours are worked out for you and always kept readable.",
             style = MaterialTheme.typography.bodySmall,
@@ -312,11 +322,27 @@ internal fun CustomThemeEditor(colors: CustomThemeColors, onChange: (CustomTheme
 }
 
 @Composable
-private fun ColorRow(label: String, selected: Color, options: List<Color>, onPick: (Color) -> Unit) {
+private fun ColorRow(
+    label: String,
+    selected: Color,
+    options: List<Color>,
+    /** Live recolour while the colour wheel is open; the wheel swatch shows when set. */
+    onPreview: ((Color) -> Unit)? = null,
+    onPick: (Color) -> Unit,
+) {
+    fun same(a: Color, b: Color) =
+        kotlin.math.abs(a.red - b.red) + kotlin.math.abs(a.green - b.green) + kotlin.math.abs(a.blue - b.blue) < 0.012f
+    var wheelOpen by remember { mutableStateOf(false) }
     Text(label, style = MaterialTheme.typography.labelLarge, color = WhiplashColors.textPrimary)
     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (onPreview != null) {
+            // First, so it's always visible without scrolling the row.
+            item(key = "wheel") {
+                ColorWheelSwatch(label, isCustom = options.none { same(it, selected) }, current = selected) { wheelOpen = true }
+            }
+        }
         items(options) { c ->
-            val isSel = c.toHsv().let { a -> selected.toHsv().let { b -> a.zip(b).all { (x, y) -> kotlin.math.abs(x - y) < 0.01f } } }
+            val isSel = same(c, selected)
             Box(
                 Modifier
                     .size(40.dp)
@@ -333,40 +359,100 @@ private fun ColorRow(label: String, selected: Color, options: List<Color>, onPic
             }
         }
     }
+    if (wheelOpen && onPreview != null) {
+        ColorWheelSheet(
+            title = "$label colour",
+            initial = selected,
+            onPreview = onPreview,
+            onApply = onPick,
+            onDismiss = { wheelOpen = false },
+        )
+    }
 }
 
-/** Hue and brightness sliders for fine-tuning a colour. Saturation is kept from the current colour. */
+/**
+ * Hue, saturation and brightness sliders for fine-tuning a colour. The app
+ * recolours live on every drag step ([onPreview]); [onChange] saves once on
+ * release, so storage isn't written dozens of times a second.
+ */
 @Composable
-private fun HueToneSliders(label: String, color: Color, onChange: (Color) -> Unit) {
-    val hsv = color.toHsv()
-    val sat = if (hsv[1] < 0.05f && label == "Accent") 0.6f else hsv[1]
-    var hue by remember(color) { mutableStateOf(hsv[0]) }
-    var value by remember(color) { mutableStateOf(hsv[2]) }
+private fun HueToneSliders(
+    label: String,
+    color: Color,
+    onPreview: (Color) -> Unit = {},
+    onChange: (Color) -> Unit,
+) {
+    // Local H/S/V while dragging. Re-seeded only when the saved colour becomes
+    // something other than what the sliders show (a swatch tap), so saving
+    // our own value never snaps a thumb (hue is undefined for greys).
+    val seed = remember { color.toHsv() }
+    val accentLike = label.contains("accent", ignoreCase = true)
+    var hue by remember { mutableStateOf(seed[0]) }
+    var sat by remember { mutableStateOf(if (seed[1] < 0.05f && accentLike) 0.6f else seed[1]) }
+    var value by remember { mutableStateOf(seed[2]) }
+    fun current() = Color.hsv(hue.coerceIn(0f, 359.9f), sat.coerceIn(0f, 1f), value.coerceIn(0f, 1f))
+    LaunchedEffect(color) {
+        val c = current()
+        val same = kotlin.math.abs(c.red - color.red) + kotlin.math.abs(c.green - color.green) + kotlin.math.abs(c.blue - color.blue) < 0.012f
+        if (!same) {
+            val h = color.toHsv()
+            hue = h[0]
+            sat = if (h[1] < 0.05f && accentLike) 0.6f else h[1]
+            value = h[2]
+        }
+    }
     val sliderColors = SliderDefaults.colors(
         thumbColor = WhiplashColors.accent,
         activeTrackColor = WhiplashColors.accent,
         inactiveTrackColor = WhiplashColors.glassBorderStrong,
     )
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Hue", style = MaterialTheme.typography.labelMedium, color = WhiplashColors.textSecondary, modifier = Modifier.width(76.dp))
-        Slider(
-            value = hue,
-            onValueChange = { hue = it },
-            onValueChangeFinished = { onChange(Color.hsv(hue, sat, value)) },
-            valueRange = 0f..359f,
-            colors = sliderColors,
-            modifier = Modifier.weight(1f).semantics { contentDescription = "$label hue" },
-        )
+    @Composable
+    fun row(name: String, v: Float, range: ClosedFloatingPointRange<Float>, set: (Float) -> Unit) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(name, style = MaterialTheme.typography.labelMedium, color = WhiplashColors.textSecondary, modifier = Modifier.width(76.dp))
+            Slider(
+                value = v,
+                onValueChange = { set(it); onPreview(current()) },
+                onValueChangeFinished = { onChange(current()) },
+                valueRange = range,
+                colors = sliderColors,
+                modifier = Modifier.weight(1f).semantics { contentDescription = "$label ${name.lowercase()}" },
+            )
+        }
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Brightness", style = MaterialTheme.typography.labelMedium, color = WhiplashColors.textSecondary, modifier = Modifier.width(76.dp))
-        Slider(
-            value = value,
-            onValueChange = { value = it },
-            onValueChangeFinished = { onChange(Color.hsv(hue, sat, value)) },
-            valueRange = 0f..1f,
-            colors = sliderColors,
-            modifier = Modifier.weight(1f).semantics { contentDescription = "$label brightness" },
+    row("Hue", hue, 0f..359f) { hue = it }
+    row("Saturation", sat, 0f..1f) { sat = it }
+    row("Brightness", value, 0f..1f) { value = it }
+}
+
+/** Colours offered for the Accent colour setting's Custom choice. */
+private val ACCENT_PRESETS = listOf(
+    Color(0xFF5AC8FA), Color(0xFF0A84FF), Color(0xFF5E5CE6), Color(0xFFBF5AF2), Color(0xFFFF375F),
+    Color(0xFFFF453A), Color(0xFFFF9F0A), Color(0xFFFFD60A), Color(0xFF30D158), Color(0xFF64D2FF),
+    Color(0xFF66D4CF), Color(0xFFAC8E68),
+)
+
+/**
+ * Editor for the Accent colour setting's Custom choice: preset swatches plus
+ * live hue / saturation / brightness sliders. The contrast pass keeps text on
+ * buttons and the accent itself readable on the current theme.
+ */
+@Composable
+internal fun CustomAccentEditor(
+    colors: CustomThemeColors,
+    onChange: (CustomThemeColors) -> Unit,
+    onPreview: (CustomThemeColors) -> Unit = {},
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+        ColorRow("Custom accent", colors.accentColor, ACCENT_PRESETS, onPreview = { onPreview(colors.copy(accentColor = it)) }) { onChange(colors.copy(accentColor = it)) }
+        HueToneSliders(
+            "Custom accent", colors.accentColor,
+            onPreview = { onPreview(colors.copy(accentColor = it)) },
+        ) { onChange(colors.copy(accentColor = it)) }
+        Text(
+            "Adjusted only as much as needed to stay readable on this theme.",
+            style = MaterialTheme.typography.bodySmall,
+            color = WhiplashColors.textTertiary,
         )
     }
 }
@@ -382,7 +468,11 @@ private fun Color.toHsv(): FloatArray {
  * a few calm solid tones, or a custom colour with hue/brightness sliders.
  */
 @Composable
-internal fun GlassBackgroundPicker(colors: CustomThemeColors, onChange: (CustomThemeColors) -> Unit) {
+internal fun GlassBackgroundPicker(
+    colors: CustomThemeColors,
+    onChange: (CustomThemeColors) -> Unit,
+    onPreview: (CustomThemeColors) -> Unit = {},
+) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(com.whiplash.music.ui.theme.GlassBackground.entries, key = { it.name }) { option ->
@@ -434,7 +524,14 @@ internal fun GlassBackgroundPicker(colors: CustomThemeColors, onChange: (CustomT
             }
         }
         if (colors.glassBackground == com.whiplash.music.ui.theme.GlassBackground.CUSTOM) {
-            HueToneSliders("Glass background", colors.glassColor) { onChange(colors.copy(glassColor = it)) }
+            ColorRow(
+                "Glass background", colors.glassColor, emptyList(),
+                onPreview = { onPreview(colors.copy(glassColor = it)) },
+            ) { onChange(colors.copy(glassColor = it)) }
+            HueToneSliders(
+                "Glass background", colors.glassColor,
+                onPreview = { onPreview(colors.copy(glassColor = it)) },
+            ) { onChange(colors.copy(glassColor = it)) }
         }
         if (colors.glassBackground == com.whiplash.music.ui.theme.GlassBackground.NOW_PLAYING) {
             Text(

@@ -120,6 +120,7 @@ fun FullPlayerScreen(
     onLyricsSheetOpened: () -> Unit = {},
     playbackSpeed: Float = 1.0f,
     onSetPlaybackSpeed: (Float) -> Unit = {},
+    onPreviewPlaybackSpeed: (Float) -> Unit = {},
     showStatsForNerds: Boolean = false,
     artworkColorsEnabled: Boolean = true,
     showLyricStrip: Boolean = true,
@@ -752,6 +753,7 @@ fun FullPlayerScreen(
             PlaybackSpeedContent(
                 selected = playbackSpeed,
                 onSelect = { speed -> onSetPlaybackSpeed(speed) },
+                onPreview = onPreviewPlaybackSpeed,
             )
         }
     }

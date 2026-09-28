@@ -271,4 +271,24 @@ enum class ThemeVariant(val displayName: String, val palette: GlassPalette) {
             onAccent = Color(0xFF000000),
         ),
     ),
+    /**
+     * The user's own accent ([CustomThemeColors.accentColor]) on the Classic
+     * Graphite surfaces. [palette] is only a stand-in; resolvePalette swaps
+     * the real colour in.
+     */
+    CUSTOM(
+        displayName = "Custom",
+        palette = GlassPalette(
+            background = Color(0xFF0A0A0B),
+            surfaceGlass = Color(0xFF151517),
+            surfaceElevated = Color(0xFF1D1D20),
+            surfaceSheet = Color(0xFF242428),
+            textPrimary = Color(0xFFF2F2F4),
+            textSecondary = Color(0xFFB4B4BA),
+            textTertiary = Color(0xFF7C7C84),
+            textDisabled = Color(0xFF4C4C52),
+            accent = Color(0xFF5AC8FA),
+            onAccent = Color(0xFF111114),
+        ),
+    ),
 }

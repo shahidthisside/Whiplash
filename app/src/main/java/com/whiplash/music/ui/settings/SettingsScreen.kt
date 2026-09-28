@@ -464,6 +464,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                         viewModel.setPlaybackSpeed(speed)
                                         app.playbackController.setPlaybackSpeed(speed)
                                     },
+                                    onPreview = app.playbackController::previewPlaybackSpeed,
                                 )
                             }
                         }
@@ -707,7 +708,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     SettingRow(
                                         title = "Glass opacity",
                                         icon = Icons.Filled.Tune,
-                                        subtitle = "0% is fully clear glass, like Apple's Clear style; higher frosts and tints it.",
+                                        subtitle = "0% is fully clear glass; higher frosts and tints it.",
                                     )
                                     GlassOpacitySlider(
                                         value = glassOpacity,
@@ -749,7 +750,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                         subtitle = "What shows through the glass behind every page.",
                                     )
                                     Spacer(Modifier.height(GlassTokens.spaceSm))
-                                    GlassBackgroundPicker(colors = customThemeColors, onChange = viewModel::setCustomThemeColors)
+                                    GlassBackgroundPicker(colors = customThemeColors, onChange = viewModel::setCustomThemeColors, onPreview = viewModel::previewCustomThemeColors)
                                 }
                             }
                         }
@@ -763,7 +764,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                         subtitle = "Choose a background and an accent. Changes apply as you pick.",
                                     )
                                     Spacer(Modifier.height(GlassTokens.spaceSm))
-                                    CustomThemeEditor(colors = customThemeColors, onChange = viewModel::setCustomThemeColors)
+                                    CustomThemeEditor(colors = customThemeColors, onChange = viewModel::setCustomThemeColors, onPreview = viewModel::previewCustomThemeColors)
                                 }
                             }
                         }
@@ -785,6 +786,10 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     )
                                     Spacer(Modifier.height(GlassTokens.spaceMd))
                                     ThemeGrid(selected = themeVariant, onSelect = viewModel::setThemeVariant)
+                                    if (themeVariant == ThemeVariant.CUSTOM) {
+                                        Spacer(Modifier.height(GlassTokens.spaceSm))
+                                        CustomAccentEditor(colors = customThemeColors, onChange = viewModel::setCustomThemeColors, onPreview = viewModel::previewCustomThemeColors)
+                                    }
                                 }
                             }
                         }
@@ -1720,6 +1725,13 @@ private fun ThemeSwatch(variant: ThemeVariant, isSelected: Boolean, onClick: () 
                 if (isSelected) {
                     Icon(
                         Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = palette.onAccent,
+                        modifier = Modifier.size(18.dp),
+                    )
+                } else if (variant == ThemeVariant.CUSTOM) {
+                    Icon(
+                        Icons.Filled.Palette,
                         contentDescription = null,
                         tint = palette.onAccent,
                         modifier = Modifier.size(18.dp),
