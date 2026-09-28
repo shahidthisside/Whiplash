@@ -224,7 +224,7 @@ private fun ArtistHero(detail: YoutubeArtistDetail, onPlayQueue: (List<PlayableI
                 Text(
                     text = name.take(1).uppercase(),
                     style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White.copy(alpha = 0.85f),
+                    color = com.whiplash.music.ui.theme.inkOn(lerp(WhiplashColors.background, tintForName(name), 0.45f)),
                     modifier = Modifier.align(Alignment.Center),
                 )
             }
@@ -246,12 +246,12 @@ private fun ArtistHero(detail: YoutubeArtistDetail, onPlayQueue: (List<PlayableI
                         fontWeight = FontWeight.Bold,
                         letterSpacing = MaterialTheme.typography.labelSmall.letterSpacing * 1.5f,
                     ),
-                    color = Color.White.copy(alpha = 0.75f),
+                    color = WhiplashColors.textSecondary,
                 )
                 Text(
                     text = name,
                     style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White,
+                    color = WhiplashColors.textPrimary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.semantics { heading() },
@@ -262,7 +262,7 @@ private fun ArtistHero(detail: YoutubeArtistDetail, onPlayQueue: (List<PlayableI
                     detail.albums.size.takeIf { it > 0 }?.let { if (it == 1) "1 album" else "${it} albums" },
                 ).joinToString(" · ")
                 if (facts.isNotBlank()) {
-                    Text(text = facts, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f))
+                    Text(text = facts, style = MaterialTheme.typography.bodySmall, color = WhiplashColors.textSecondary)
                 }
             }
         }

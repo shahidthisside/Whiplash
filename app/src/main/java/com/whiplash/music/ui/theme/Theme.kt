@@ -2,6 +2,7 @@ package com.whiplash.music.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 
 /**
@@ -21,23 +22,31 @@ import androidx.compose.runtime.Composable
  * can scale them down globally.
  */
 @Composable
-private fun whiplashColorScheme() = darkColorScheme(
-    primary = WhiplashColors.accent,
-    onPrimary = WhiplashColors.onAccent,
-    secondary = WhiplashColors.textSecondary,
-    onSecondary = WhiplashColors.background,
-    background = WhiplashColors.background,
-    onBackground = WhiplashColors.textPrimary,
-    surface = WhiplashColors.surfaceGlass,
-    onSurface = WhiplashColors.textPrimary,
-    surfaceVariant = WhiplashColors.surfaceElevated,
-    onSurfaceVariant = WhiplashColors.textSecondary,
-    error = WhiplashColors.error,
-    onError = WhiplashColors.background,
-    outline = WhiplashColors.glassBorder,
-    outlineVariant = WhiplashColors.glassBorderStrong,
-    scrim = WhiplashColors.scrim,
-)
+private fun whiplashColorScheme() = if (WhiplashColors.current.isLight) {
+    lightColorScheme(
+        primary = WhiplashColors.accent, onPrimary = WhiplashColors.onAccent,
+        secondary = WhiplashColors.textSecondary, onSecondary = WhiplashColors.background,
+        background = WhiplashColors.background, onBackground = WhiplashColors.textPrimary,
+        surface = WhiplashColors.surfaceSheet, onSurface = WhiplashColors.textPrimary,
+        surfaceVariant = WhiplashColors.surfaceElevated, onSurfaceVariant = WhiplashColors.textSecondary,
+        surfaceContainerHigh = WhiplashColors.surfaceSheet, surfaceContainerHighest = WhiplashColors.surfaceElevated,
+        error = WhiplashColors.error, onError = WhiplashColors.background,
+        outline = WhiplashColors.glassBorderStrong, outlineVariant = WhiplashColors.glassBorder,
+        scrim = WhiplashColors.scrim,
+    )
+} else {
+    darkColorScheme(
+        primary = WhiplashColors.accent, onPrimary = WhiplashColors.onAccent,
+        secondary = WhiplashColors.textSecondary, onSecondary = WhiplashColors.background,
+        background = WhiplashColors.background, onBackground = WhiplashColors.textPrimary,
+        surface = WhiplashColors.surfaceGlass, onSurface = WhiplashColors.textPrimary,
+        surfaceVariant = WhiplashColors.surfaceElevated, onSurfaceVariant = WhiplashColors.textSecondary,
+        surfaceContainerHigh = WhiplashColors.surfaceSheet, surfaceContainerHighest = WhiplashColors.surfaceElevated,
+        error = WhiplashColors.error, onError = WhiplashColors.background,
+        outline = WhiplashColors.glassBorder, outlineVariant = WhiplashColors.glassBorderStrong,
+        scrim = WhiplashColors.scrim,
+    )
+}
 
 @Composable
 fun WhiplashTheme(

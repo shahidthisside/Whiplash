@@ -25,7 +25,7 @@ fun GlassConfirmDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = WhiplashColors.surfaceSheet,
-        title = { Text(text = title, color = WhiplashColors.textPrimary) },
+        title = { if (WhiplashColors.isGlass) GlassWindowBlur(); Text(text = title, color = WhiplashColors.textPrimary) },
         text = { Text(text = message, color = WhiplashColors.textSecondary) },
         confirmButton = {
             TextButton(onClick = onConfirm) {

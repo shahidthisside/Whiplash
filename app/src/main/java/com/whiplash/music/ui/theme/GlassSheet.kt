@@ -49,7 +49,12 @@ fun GlassSheet(
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
-        containerColor = WhiplashColors.surfaceSheet,
+        // Liquid Glass: a translucent sheet over a real system blur of the app.
+        containerColor = if (WhiplashColors.isGlass && glassBlurSupported) {
+            WhiplashColors.surfaceSheet.copy(alpha = 0.55f + 0.4f * WhiplashColors.glassOpacity)
+        } else {
+            WhiplashColors.surfaceSheet
+        },
         contentColor = WhiplashColors.textPrimary,
         dragHandle = {
             Box(
@@ -77,6 +82,7 @@ fun GlassSheet(
         // at full height immediately; LazyColumn-based sheet content
         // (Queue) already scrolls correctly on its own and never needed
         // this Column to do it too.
+        if (WhiplashColors.isGlass) GlassWindowBlur()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

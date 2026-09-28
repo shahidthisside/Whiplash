@@ -32,6 +32,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -62,12 +64,25 @@ fun <T> FadeBottomBar(
     icon: @Composable (item: T, selected: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Liquid Glass: a floating glass capsule over the page instead of a flat bar.
+    val floating = LocalGlassBackdrop.current != null
+    val capsule = androidx.compose.foundation.shape.RoundedCornerShape(30.dp)
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(WhiplashColors.background)
-            .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(top = 6.dp, bottom = 4.dp),
+        modifier = if (floating) {
+            modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(start = 12.dp, end = 12.dp, bottom = 8.dp)
+                .androidxShadow(capsule)
+                .liquidGlass(shape = capsule, fallback = WhiplashColors.surfaceElevated)
+                .padding(vertical = 2.dp, horizontal = 4.dp)
+        } else {
+            modifier
+                .fillMaxWidth()
+                .background(WhiplashColors.background)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(top = 6.dp, bottom = 4.dp)
+        },
     ) {
         items.forEach { item ->
             val isSelected = item == selected
@@ -122,13 +137,38 @@ private fun FadeBottomBarItem(
         label = "fadeBarPressScale",
     )
     val contentColor by animateColorAsState(
-        targetValue = if (isSelected) WhiplashColors.textPrimary else WhiplashColors.textSecondary,
+        targetValue = when {
+            isSelected -> WhiplashColors.textPrimary
+            LocalGlassBackdrop.current != null -> WhiplashColors.textPrimary.copy(alpha = 0.82f)
+            else -> WhiplashColors.textSecondary
+        },
         animationSpec = tween(GlassTokens.animRegular),
         label = "fadeBarContentColor",
     )
 
+    val onGlass = LocalGlassBackdrop.current != null
+    val pillAlpha by animateFloatAsState(
+        targetValue = if (onGlass && isSelected) 1f else 0f,
+        animationSpec = tween(GlassTokens.animSlow),
+        label = "glassTabPill",
+    )
+    val pillColor = WhiplashColors.textPrimary
     Column(
         modifier = modifier
+            .padding(vertical = if (onGlass) 4.dp else 0.dp)
+            .then(
+                if (onGlass) {
+                    // Selected tab: a lighter capsule inside the glass, like iOS.
+                    Modifier.drawBehind {
+                        drawRoundRect(
+                            color = pillColor.copy(alpha = 0.14f * pillAlpha),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
+                        )
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .padding(vertical = 6.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
@@ -149,6 +189,10 @@ private fun FadeBottomBarItem(
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall.copy(
+                    // On glass, a soft shadow keeps labels readable over bright art.
+                    shadow = if (LocalGlassBackdrop.current != null) {
+                        androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.55f), blurRadius = 6f)
+                    } else null,
                     fontSize = 10.5.sp,
                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                     letterSpacing = 0.1.sp,
@@ -161,3 +205,7 @@ private fun FadeBottomBarItem(
         }
     }
 }
+
+/** Soft drop shadow under the floating glass bar, lifting it off the page. */
+private fun Modifier.androidxShadow(shape: androidx.compose.ui.graphics.Shape): Modifier =
+    this.shadow(elevation = 18.dp, shape = shape, clip = false, ambientColor = Color.Black.copy(alpha = 0.5f), spotColor = Color.Black.copy(alpha = 0.5f))

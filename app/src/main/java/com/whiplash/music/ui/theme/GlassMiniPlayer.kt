@@ -79,10 +79,18 @@ fun GlassMiniPlayer(
                         .clip(shape)
                         .background(WhiplashColors.surfaceSheet)
                 } else {
+                    // Liquid Glass theme: real glass over the page behind it;
+                    // other themes: the flat tinted card with a hairline edge.
                     Modifier
                         .clip(shape)
-                        .background(containerColor)
-                        .border(0.5.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.06f), shape)
+                        .liquidGlass(shape = shape, fallback = containerColor, tint = WhiplashColors.surfaceElevated)
+                        .then(
+                            if (LocalGlassBackdrop.current == null) {
+                                Modifier.border(0.5.dp, WhiplashColors.glassBorder, shape)
+                            } else {
+                                Modifier
+                            },
+                        )
                 },
             )
             .clickable(onClick = onExpand)

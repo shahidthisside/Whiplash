@@ -1,5 +1,6 @@
 package com.whiplash.music.ui.settings
 
+import com.whiplash.music.ui.theme.appBackground
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -119,6 +120,9 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val crossfadeDurationMs by viewModel.crossfadeDurationMs.collectAsState()
     val playbackSpeed by viewModel.playbackSpeed.collectAsState()
     val themeVariant by viewModel.themeVariant.collectAsState()
+    val appTheme by viewModel.appTheme.collectAsState()
+    val customThemeColors by viewModel.customThemeColors.collectAsState()
+    val glassOpacity by viewModel.glassOpacity.collectAsState()
     val seekBarStyle by viewModel.seekBarStyle.collectAsState()
     val audioCacheEnabled by viewModel.audioCacheEnabled.collectAsState()
     val skipSilenceEnabled by viewModel.skipSilenceEnabled.collectAsState()
@@ -681,13 +685,65 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                     }
                     SettingsCardColumn(SettingsSection.APPEARANCE) {
                         val rows = SettingsRowCounter()
-                        if (shown(SettingEntry.THEME)) {
+                        if (shown(SettingEntry.APP_THEME)) {
+                            SettingItem(divider = rows.next()) {
+                                Column {
+                                    SettingRow(
+                                        title = "Theme",
+                                        icon = Icons.Filled.Palette,
+                                        subtitle = "${appTheme.displayName} — ${appTheme.description}.",
+                                    )
+                                    Spacer(Modifier.height(GlassTokens.spaceMd))
+                                    AppThemeGrid(selected = appTheme, onSelect = viewModel::setAppTheme)
+                                }
+                            }
+                        }
+
+                        if (shown(SettingEntry.GLASS_OPACITY) && appTheme == com.whiplash.music.ui.theme.AppTheme.LIQUID_GLASS) {
+                            SettingItem(divider = rows.next()) {
+                                Column {
+                                    SettingRow(
+                                        title = "Glass opacity",
+                                        icon = Icons.Filled.Tune,
+                                        subtitle = "Lower is clearer glass that shows more of what's behind it; higher is frosted and calmer.",
+                                    )
+                                    GlassOpacitySlider(
+                                        value = glassOpacity,
+                                        onPreview = viewModel::previewGlassOpacity,
+                                        onCommit = viewModel::saveGlassOpacity,
+                                    )
+                                }
+                            }
+                        }
+
+                        if (shown(SettingEntry.CUSTOM_THEME) && appTheme == com.whiplash.music.ui.theme.AppTheme.CUSTOM) {
+                            SettingItem(divider = rows.next()) {
+                                Column {
+                                    SettingRow(
+                                        title = "Custom theme",
+                                        icon = Icons.Filled.Palette,
+                                        subtitle = "Choose a background and an accent. Changes apply as you pick.",
+                                    )
+                                    Spacer(Modifier.height(GlassTokens.spaceSm))
+                                    CustomThemeEditor(colors = customThemeColors, onChange = viewModel::setCustomThemeColors)
+                                }
+                            }
+                        }
+
+                        // Accent colour only applies to themes built around it;
+                        // fixed designs (Catppuccin, Nord, Rosé Pine) and Custom
+                        // have their own accent, so the picker would do nothing.
+                        if (shown(SettingEntry.THEME) && appTheme.usesAccentChoice) {
                             SettingItem(divider = rows.next()) {
                                 Column {
                                     SettingRow(
                                         title = "Accent colour",
                                         icon = Icons.Filled.Palette,
-                                        subtitle = "Colours buttons and highlights, with a faint matching tint in the background. Currently ${themeVariant.displayName}.",
+                                        subtitle = if (appTheme == com.whiplash.music.ui.theme.AppTheme.DARK) {
+                                            "Colours buttons and highlights, with a faint matching tint in the background. Currently ${themeVariant.displayName}."
+                                        } else {
+                                            "Colours buttons and highlights. Currently ${themeVariant.displayName}."
+                                        },
                                     )
                                     Spacer(Modifier.height(GlassTokens.spaceMd))
                                     ThemeGrid(selected = themeVariant, onSelect = viewModel::setThemeVariant)
@@ -993,7 +1049,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                 SettingsSection.NOW_PLAYING -> "${seekBarStyle.displayName} progress bar" +
                                     if (playerArtworkColors) " · Artwork colours" else ""
                                 SettingsSection.LYRICS -> "Source: ${lyricsSource.label}"
-                                SettingsSection.APPEARANCE -> themeVariant.displayName
+                                SettingsSection.APPEARANCE -> appTheme.displayName
                                 SettingsSection.STORAGE -> {
                                     val cache = if (cacheSizeBytes > 0L) "Cache ${formatBytes(cacheSizeBytes)}" else "No cache"
                                     val downloads = if (downloadsUsage.first > 0) "Downloads ${formatBytes(downloadsUsage.second)}" else "No downloads"
@@ -1318,7 +1374,7 @@ private fun androidx.compose.foundation.layout.RowScope.SettingLeadingIcon(icon:
     // A small tinted tile in the section's colour, the same shape as the
     // folder icons on the Settings start page. The slot is reserved even
     // without an icon so text in a card always lines up.
-    val tint = LocalSettingTint.current
+    val tint = com.whiplash.music.ui.theme.readableTint(LocalSettingTint.current)
     Box(modifier = Modifier.width(SETTING_ICON_SLOT), contentAlignment = Alignment.CenterStart) {
         if (icon != null) {
             Box(
@@ -1587,6 +1643,12 @@ private fun ThemeGrid(selected: ThemeVariant, onSelect: (ThemeVariant) -> Unit) 
 
 @Composable
 private fun ThemeSwatch(variant: ThemeVariant, isSelected: Boolean, onClick: () -> Unit) {
+    // Drawn as it would actually look in the current theme (contrast-adjusted).
+    val theme = WhiplashColors.theme
+    val custom = WhiplashColors.customColors
+    val palette = androidx.compose.runtime.remember(theme, variant, custom) {
+        com.whiplash.music.ui.theme.resolvePalette(theme, variant, custom)
+    }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -1600,12 +1662,12 @@ private fun ThemeSwatch(variant: ThemeVariant, isSelected: Boolean, onClick: () 
                 .clip(CircleShape)
                 .border(
                     width = if (isSelected) 2.5.dp else GlassTokens.borderWidth,
-                    color = if (isSelected) variant.palette.accent else WhiplashColors.glassBorder,
+                    color = if (isSelected) palette.accent else WhiplashColors.glassBorder,
                     shape = CircleShape,
                 )
                 .padding(4.dp)
                 .clip(CircleShape)
-                .background(variant.palette.background),
+                .background(palette.background),
             horizontalArrangement = Arrangement.Center,
         ) {
             Row(
@@ -1613,7 +1675,7 @@ private fun ThemeSwatch(variant: ThemeVariant, isSelected: Boolean, onClick: () 
                     .fillMaxSize()
                     .padding(6.dp)
                     .clip(CircleShape)
-                    .background(variant.palette.accent),
+                    .background(palette.accent),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1621,7 +1683,7 @@ private fun ThemeSwatch(variant: ThemeVariant, isSelected: Boolean, onClick: () 
                     Icon(
                         Icons.Filled.Check,
                         contentDescription = null,
-                        tint = variant.palette.onAccent,
+                        tint = palette.onAccent,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -1725,7 +1787,7 @@ private fun SettingsFolderList(
                                         .padding(start = FOLDER_TEXT_INSET)
                                         .fillMaxWidth()
                                         .height(0.5.dp)
-                                        .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.07f)),
+                                        .background(WhiplashColors.textPrimary.copy(alpha = 0.07f)),
                                 )
                             }
                             SettingsFolderRow(section = section, summary = summary(section), onClick = { onOpen(section) })
@@ -1758,7 +1820,7 @@ private val FOLDER_TEXT_INSET = 16.dp + 36.dp + 14.dp
 @Composable
 private fun SettingsFolderRow(section: SettingsSection, summary: String, onClick: () -> Unit) {
     val haptic = LocalHapticFeedback.current
-    val tint = section.folderTint()
+    val tint = com.whiplash.music.ui.theme.readableTint(section.folderTint())
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1805,7 +1867,7 @@ private fun SettingsSectionPage(section: SettingsSection, onBack: () -> Unit, co
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(WhiplashColors.background),
+            .then(Modifier.appBackground()),
     ) {
         Row(
             modifier = Modifier
@@ -1837,7 +1899,7 @@ private val LocalSettingTint = androidx.compose.runtime.staticCompositionLocalOf
 /** Card fill shared by the folder start page and the section pages. */
 @Composable
 private fun settingsCardColor(): androidx.compose.ui.graphics.Color =
-    androidx.compose.ui.graphics.lerp(WhiplashColors.background, androidx.compose.ui.graphics.Color.White, 0.05f)
+    WhiplashColors.tone(0.05f)
 
 /**
  * One rounded card holding a section's settings, separated by hairlines —
@@ -1877,7 +1939,7 @@ private fun SettingItem(divider: Boolean, content: @Composable () -> Unit) {
                 .padding(start = 16.dp + SETTING_ICON_SLOT)
                 .fillMaxWidth()
                 .height(0.5.dp)
-                .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.07f)),
+                .background(WhiplashColors.textPrimary.copy(alpha = 0.07f)),
         )
     }
     Column(

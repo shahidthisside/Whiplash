@@ -72,9 +72,9 @@ fun GlassSearchField(
     val focused by interactionSource.collectIsFocusedAsState()
     val haptic = LocalHapticFeedback.current
 
-    val fill = lerp(WhiplashColors.background, Color.White, 0.08f)
+    val fill = WhiplashColors.tone(0.08f)
     val edge by animateColorAsState(
-        targetValue = Color.White.copy(alpha = if (focused) 0.18f else 0.06f),
+        targetValue = WhiplashColors.textPrimary.copy(alpha = if (focused) 0.22f else 0.08f),
         animationSpec = tween(GlassTokens.animRegular),
         label = "searchFieldEdge",
     )
@@ -151,7 +151,7 @@ fun GlassSearchField(
                         modifier = Modifier
                             .size(24.dp)
                             .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.16f)),
+                            .background(WhiplashColors.textPrimary.copy(alpha = 0.16f)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(

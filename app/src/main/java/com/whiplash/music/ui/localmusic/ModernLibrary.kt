@@ -312,7 +312,7 @@ private fun QuickCard(
             modifier = Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(tint.copy(alpha = 0.18f)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+            Icon(icon, contentDescription = null, tint = com.whiplash.music.ui.theme.readableTint(tint), modifier = Modifier.size(22.dp))
         }
         Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall, color = WhiplashColors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)

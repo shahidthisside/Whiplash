@@ -23,6 +23,7 @@ import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
+import androidx.compose.ui.graphics.toArgb
 
 /**
  * Real local backup/restore for everything Whiplash stores on-device:
@@ -301,6 +302,12 @@ class BackupManager(
                         put("downloadQuality", settingsRepository.downloadQuality.first().name)
                         put("autoplayEnabled", settingsRepository.autoplayEnabled.first())
                         put("themeVariant", settingsRepository.themeVariant.first().name)
+                        put("appTheme", settingsRepository.appTheme.first().name)
+                        settingsRepository.customThemeColors.first().let { c ->
+                            put("customThemeBackground", c.background.toArgb())
+                            put("customThemeAccent", c.accent.toArgb())
+                        }
+                        put("glassOpacity", settingsRepository.glassOpacity.first().toDouble())
                         put("seekBarStyle", settingsRepository.seekBarStyle.first().name)
                         put("crossfadeDurationMs", settingsRepository.crossfadeDurationMs.first())
                         put("gaplessEnabled", settingsRepository.gaplessEnabled.first())
@@ -456,6 +463,16 @@ class BackupManager(
                     runCatching { settingsRepository.setDownloadQuality(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("downloadQuality"))) }
                     runCatching { settingsRepository.setAutoplayEnabled(s.getBoolean("autoplayEnabled")) }
                     runCatching { settingsRepository.setThemeVariant(com.whiplash.music.ui.theme.ThemeVariant.valueOf(s.getString("themeVariant"))) }
+                    runCatching { settingsRepository.setAppTheme(com.whiplash.music.ui.theme.AppTheme.valueOf(s.getString("appTheme"))) }
+                    runCatching {
+                        settingsRepository.setCustomThemeColors(
+                            com.whiplash.music.ui.theme.CustomThemeColors(
+                                background = androidx.compose.ui.graphics.Color(s.getInt("customThemeBackground")),
+                                accent = androidx.compose.ui.graphics.Color(s.getInt("customThemeAccent")),
+                            ),
+                        )
+                    }
+                    runCatching { settingsRepository.setGlassOpacity(s.getDouble("glassOpacity").toFloat()) }
                     runCatching { settingsRepository.setSeekBarStyle(com.whiplash.music.ui.theme.SeekBarStyle.valueOf(s.getString("seekBarStyle"))) }
                     runCatching { settingsRepository.setCrossfadeDurationMs(s.getInt("crossfadeDurationMs")) }
                     runCatching { settingsRepository.setGaplessEnabled(s.getBoolean("gaplessEnabled")) }

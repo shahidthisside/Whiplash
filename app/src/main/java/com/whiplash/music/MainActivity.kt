@@ -37,6 +37,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
@@ -84,6 +85,9 @@ import com.whiplash.music.ui.settings.SettingsScreen
 import com.whiplash.music.ui.theme.GlassMiniPlayer
 import com.whiplash.music.ui.theme.GlassTokens
 import com.whiplash.music.ui.theme.WhiplashTheme
+import com.whiplash.music.ui.theme.WhiplashColors
+import com.whiplash.music.ui.theme.appBackground
+import com.whiplash.music.ui.theme.glassSource
 
 /**
  * Single activity host for the Compose UI.
@@ -187,11 +191,7 @@ private fun MiniPlayerHost(
     val currentItem = state.currentItem ?: return
     // A flat card in the app's own near-black surface, so the mini player
     // belongs to the page instead of sitting on it as a grey slab.
-    val uiSurface = androidx.compose.ui.graphics.lerp(
-        com.whiplash.music.ui.theme.WhiplashColors.background,
-        androidx.compose.ui.graphics.Color.White,
-        0.06f,
-    )
+    val uiSurface = com.whiplash.music.ui.theme.WhiplashColors.tone(0.07f)
     GlassMiniPlayer(
         containerColor = uiSurface,
         title = currentItem.title,
@@ -389,6 +389,81 @@ private fun WhiplashApp() {
         showReplay = false
     }
 
+                val onSelectTab: (AppTab) -> Unit = { tab ->
+                    // Real, reported navigation bug (UAT audit
+                    // finding): re-tapping the *already-selected*
+                    // bottom-nav tab while a nested sub-screen was
+                    // open (History under Home, a playlist's detail
+                    // view under Playlists, an album/artist detail
+                    // under Search) silently did nothing — Compose
+                    // never recomposes from `selectedTab = it` when
+                    // `it` already equals the current value, and none
+                    // of those nested-state variables were ever reset
+                    // anywhere except their own screen-local `onBack`.
+                    // Every other major app treats "tap the tab
+                    // you're already on" as "return to that tab's
+                    // root", so this now explicitly collapses the
+                    // matching nested state when the tap target is
+                    // the tab already selected, in addition to the
+                    // always-correct plain tab switch.
+                    if (tab == selectedTab) {
+                        when (tab) {
+                            AppTab.HOME, AppTab.LOCAL -> {
+                                if (historyTab == tab) historyTab = null
+                                if (tab == AppTab.HOME) homeCollectionUrl = null
+                                if (tab == AppTab.LOCAL) libraryResetKey++
+                            }
+                            AppTab.SEARCH -> searchDetailStack = emptyList()
+                            AppTab.PLAYLISTS -> openPlaylist = null
+                            AppTab.SETTINGS -> settingsResetKey++
+                            else -> {}
+                        }
+                    }
+                    selectedTab = tab
+                }
+    val bottomBar: @Composable () -> Unit = {
+                com.whiplash.music.ui.theme.FadeBottomBar(
+                    items = AppTab.entries,
+                    selected = selectedTab,
+                    onSelect = onSelectTab,
+                    label = { it.label },
+                    icon = { tab, sel ->
+                        Icon(
+                            imageVector = when (tab) {
+                                AppTab.HOME -> if (sel) Icons.Filled.Home else Icons.Outlined.OutlinedHome
+                                AppTab.SEARCH -> if (sel) Icons.Filled.Search else Icons.Outlined.OutlinedSearch
+                                AppTab.LOCAL -> if (sel) Icons.Filled.LibraryMusic else Icons.Outlined.OutlinedLibraryMusic
+                                AppTab.FAVORITES -> if (sel) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder
+                                AppTab.PLAYLISTS -> if (sel) Icons.AutoMirrored.Filled.QueueMusic else Icons.AutoMirrored.Outlined.OutlinedQueueMusic
+                                AppTab.SETTINGS -> if (sel) Icons.Filled.Settings else Icons.Outlined.OutlinedSettings
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(26.dp),
+                        )
+                    },
+                )
+    }
+
+    // Themes: Liquid Glass records the page as a backdrop that the floating
+    // tab bar and mini player refract. The full player and Replay keep their
+    // dark, artwork-lit look in light themes (dark palette just for them).
+    val glass = WhiplashColors.isGlass
+    val glassBackdrop = com.whiplash.music.ui.theme.rememberGlassBackdrop()
+    val darkOnlyPalette = if (WhiplashColors.isLight) {
+        com.whiplash.music.ui.theme.resolvePalette(
+            com.whiplash.music.ui.theme.AppTheme.DARK, WhiplashColors.accentVariant, WhiplashColors.customColors,
+        )
+    } else null
+    val lightSystemBars = WhiplashColors.isLight && !isPlayerExpanded && !showReplay
+    val rootView = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect {
+        val window = (rootView.context as? android.app.Activity)?.window ?: return@SideEffect
+        androidx.core.view.WindowCompat.getInsetsController(window, rootView).apply {
+            isAppearanceLightStatusBars = lightSystemBars
+            isAppearanceLightNavigationBars = lightSystemBars
+        }
+    }
+
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { innerPadding ->
         // Single Box hosting every layer of the screen (tab content, mini
         // player, bottom nav, full player) so Compose's z-order-based hit
@@ -402,6 +477,11 @@ private fun WhiplashApp() {
         // navigation bars, with its own insets), so only the tab content,
         // mini player and bottom nav get the Scaffold's system-bar padding.
         Box(modifier = Modifier.fillMaxSize()) {
+          Box(
+              modifier = Modifier
+                  .fillMaxSize()
+                  .then(if (glass) Modifier.glassSource(glassBackdrop).appBackground() else Modifier),
+          ) {
           Box(
               modifier = Modifier
                   .padding(innerPadding)
@@ -689,72 +769,48 @@ private fun WhiplashApp() {
                     // "choppy" scrolling/interaction while a song is
                     // playing, reported by a user on a 120Hz device.
                     // The page fades out into the bottom bar (drawn under the mini player).
-                    com.whiplash.music.ui.theme.BottomBarFade(modifier = Modifier.align(Alignment.BottomCenter))
-                    MiniPlayerHost(
-                        playerViewModel = playerViewModel,
-                        onExpand = { isPlayerExpanded = true },
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(horizontal = GlassTokens.spaceSm)
-                            .padding(bottom = GlassTokens.spaceXs),
-                    )
-                }
-
-                val onSelectTab: (AppTab) -> Unit = { tab ->
-                    // Real, reported navigation bug (UAT audit
-                    // finding): re-tapping the *already-selected*
-                    // bottom-nav tab while a nested sub-screen was
-                    // open (History under Home, a playlist's detail
-                    // view under Playlists, an album/artist detail
-                    // under Search) silently did nothing — Compose
-                    // never recomposes from `selectedTab = it` when
-                    // `it` already equals the current value, and none
-                    // of those nested-state variables were ever reset
-                    // anywhere except their own screen-local `onBack`.
-                    // Every other major app treats "tap the tab
-                    // you're already on" as "return to that tab's
-                    // root", so this now explicitly collapses the
-                    // matching nested state when the tap target is
-                    // the tab already selected, in addition to the
-                    // always-correct plain tab switch.
-                    if (tab == selectedTab) {
-                        when (tab) {
-                            AppTab.HOME, AppTab.LOCAL -> {
-                                if (historyTab == tab) historyTab = null
-                                if (tab == AppTab.HOME) homeCollectionUrl = null
-                                if (tab == AppTab.LOCAL) libraryResetKey++
-                            }
-                            AppTab.SEARCH -> searchDetailStack = emptyList()
-                            AppTab.PLAYLISTS -> openPlaylist = null
-                            AppTab.SETTINGS -> settingsResetKey++
-                            else -> {}
-                        }
-                    }
-                    selectedTab = tab
-                }
-                com.whiplash.music.ui.theme.FadeBottomBar(
-                    items = AppTab.entries,
-                    selected = selectedTab,
-                    onSelect = onSelectTab,
-                    label = { it.label },
-                    icon = { tab, sel ->
-                        Icon(
-                            imageVector = when (tab) {
-                                AppTab.HOME -> if (sel) Icons.Filled.Home else Icons.Outlined.OutlinedHome
-                                AppTab.SEARCH -> if (sel) Icons.Filled.Search else Icons.Outlined.OutlinedSearch
-                                AppTab.LOCAL -> if (sel) Icons.Filled.LibraryMusic else Icons.Outlined.OutlinedLibraryMusic
-                                AppTab.FAVORITES -> if (sel) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder
-                                AppTab.PLAYLISTS -> if (sel) Icons.AutoMirrored.Filled.QueueMusic else Icons.AutoMirrored.Outlined.OutlinedQueueMusic
-                                AppTab.SETTINGS -> if (sel) Icons.Filled.Settings else Icons.Outlined.OutlinedSettings
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.size(26.dp),
+                    if (!glass) {
+                        com.whiplash.music.ui.theme.BottomBarFade(modifier = Modifier.align(Alignment.BottomCenter))
+                        MiniPlayerHost(
+                            playerViewModel = playerViewModel,
+                            onExpand = { isPlayerExpanded = true },
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(horizontal = GlassTokens.spaceSm)
+                                .padding(bottom = GlassTokens.spaceXs),
                         )
-                    },
-                )
+                    }
+                }
+                if (!glass) bottomBar()
+
             }
 
           }
+          }
+
+            // Liquid Glass chrome: outside the recorded page (glass must never
+            // sample itself), floating over its bottom edge.
+            if (glass) {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    com.whiplash.music.ui.theme.LocalGlassBackdrop provides glassBackdrop,
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .then(if (showReplay) Modifier.clearAndSetSemantics {} else Modifier),
+                    ) {
+                        MiniPlayerHost(
+                            playerViewModel = playerViewModel,
+                            onExpand = { isPlayerExpanded = true },
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp)
+                                .padding(bottom = 8.dp),
+                        )
+                        bottomBar()
+                    }
+                }
+            }
 
             // 4.7 Replay story: fades and settles in from slightly larger, like
             // opening a story; closing reverses it. Same 380 ms as detail pages.
@@ -765,6 +821,8 @@ private fun WhiplashApp() {
                 exit = if (reduceMotion) ExitTransition.None else fadeOut(tween(DETAIL_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing)) +
                     androidx.compose.animation.scaleOut(tween(DETAIL_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing), targetScale = 1.06f),
             ) {
+                androidx.compose.runtime.CompositionLocalProvider(com.whiplash.music.ui.theme.LocalPaletteOverride provides darkOnlyPalette) {
+                WhiplashTheme {
                 com.whiplash.music.ui.replay.ReplayScreen(
                     viewModel = replayViewModel,
                     onClose = { showReplay = false },
@@ -773,6 +831,8 @@ private fun WhiplashApp() {
                         com.whiplash.music.ui.common.ToastController.show("Playing your Replay songs")
                     },
                 )
+                }
+                }
                 // Next open starts on the default month again.
                 androidx.compose.runtime.DisposableEffect(Unit) { onDispose { replayViewModel.resetMonth() } }
             }
@@ -811,7 +871,7 @@ private fun WhiplashApp() {
                             enabled = !playerBackGestureActive,
                             onDismiss = { isPlayerExpanded = false },
                         )
-                        .background(MaterialTheme.colorScheme.background)
+                        .background(darkOnlyPalette?.background ?: MaterialTheme.colorScheme.background)
                         .clickable(
                             interactionSource = scrimInteractionSource,
                             indication = null,
@@ -829,6 +889,8 @@ private fun WhiplashApp() {
                     val playlistsForPlayer by playerViewModel.playlists.collectAsState()
                     val downloadedIds by app.libraryRepository.observeDownloadedIds().collectAsState(initial = emptySet())
                     val currentItemForDownload = playbackState.currentItem
+                    androidx.compose.runtime.CompositionLocalProvider(com.whiplash.music.ui.theme.LocalPaletteOverride provides darkOnlyPalette) {
+                    WhiplashTheme {
                     FullPlayerScreen(
                         state = playbackState,
                         onTogglePlayPause = playerViewModel::togglePlayPause,
@@ -875,6 +937,8 @@ private fun WhiplashApp() {
                             }
                         } else null,
                     )
+                    }
+                    }
                 }
             }
 
@@ -973,7 +1037,7 @@ private fun DetailOverlay(
                 translationX = (1f - p) * size.width / 4f
                 alpha = p
             }
-            .background(MaterialTheme.colorScheme.background)
+            .appBackground()
             .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }
             .then(if (coveredAbove) Modifier.clearAndSetSemantics {} else Modifier),
     ) {

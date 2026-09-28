@@ -1,5 +1,6 @@
 package com.whiplash.music.ui.localmusic
 
+import com.whiplash.music.ui.theme.appBackground
 import android.content.Intent
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -156,7 +157,7 @@ fun LocalLibraryScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(com.whiplash.music.ui.theme.WhiplashColors.background)
+                    .then(Modifier.appBackground())
                     .then(if (detailKind != null) Modifier.clearAndSetSemantics {} else Modifier),
             ) {
                 LibrarySectionPage(
@@ -180,7 +181,7 @@ fun LocalLibraryScreen(
     LibrarySlideOverlay(visible = detailKind != null) {
         val kind = shownKind
         if (kind != null) {
-            Box(modifier = Modifier.fillMaxSize().background(com.whiplash.music.ui.theme.WhiplashColors.background)) {
+            Box(modifier = Modifier.fillMaxSize().then(Modifier.appBackground())) {
                 LocalCollectionPage(
                     viewModel = viewModel,
                     isAlbum = kind == "album",

@@ -84,6 +84,42 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[THEME_KEY] = variant.name }
     }
 
+    /** App-wide theme (Dark, Light, Liquid Glass, ...). Defaults to Dark, the original look. */
+    val appTheme: Flow<com.whiplash.music.ui.theme.AppTheme> = dataStore.data.map { prefs ->
+        prefs[APP_THEME_KEY]?.let { stored ->
+            runCatching { com.whiplash.music.ui.theme.AppTheme.valueOf(stored) }.getOrNull()
+        } ?: com.whiplash.music.ui.theme.AppTheme.DARK
+    }
+
+    suspend fun setAppTheme(theme: com.whiplash.music.ui.theme.AppTheme) {
+        dataStore.edit { prefs -> prefs[APP_THEME_KEY] = theme.name }
+    }
+
+    /** The Custom theme's background and accent, stored as ARGB ints. */
+    val customThemeColors: Flow<com.whiplash.music.ui.theme.CustomThemeColors> = dataStore.data.map { prefs ->
+        val d = com.whiplash.music.ui.theme.CustomThemeColors()
+        com.whiplash.music.ui.theme.CustomThemeColors(
+            background = prefs[CUSTOM_BG_KEY]?.let { androidx.compose.ui.graphics.Color(it) } ?: d.background,
+            accent = prefs[CUSTOM_ACCENT_KEY]?.let { androidx.compose.ui.graphics.Color(it) } ?: d.accent,
+        )
+    }
+
+    suspend fun setCustomThemeColors(colors: com.whiplash.music.ui.theme.CustomThemeColors) {
+        dataStore.edit { prefs ->
+            prefs[CUSTOM_BG_KEY] = colors.background.toArgbInt()
+            prefs[CUSTOM_ACCENT_KEY] = colors.accent.toArgbInt()
+        }
+    }
+
+    /** Liquid Glass tint strength, 0..1. */
+    val glassOpacity: Flow<Float> = dataStore.data.map { prefs ->
+        (prefs[GLASS_OPACITY_KEY] ?: com.whiplash.music.ui.theme.WhiplashColors.DEFAULT_GLASS_OPACITY).coerceIn(0f, 1f)
+    }
+
+    suspend fun setGlassOpacity(value: Float) {
+        dataStore.edit { prefs -> prefs[GLASS_OPACITY_KEY] = value.coerceIn(0f, 1f) }
+    }
+
     /** Selected full-player seek bar visual style (section: Appearance). Defaults to the original Classic style. */
     val seekBarStyle: Flow<com.whiplash.music.ui.theme.SeekBarStyle> = dataStore.data.map { prefs ->
         prefs[SEEK_BAR_STYLE_KEY]?.let { stored ->
@@ -387,6 +423,10 @@ class SettingsRepository(context: Context) {
         val DOWNLOAD_QUALITY_KEY: Preferences.Key<String> = stringPreferencesKey("download_quality")
         val AUTOPLAY_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("autoplay_enabled")
         val THEME_KEY: Preferences.Key<String> = stringPreferencesKey("theme_variant")
+        val APP_THEME_KEY: Preferences.Key<String> = stringPreferencesKey("app_theme")
+        val CUSTOM_BG_KEY: Preferences.Key<Int> = intPreferencesKey("custom_theme_background")
+        val CUSTOM_ACCENT_KEY: Preferences.Key<Int> = intPreferencesKey("custom_theme_accent")
+        val GLASS_OPACITY_KEY: Preferences.Key<Float> = floatPreferencesKey("glass_opacity")
         val SEEK_BAR_STYLE_KEY: Preferences.Key<String> = stringPreferencesKey("seek_bar_style")
         val CROSSFADE_KEY: Preferences.Key<Int> = intPreferencesKey("crossfade_duration_ms")
         val GAPLESS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("gapless_enabled")
@@ -417,3 +457,10 @@ class SettingsRepository(context: Context) {
 
 /** Allowed Quick Picks grid page sizes; 0 = All. */
 val QUICK_PICKS_GRID_COUNTS = listOf(3, 6, 9, 12, 0)
+
+/** ARGB int without depending on the Compose toArgb extension import here. */
+private fun androidx.compose.ui.graphics.Color.toArgbInt(): Int =
+    android.graphics.Color.argb(
+        (alpha * 255f + 0.5f).toInt(), (red * 255f + 0.5f).toInt(),
+        (green * 255f + 0.5f).toInt(), (blue * 255f + 0.5f).toInt(),
+    )

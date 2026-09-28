@@ -331,6 +331,33 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setPlaybackSpeed(speed) }
     }
 
+    val appTheme: StateFlow<com.whiplash.music.ui.theme.AppTheme> = repository.appTheme
+        .stateIn(viewModelScope, SharingStarted.Eagerly, WhiplashColors.theme)
+    val customThemeColors: StateFlow<com.whiplash.music.ui.theme.CustomThemeColors> = repository.customThemeColors
+        .stateIn(viewModelScope, SharingStarted.Eagerly, WhiplashColors.customColors)
+    val glassOpacity: StateFlow<Float> = repository.glassOpacity
+        .stateIn(viewModelScope, SharingStarted.Eagerly, WhiplashColors.glassOpacity)
+
+    fun setAppTheme(theme: com.whiplash.music.ui.theme.AppTheme) {
+        WhiplashColors.applyTheme(theme = theme)
+        viewModelScope.launch { repository.setAppTheme(theme) }
+    }
+
+    fun setCustomThemeColors(colors: com.whiplash.music.ui.theme.CustomThemeColors) {
+        WhiplashColors.applyTheme(custom = colors)
+        viewModelScope.launch { repository.setCustomThemeColors(colors) }
+    }
+
+    /** Live while dragging; the value is saved by [saveGlassOpacity] on release. */
+    fun previewGlassOpacity(value: Float) {
+        WhiplashColors.applyTheme(glassOpacity = value)
+    }
+
+    fun saveGlassOpacity(value: Float) {
+        WhiplashColors.applyTheme(glassOpacity = value)
+        viewModelScope.launch { repository.setGlassOpacity(value) }
+    }
+
     fun setThemeVariant(variant: ThemeVariant) {
         WhiplashColors.applyVariant(variant) // instant visual feedback, before the DataStore write completes
         viewModelScope.launch { repository.setThemeVariant(variant) }

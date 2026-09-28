@@ -26,59 +26,124 @@ import androidx.compose.ui.graphics.Color
  * it is called once at app startup (from the persisted setting) and again
  * any time the user picks a new theme in Settings > Appearance.
  */
+/** Non-null inside a subtree that must use a specific palette (e.g. the always-dark full player). */
+val LocalPaletteOverride = androidx.compose.runtime.staticCompositionLocalOf<GlassPalette?> { null }
+
 object WhiplashColors {
 
-    // Tonal layering (section 42): background -> glass surface -> elevated -> sheet/modal.
-    // Each step is a small, deliberate lightness increase — never pure black, never a jump.
-    var background by mutableStateOf(Color(0xFF0A0A0B))
-    var surfaceGlass by mutableStateOf(Color(0xFF151517))
-    var surfaceElevated by mutableStateOf(Color(0xFF1D1D20))
-    var surfaceSheet by mutableStateOf(Color(0xFF242428))
+    /**
+     * The app-wide palette. Composables read colours through the getters
+     * below, which honour [LocalPaletteOverride] first, so one subtree (the
+     * full player) can render in a different palette than the rest.
+     */
+    var palette by mutableStateOf(ThemeVariant.CLASSIC.palette)
+        private set
 
-    // Text
-    var textPrimary by mutableStateOf(Color(0xFFF2F2F4))
-    var textSecondary by mutableStateOf(Color(0xFFB4B4BA))
-    var textTertiary by mutableStateOf(Color(0xFF7C7C84))
-    var textDisabled by mutableStateOf(Color(0xFF4C4C52))
+    /** The palette in effect at this point of the composition. */
+    val current: GlassPalette
+        @androidx.compose.runtime.Composable
+        @androidx.compose.runtime.ReadOnlyComposable
+        get() = LocalPaletteOverride.current ?: palette
 
-    // Accent — a single restrained neutral-warm accent, not a gradient system.
-    var accent by mutableStateOf(Color(0xFFE4E1D8))
-    var onAccent by mutableStateOf(Color(0xFF161512))
+    val background: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.background
+    val surfaceGlass: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.surfaceGlass
+    val surfaceElevated: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.surfaceElevated
+    val surfaceSheet: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.surfaceSheet
+    val textPrimary: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.textPrimary
+    val textSecondary: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.textSecondary
+    val textTertiary: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.textTertiary
+    val textDisabled: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.textDisabled
+    val accent: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.accent
+    val onAccent: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.onAccent
+    val glassBorder: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.glassBorder
+    val glassHighlight: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.glassHighlight
+    val glassBorderStrong: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.glassBorderStrong
+    val error: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.error
+    val success: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.success
+    val warning: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.warning
+    val scrim: Color
+        @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+        get() = current.scrim
 
-    // Borders / hairlines / highlights (glass edges catching light)
-    var glassBorder by mutableStateOf(Color(0x1FFFFFFF))
-    var glassHighlight by mutableStateOf(Color(0x14FFFFFF))
-    var glassBorderStrong by mutableStateOf(Color(0x33FFFFFF))
+    // ---- Theme state (see Themes.kt) ----
+    /** The app-wide theme. Accent choice and custom colours feed into it. */
+    var theme by mutableStateOf(AppTheme.DARK)
+        private set
+    var accentVariant by mutableStateOf(ThemeVariant.CLASSIC)
+        private set
+    var customColors by mutableStateOf(CustomThemeColors())
+        private set
+    /** Liquid Glass tint strength, 0 = clear glass, 1 = frosted and nearly solid. */
+    var glassOpacity by mutableStateOf(DEFAULT_GLASS_OPACITY)
+        private set
+    /** True when the current background is light (dark status bar icons, etc.). */
+    var isLight by mutableStateOf(false)
+        private set
+    val isGlass: Boolean get() = theme == AppTheme.LIQUID_GLASS
 
-    // Semantic
-    var error by mutableStateOf(Color(0xFFE5877E))
-    var success by mutableStateOf(Color(0xFF8FBF9A))
-    var warning by mutableStateOf(Color(0xFFD8B778))
-
-    // Scrim for sheets/dialogs
-    var scrim by mutableStateOf(Color(0x99000000))
-
-    /** Overwrites every token above from [variant]'s palette. */
-    fun applyVariant(variant: ThemeVariant) {
-        val p = variant.palette
-        background = p.background
-        surfaceGlass = p.surfaceGlass
-        surfaceElevated = p.surfaceElevated
-        surfaceSheet = p.surfaceSheet
-        textPrimary = p.textPrimary
-        textSecondary = p.textSecondary
-        textTertiary = p.textTertiary
-        textDisabled = p.textDisabled
-        accent = p.accent
-        onAccent = p.onAccent
-        glassBorder = p.glassBorder
-        glassHighlight = p.glassHighlight
-        glassBorderStrong = p.glassBorderStrong
-        error = p.error
-        success = p.success
-        warning = p.warning
-        scrim = p.scrim
+    /** Sets whichever parts are given and re-resolves the whole palette. */
+    fun applyTheme(
+        theme: AppTheme = this.theme,
+        accent: ThemeVariant = this.accentVariant,
+        custom: CustomThemeColors = this.customColors,
+        glassOpacity: Float = this.glassOpacity,
+    ) {
+        this.theme = theme
+        this.accentVariant = accent
+        this.customColors = custom
+        this.glassOpacity = glassOpacity.coerceIn(0f, 1f)
+        applyPalette(resolvePalette(theme, accent, custom))
     }
+
+    /** Kept for existing callers: changes only the accent colour. */
+    fun applyVariant(variant: ThemeVariant) = applyTheme(accent = variant)
+
+    private fun applyPalette(p: GlassPalette) {
+        isLight = p.isLight
+        palette = p
+    }
+
+    /**
+     * A surface [amount] of the way from the background toward the text
+     * colour. Use instead of lerp(background, Color.White, x): in light
+     * themes that would make "raised" cards invisible white-on-white.
+     */
+    @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
+    fun tone(amount: Float): Color = androidx.compose.ui.graphics.lerp(background, textPrimary, amount)
+
+    const val DEFAULT_GLASS_OPACITY: Float = 0.35f
 }
 
 /** Immutable palette definition backing one [ThemeVariant]. */

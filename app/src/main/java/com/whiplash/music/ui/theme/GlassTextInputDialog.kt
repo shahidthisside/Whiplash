@@ -32,7 +32,7 @@ fun GlassTextInputDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = WhiplashColors.surfaceSheet,
-        title = { Text(text = title, color = WhiplashColors.textPrimary) },
+        title = { if (WhiplashColors.isGlass) GlassWindowBlur(); Text(text = title, color = WhiplashColors.textPrimary) },
         text = {
             OutlinedTextField(
                 value = text,

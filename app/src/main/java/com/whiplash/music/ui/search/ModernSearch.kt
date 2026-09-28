@@ -118,7 +118,8 @@ private const val ARTIST_ART_PX = 360
 private val tileShape = RoundedCornerShape(16.dp)
 
 
-private fun tonal(amount: Float = 0.08f): Color = lerp(WhiplashColors.background, Color.White, amount)
+@Composable
+private fun tonal(amount: Float = 0.08f): Color = WhiplashColors.tone(amount)
 
 private fun tabIcon(tab: SearchResultTab): ImageVector = when (tab) {
     SearchResultTab.SONGS -> Icons.Filled.MusicNote
@@ -257,10 +258,12 @@ private fun TopResultCard(track: PlayableItem.YoutubeTrack, onPlay: () -> Unit, 
     // Colours from the cover itself (same sampler as the player, tiny
     // decode from the disk cache), falling back to a tint from the title.
     val palette by rememberArtworkPalette(art, enabled = true)
-    val fallback = lerp(WhiplashColors.background, tintForName(track.title), 0.35f)
+    // Always a deep, cover-coloured card with white text (the mesh tones are
+    // dark too), so it reads the same in light and dark themes.
+    val fallback = lerp(Color(0xFF141418), tintForName(track.title), 0.35f)
     val mesh = palette?.mesh
     val c1 by animateColorAsState(mesh?.getOrNull(0)?.let { Color(it) } ?: fallback, tween(GlassTokens.animSlow), label = "top1")
-    val c2 by animateColorAsState(mesh?.getOrNull(3)?.let { Color(it) } ?: tonal(0.05f), tween(GlassTokens.animSlow), label = "top2")
+    val c2 by animateColorAsState(mesh?.getOrNull(3)?.let { Color(it) } ?: Color(0xFF1B1B20), tween(GlassTokens.animSlow), label = "top2")
 
     Row(
         modifier = Modifier
@@ -749,7 +752,7 @@ internal fun ModernArtistGrid(
                         Text(
                             artist.name.take(1).uppercase(),
                             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color.White.copy(alpha = 0.85f),
+                            color = com.whiplash.music.ui.theme.inkOn(lerp(WhiplashColors.background, tintForName(artist.name), 0.45f)),
                         )
                         if (artist.artworkUrl != null) {
                             AsyncImage(

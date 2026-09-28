@@ -175,9 +175,14 @@ class WhiplashApplication : Application() {
         // mutable object (see Color.kt), so this single collector keeps
         // it in sync regardless of which screens are ever opened.
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate).launch {
-            settingsRepository.themeVariant.collect { variant ->
-                com.whiplash.music.ui.theme.WhiplashColors.applyVariant(variant)
-            }
+            kotlinx.coroutines.flow.combine(
+                settingsRepository.appTheme,
+                settingsRepository.themeVariant,
+                settingsRepository.customThemeColors,
+                settingsRepository.glassOpacity,
+            ) { theme, accent, custom, opacity ->
+                com.whiplash.music.ui.theme.WhiplashColors.applyTheme(theme, accent, custom, opacity)
+            }.collect { }
         }
 
         // Warm Home's Speed dial artwork and Quick Picks (both data and

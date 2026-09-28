@@ -46,7 +46,10 @@ object GlassTokens {
     // directly behind the mini-player with no way to tap it. Sized generously
     // above the mini-player's actual measured height (~75dp content +
     // 16dp/spaceMd outer margin) so it clears comfortably on every density.
-    val miniPlayerReservedHeight: Dp = 100.dp
+    // In Liquid Glass the tab bar floats over the page too, so lists reserve
+    // room for both (reads the theme state, so it updates on theme change).
+    val miniPlayerReservedHeight: Dp
+        get() = if (WhiplashColors.isGlass) 100.dp + 84.dp else 100.dp
 
     // Animation durations (ms). Motion quality over quantity (section 44).
     const val animFast: Int = 120

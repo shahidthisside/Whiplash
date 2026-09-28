@@ -60,7 +60,7 @@ import com.whiplash.music.domain.model.PlayableItem
 
 /** Flat card colour shared with Settings and the mini player. */
 @Composable
-internal fun collectionCardColor(): Color = lerp(WhiplashColors.background, Color.White, 0.06f)
+internal fun collectionCardColor(): Color = WhiplashColors.tone(0.06f)
 
 /** "12 songs", "1 song". */
 internal fun songCountLabel(count: Int): String = if (count == 1) "1 song" else "$count songs"
@@ -100,7 +100,7 @@ fun CollectionPillButton(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.96f else 1f, tween(GlassTokens.animFast), label = "pillScale")
-    val container = if (primary) WhiplashColors.accent else lerp(WhiplashColors.background, Color.White, 0.10f)
+    val container = if (primary) WhiplashColors.accent else WhiplashColors.tone(0.10f)
     val content = if (primary) WhiplashColors.onAccent else WhiplashColors.textPrimary
     Row(
         modifier = modifier
@@ -170,7 +170,7 @@ fun CollectionHero(
                 Text(
                     text = eyebrow.uppercase(),
                     style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.4.sp, fontWeight = FontWeight.SemiBold),
-                    color = lerp(tint, Color.White, 0.45f),
+                    color = readableTint(lerp(tint, WhiplashColors.textPrimary, 0.35f), 4.5f),
                     maxLines = 1,
                 )
                 Spacer(Modifier.height(4.dp))
@@ -254,7 +254,7 @@ fun CollectionEmptyState(
                     .background(tint.copy(alpha = 0.16f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(icon, contentDescription = null, tint = lerp(tint, Color.White, 0.35f), modifier = Modifier.size(38.dp))
+                Icon(icon, contentDescription = null, tint = readableTint(lerp(tint, WhiplashColors.textPrimary, 0.25f)), modifier = Modifier.size(38.dp))
             }
             Spacer(Modifier.height(20.dp))
             Text(
@@ -362,7 +362,7 @@ fun RoundActionButton(
 @Composable
 fun RoundActionSurface(content: @Composable () -> Unit) {
     Box(
-        Modifier.size(46.dp).clip(androidx.compose.foundation.shape.CircleShape).background(lerp(WhiplashColors.background, Color.White, 0.10f)),
+        Modifier.size(46.dp).clip(androidx.compose.foundation.shape.CircleShape).background(WhiplashColors.tone(0.10f)),
         contentAlignment = Alignment.Center,
     ) { content() }
 }
