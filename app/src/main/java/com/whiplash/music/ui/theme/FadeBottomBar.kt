@@ -10,7 +10,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -67,33 +76,65 @@ fun <T> FadeBottomBar(
     // Liquid Glass: a floating glass capsule over the page instead of a flat bar.
     val floating = LocalGlassBackdrop.current != null
     val capsule = androidx.compose.foundation.shape.RoundedCornerShape(30.dp)
-    Row(
-        modifier = if (floating) {
-            modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(start = 12.dp, end = 12.dp, bottom = 8.dp)
-                .androidxShadow(capsule)
-                .liquidGlass(shape = capsule, fallback = WhiplashColors.surfaceElevated, legibility = 0.4f)
-                .padding(vertical = 2.dp, horizontal = 4.dp)
-        } else {
+    val tabs: @Composable () -> Unit = {
+        Row(Modifier.fillMaxWidth()) {
+            items.forEach { item ->
+                val isSelected = item == selected
+                FadeBottomBarItem(
+                    isSelected = isSelected,
+                    label = label(item),
+                    onClick = { onSelect(item) },
+                    icon = { sel -> icon(item, sel) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+    if (!floating) {
+        Box(
             modifier
                 .fillMaxWidth()
                 .background(WhiplashColors.background)
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(top = 6.dp, bottom = 4.dp)
-        },
+                .padding(top = 6.dp, bottom = 4.dp),
+        ) { tabs() }
+        return
+    }
+    BoxWithConstraints(
+        modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(start = 12.dp, end = 12.dp, bottom = 8.dp)
+            .androidxShadow(capsule)
+            .liquidGlass(shape = capsule, fallback = WhiplashColors.surfaceElevated, legibility = 0.4f)
+            .padding(vertical = 2.dp, horizontal = 4.dp),
     ) {
-        items.forEach { item ->
-            val isSelected = item == selected
-            FadeBottomBarItem(
-                isSelected = isSelected,
-                label = label(item),
-                onClick = { onSelect(item) },
-                icon = { sel -> icon(item, sel) },
-                modifier = Modifier.weight(1f),
+        // The open tab: one raised 3D glass puck (rim, bevel, gloss and a
+        // soft lift, same as the Search filter) that glides between tabs.
+        val segment = maxWidth / items.size.coerceAtLeast(1)
+        val offset by animateDpAsState(
+            segment * items.indexOf(selected).coerceAtLeast(0),
+            tween(GlassTokens.animSlow, easing = FastOutSlowInEasing),
+            label = "barIndicator",
+        )
+        val puck = androidx.compose.foundation.shape.RoundedCornerShape(26.dp)
+        Box(Modifier.matchParentSize().wrapContentWidth(Alignment.Start)) {
+            Box(
+                Modifier
+                    .offset { IntOffset(offset.roundToPx(), 0) }
+                    .width(segment)
+                    .fillMaxHeight()
+                    .padding(vertical = 4.dp)
+                    .glassShadow(puck, elevation = 6.dp, strength = if (WhiplashColors.isLight) 0.16f else 0.28f)
+                    .clip(puck)
+                    .background(
+                        if (WhiplashColors.isLight) Color.White.copy(alpha = 0.55f)
+                        else WhiplashColors.textPrimary.copy(alpha = 0.14f),
+                    )
+                    .glassMaterial(puck),
             )
         }
+        tabs()
     }
 }
 
@@ -147,28 +188,9 @@ private fun FadeBottomBarItem(
     )
 
     val onGlass = LocalGlassBackdrop.current != null
-    val pillAlpha by animateFloatAsState(
-        targetValue = if (onGlass && isSelected) 1f else 0f,
-        animationSpec = tween(GlassTokens.animSlow),
-        label = "glassTabPill",
-    )
-    val pillColor = WhiplashColors.textPrimary
     Column(
         modifier = modifier
             .padding(vertical = if (onGlass) 4.dp else 0.dp)
-            .then(
-                if (onGlass) {
-                    // Selected tab: a lighter capsule inside the glass, like iOS.
-                    Modifier.drawBehind {
-                        drawRoundRect(
-                            color = pillColor.copy(alpha = 0.14f * pillAlpha),
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
-                        )
-                    }
-                } else {
-                    Modifier
-                },
-            )
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .padding(vertical = 6.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
