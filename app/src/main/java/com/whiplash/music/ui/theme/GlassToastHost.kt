@@ -102,6 +102,16 @@ fun GlassToastHost(modifier: Modifier = Modifier) {
 private const val DURATION_MS = 2600L
 
 /**
+ * Screen positions the toast host anchors to that live outside MainActivity's
+ * own layout. The full player reports the window Y of its transport controls
+ * here, so a toast raised from inside the player sits just above Play/Next
+ * instead of on top of them.
+ */
+object ToastAnchor {
+    var fullPlayerControlsTopPx by mutableStateOf<Float?>(null)
+}
+
+/**
  * Caps how wide the toast pill can grow (section: fixing an oversized
  * toast). Most toast messages in this app are short, fixed phrases
  * ("Added to favorites", "Queue cleared"), so the pill never needed an

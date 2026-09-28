@@ -421,6 +421,8 @@ private fun WhiplashApp() {
                     }
                     selectedTab = tab
                 }
+    // Height of the root box, for placing toasts above the full player's controls.
+    var rootHeightPx by remember { mutableStateOf(0f) }
     val bottomBar: @Composable () -> Unit = {
                 com.whiplash.music.ui.theme.FadeBottomBar(
                     items = AppTab.entries,
@@ -485,7 +487,7 @@ private fun WhiplashApp() {
         // The full player is drawn edge to edge (under the status and
         // navigation bars, with its own insets), so only the tab content,
         // mini player and bottom nav get the Scaffold's system-bar padding.
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize().onSizeChanged { rootHeightPx = it.height.toFloat() }) {
           if (glass) {
               Box(Modifier.fillMaxSize().glassSource(wallpaperBackdrop).appBackground())
           }
@@ -962,15 +964,42 @@ private fun WhiplashApp() {
             // App-wide toast host (section: feedback for silent actions —
             // favoriting, pinning, playlist/queue changes, etc.), drawn
             // last so it renders above even the expanded full player.
+            //
+            // Position: one fixed spot, the same in every theme and whether or
+            // not a song is loaded — just above the tab bar, where Android's
+            // own toasts and Spotify / YouTube Music's confirmations appear
+            // (it may briefly overlap the mini player; it's gone in 2.6 s).
+            // Measured from the system navigation bar, not from the theme's
+            // chrome, since the glass tab bar floats at a different height.
+            // While the full player is open there's no tab bar, so the toast
+            // sits just above the player's transport controls instead of on
+            // top of Play.
+            val playerControlsTopPx = com.whiplash.music.ui.theme.ToastAnchor.fullPlayerControlsTopPx
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val toastBottom = if (isPlayerExpanded && playerControlsTopPx != null && rootHeightPx > 0f) {
+                with(density) { (rootHeightPx - playerControlsTopPx).coerceAtLeast(0f).toDp() } + TOAST_GAP
+            } else {
+                innerPadding.calculateBottomPadding() + TOAST_ABOVE_NAV_BAR
+            }
             com.whiplash.music.ui.theme.GlassToastHost(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(innerPadding)
-                    .padding(bottom = GlassTokens.spaceXl + GlassTokens.miniPlayerReservedHeight),
+                    .padding(horizontal = GlassTokens.spaceLg)
+                    .padding(bottom = toastBottom),
             )
         }
     }
 }
+
+/** Space between a toast and the full player's controls it sits above. */
+private val TOAST_GAP = 12.dp
+
+/**
+ * Toast bottom edge above the system navigation bar: the tab bar's height
+ * plus its padding (about 84dp) and a 12dp gap, so the toast sits just above
+ * the flat tab bar and at that same spot in Liquid Glass.
+ */
+private val TOAST_ABOVE_NAV_BAR = 96.dp
 
 /**
  * An AnimatedContent transition with no motion at all, used when reduced

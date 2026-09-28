@@ -411,7 +411,12 @@ fun FullPlayerScreen(
     androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            // Toasts raised inside the player sit just above these controls.
+            .onGloballyPositioned {
+                com.whiplash.music.ui.theme.ToastAnchor.fullPlayerControlsTopPx = it.positionInRoot().y
+            },
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
