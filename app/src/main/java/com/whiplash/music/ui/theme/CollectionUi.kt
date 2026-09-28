@@ -102,7 +102,7 @@ fun CollectionPillButton(
     val scale by animateFloatAsState(if (pressed) 0.96f else 1f, tween(GlassTokens.animFast), label = "pillScale")
     val container = if (primary) WhiplashColors.accent else WhiplashColors.tone(0.10f)
     val content = if (primary) WhiplashColors.onAccent else WhiplashColors.textPrimary
-    Row(
+    androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = modifier
             .graphicsLayer { scaleX = scale; scaleY = scale; alpha = if (enabled) 1f else GlassTokens.opacityDisabled }
             .heightIn(min = 46.dp)
@@ -110,20 +110,39 @@ fun CollectionPillButton(
                 if (primary) Modifier.clip(RoundedCornerShape(WhiplashRadius.pill)).background(container)
                 else Modifier.glassFill(RoundedCornerShape(WhiplashRadius.pill), container),
             )
-            .clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
+            .clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), enabled = enabled, role = Role.Button, onClick = onClick),
     ) {
-        Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-            color = content,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        // Keep the label whole when the pill is squeezed (a row that also
+        // holds icon buttons, like Downloads' Save all / Clear all, or a
+        // large system font): first tighten the padding, then drop the icon,
+        // and only ellipsize if even the bare word can't fit.
+        val labelStyle = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+        val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val labelWidth = remember(text, labelStyle, density) {
+            with(density) { measurer.measure(text, labelStyle, maxLines = 1).size.width.toDp() }
+        }
+        val roomy = maxWidth >= labelWidth + 20.dp + 8.dp + 32.dp
+        val tight = !roomy && maxWidth >= labelWidth + 20.dp + 6.dp + 20.dp
+        Row(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(horizontal = if (roomy) 16.dp else 10.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (roomy || tight) {
+                Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(if (roomy) 8.dp else 6.dp))
+            }
+            Text(
+                text = text,
+                style = labelStyle,
+                color = content,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

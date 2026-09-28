@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.flowOf
 internal data class SongLibraryState(
     val downloading: Boolean,
     val inPlaylists: List<Playlist>,
+    /** Fully downloaded, so it can be saved to the device. */
+    val downloaded: Boolean = false,
 )
 
 @Composable
@@ -30,9 +32,11 @@ internal fun rememberSongLibraryState(item: PlayableItem?): SongLibraryState {
     }
     val ids by idsFlow.collectAsState(initial = emptySet())
     val playlists by app.libraryRepository.observePlaylists().collectAsState(initial = emptyList())
+    val downloadedIds by remember { app.libraryRepository.observeDownloadedIds() }.collectAsState(initial = emptySet())
     return SongLibraryState(
         downloading = item != null && item.id in inFlight,
         inPlaylists = playlists.filter { it.id in ids },
+        downloaded = item != null && item.id in downloadedIds,
     )
 }
 

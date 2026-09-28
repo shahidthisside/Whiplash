@@ -35,7 +35,10 @@ class Mp4TaggerTest {
     private fun fakeMp4(mdatContent: ByteArray = byteArrayOf(1, 2, 3, 4, 5), moovExtra: ByteArray = ByteArray(0)): ByteArray {
         val ftyp = box("ftyp", "isom".toByteArray(Charsets.US_ASCII) + u32(0) + "isomiso2mp41".toByteArray(Charsets.US_ASCII))
         val mvhd = box("mvhd", ByteArray(100)) // stub, content shape doesn't matter for these tests
-        val moov = box("moov", mvhd + moovExtra)
+        // Fragmented, like YouTube's DASH audio: sample offsets are relative
+        // to each fragment, so moov can grow in front of mdat safely.
+        val mvex = box("mvex", ByteArray(8))
+        val moov = box("moov", mvhd + mvex + moovExtra)
         val mdat = box("mdat", mdatContent)
         return ftyp + moov + mdat
     }
@@ -155,5 +158,27 @@ class Mp4TaggerTest {
         val tagged = Mp4Tagger.tag(fakeMp4(), title = "Title Only", artist = "", album = null, cover = null)
         val boxes = parseTopLevel(tagged)
         assertEquals(listOf("ftyp", "moov", "mdat"), boxes.map { it.type })
+    }
+
+    @Test
+    fun `plain file with moov before mdat is left unchanged so chunk offsets stay valid`() {
+        val ftyp = box("ftyp", "M4A ".toByteArray(Charsets.US_ASCII) + ByteArray(4))
+        val plain = ftyp + box("moov", box("mvhd", ByteArray(100))) + box("mdat", byteArrayOf(1, 2, 3))
+        assertArrayEquals(plain, Mp4Tagger.tag(plain, "T", "A", null, null))
+    }
+
+    @Test
+    fun `MediaMuxer layout with a 64-bit mdat and moov at the end gets tagged`() {
+        val ftyp = box("ftyp", "M4A ".toByteArray(Charsets.US_ASCII) + ByteArray(4))
+        val audio = byteArrayOf(9, 8, 7, 6)
+        val largeMdat = u32(1L) + "mdat".toByteArray(Charsets.US_ASCII) + u32(0L) + u32(16L + audio.size) + audio
+        val moov = box("moov", box("mvhd", ByteArray(100)))
+        val original = ftyp + box("free", ByteArray(16)) + largeMdat + moov
+        val tagged = Mp4Tagger.tag(original, "Title", "Artist", null, null)
+        // Everything before moov is byte-identical, so the chunk offsets still point at the audio.
+        val moovAt = original.size - moov.size
+        assertArrayEquals(original.copyOfRange(0, moovAt), tagged.copyOfRange(0, moovAt))
+        assertTrue(tagged.size > original.size)
+        assertTrue(String(tagged, Charsets.ISO_8859_1).contains("Title"))
     }
 }

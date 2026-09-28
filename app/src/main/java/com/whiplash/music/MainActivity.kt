@@ -938,6 +938,7 @@ private fun WhiplashApp() {
                         showStatsForNerds = statsForNerdsEnabled,
                         artworkColorsEnabled = playerArtworkColors,
                         showLyricStrip = playerLyricStrip,
+                        onSetLyricStrip = playerViewModel::setPlayerLyricStrip,
                         heroArtwork = playerHeroArtwork,
                         lyricsBlurUnfocused = lyricsBlurUnfocused,
                         playlists = playlistsForPlayer,

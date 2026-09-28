@@ -25,6 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MusicOff
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.SubtitlesOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -82,6 +84,8 @@ fun LyricsContent(
     blurUnfocused: Boolean = false,
     onAdjustOffset: (Long) -> Unit = {},
     onResetOffset: () -> Unit = {},
+    showLyricStrip: Boolean? = null,
+    onSetLyricStrip: (Boolean) -> Unit = {},
 ) {
     // Keep the screen on only while lyrics are on screen and the song is
     // playing: the display otherwise times out mid-verse while someone is
@@ -164,7 +168,16 @@ fun LyricsContent(
             if (result is LyricsResult.Synced) {
                 // While faded out the buttons are disabled, so the touch that
                 // brings them back can't also nudge the timing by accident.
-                Box(modifier = Modifier.graphicsLayer { alpha = controlsAlpha }) {
+                Row(
+                    modifier = Modifier.graphicsLayer { alpha = controlsAlpha },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Shortcut for the one-line lyric above the player's
+                    // scrubber (Settings > Now Playing > Lyric line), which
+                    // only shows synced lyrics, so it sits with the timing.
+                    if (showLyricStrip != null) {
+                        LyricStripToggle(showLyricStrip, onSetLyricStrip, enabled = controlsVisible)
+                    }
                     LyricOffsetControl(offsetMs, onAdjustOffset, onResetOffset, enabled = controlsVisible)
                 }
             }
@@ -471,6 +484,34 @@ private fun wordHighlightText(
                 append(word.text)
             }
         }
+    }
+}
+
+/**
+ * On/off switch for the player's lyric line, drawn as a toggle icon button:
+ * accent and filled when the line shows, dimmed with a strike-through icon
+ * when it's hidden. Announces its state to TalkBack as a switch.
+ */
+@Composable
+private fun LyricStripToggle(on: Boolean, onSet: (Boolean) -> Unit, enabled: Boolean) {
+    androidx.compose.material3.IconToggleButton(
+        checked = on,
+        onCheckedChange = { checked ->
+            onSet(checked)
+            com.whiplash.music.ui.common.ToastController.show(
+                if (checked) "Lyric line on player shown" else "Lyric line on player hidden",
+            )
+        },
+        enabled = enabled,
+        modifier = Modifier.semantics {
+            contentDescription = if (on) "Lyric line on player: on" else "Lyric line on player: off"
+        },
+    ) {
+        Icon(
+            imageVector = if (on) Icons.Filled.Subtitles else Icons.Filled.SubtitlesOff,
+            contentDescription = null,
+            tint = if (on) WhiplashColors.accent else WhiplashColors.textSecondary,
+        )
     }
 }
 

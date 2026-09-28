@@ -19,6 +19,8 @@ fun GlassConfirmDialog(
     message: String,
     confirmLabel: String = "Delete",
     dismissLabel: String = "Cancel",
+    /** False for a safe action (confirm in the accent colour instead of red). */
+    destructive: Boolean = true,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -29,7 +31,7 @@ fun GlassConfirmDialog(
         text = { Text(text = message, color = WhiplashColors.textSecondary) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text(text = confirmLabel, color = WhiplashColors.error)
+                Text(text = confirmLabel, color = if (destructive) WhiplashColors.error else WhiplashColors.accent)
             }
         },
         dismissButton = {

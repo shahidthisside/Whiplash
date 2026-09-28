@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.RemoveCircleOutline
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -173,6 +174,17 @@ fun SongActionsContent(
                 },
                 label = if (isDownloaded) "Downloaded" else "Download",
                 onClick = onDownload,
+            )
+        }
+        // A finished download can be copied out to the phone's
+        // Download/Whiplash folder; the app keeps its own copy.
+        if (!live.downloading && (live.downloaded || item is PlayableItem.DownloadedTrack)) {
+            val saveToDevice = com.whiplash.music.ui.common.rememberSaveToDevice()
+            SongActionRow(
+                icon = { Icon(Icons.Filled.SaveAlt, contentDescription = null, tint = WhiplashColors.textPrimary) },
+                label = "Save to device",
+                subtitle = "Download/Whiplash",
+                onClick = { saveToDevice(listOf(item.id)) },
             )
         }
         if (onRemoveDownload != null) {

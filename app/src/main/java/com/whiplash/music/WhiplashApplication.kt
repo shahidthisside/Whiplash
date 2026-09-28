@@ -161,6 +161,11 @@ class WhiplashApplication : Application() {
         com.whiplash.music.data.download.DownloadManager(this, playbackManager, database.downloadDao(), downloadOkHttpClient, settingsRepository)
     }
 
+    /** Saves downloaded songs to the phone's Download/Whiplash folder. */
+    val deviceExporter: com.whiplash.music.data.download.DeviceExporter by lazy {
+        com.whiplash.music.data.download.DeviceExporter(this, database.downloadDao())
+    }
+
     override fun onCreate() {
         super.onCreate()
         NewPipe.init(OkHttpNewPipeDownloader(okHttpClient))

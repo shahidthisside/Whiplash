@@ -71,6 +71,16 @@ object Mp4Tagger {
         // VORBIS_COMMENT/PICTURE, so the same rule applies here: drop the
         // old one, write one fresh one).
         val moovChildren = parseChildBoxes(bytes, moovBox.contentStart, moovBox.contentEnd) ?: return bytes
+
+        // Growing moov shifts everything after it. That's harmless when moov
+        // comes after the audio (Android's MediaMuxer output) or the file is
+        // fragmented (sample offsets are relative to each fragment, as in
+        // YouTube's DASH downloads), but in a plain file with moov before
+        // mdat it would break the absolute chunk offsets (stco/co64) and
+        // corrupt playback. Leave such a file untouched.
+        val moovBeforeMdat = boxes.indexOfFirst { it.type == MOOV } < boxes.indexOfLast { it.type == MDAT }
+        val fragmented = moovChildren.any { it.type == MVEX }
+        if (moovBeforeMdat && !fragmented) return bytes
         val rebuiltMoovContent = ByteArrayOutputStream().apply {
             moovChildren.forEach { child ->
                 if (child.type != UDTA) write(bytes, child.start, child.end - child.start)
@@ -107,16 +117,20 @@ object Mp4Tagger {
             val type = String(bytes, pos + 4, 4, Charsets.ISO_8859_1)
             val boxSize = when {
                 size == 1L -> {
-                    // 64-bit "largesize" extension — present but genuinely
-                    // rare for the kind of short audio-only MP4s a YouTube
-                    // download produces; safest to bail rather than guess.
-                    return null
+                    // 64-bit "largesize" header (Android's MediaMuxer writes
+                    // mdat this way). The file is in memory, so the real size
+                    // always fits an Int; anything else is malformed.
+                    if (pos + 16 > end) return null
+                    val large = (readU32(bytes, pos + 8) shl 32) or readU32(bytes, pos + 12)
+                    if (large < 16 || large > Int.MAX_VALUE) return null
+                    large
                 }
                 size == 0L -> (end - pos).toLong() // box extends to end of parent, per spec
                 else -> size
             }
             if (boxSize < 8 || pos + boxSize > end) return null
-            result.add(Box(type, pos, (pos + boxSize).toInt(), pos + 8, (pos + boxSize).toInt()))
+            val headerSize = if (size == 1L) 16 else 8
+            result.add(Box(type, pos, (pos + boxSize).toInt(), pos + headerSize, (pos + boxSize).toInt()))
             pos += boxSize.toInt()
         }
         return result
@@ -198,4 +212,6 @@ object Mp4Tagger {
     private const val FTYP = "ftyp"
     private const val MOOV = "moov"
     private const val UDTA = "udta"
+    private const val MDAT = "mdat"
+    private const val MVEX = "mvex"
 }

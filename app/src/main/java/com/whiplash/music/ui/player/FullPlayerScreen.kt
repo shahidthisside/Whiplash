@@ -124,6 +124,7 @@ fun FullPlayerScreen(
     showStatsForNerds: Boolean = false,
     artworkColorsEnabled: Boolean = true,
     showLyricStrip: Boolean = true,
+    onSetLyricStrip: (Boolean) -> Unit = {},
     lyricsBlurUnfocused: Boolean = false,
     heroArtwork: Boolean = false,
     playlists: List<com.whiplash.music.domain.model.Playlist> = emptyList(),
@@ -750,6 +751,8 @@ fun FullPlayerScreen(
                 blurUnfocused = lyricsBlurUnfocused,
                 onAdjustOffset = onAdjustLyricOffset,
                 onResetOffset = onResetLyricOffset,
+                showLyricStrip = showLyricStrip,
+                onSetLyricStrip = onSetLyricStrip,
             )
         }
     }

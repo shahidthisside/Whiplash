@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Shuffle
@@ -433,6 +434,9 @@ internal fun LibrarySectionPage(
     val inFlight by viewModel.inFlightTracks.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
     var confirmClear by remember { mutableStateOf(false) }
+    // "Save all" asks first: it says how many songs and exactly where they go.
+    var confirmSaveAll by remember { mutableStateOf(false) }
+    val saveToDevice = com.whiplash.music.ui.common.rememberSaveToDevice()
     // Space used, refreshed whenever the set of downloads changes.
     val downloadBytes by androidx.compose.runtime.produceState(0L, downloads.size) { value = viewModel.downloadsBytes() }
 
@@ -474,6 +478,25 @@ internal fun LibrarySectionPage(
                     sortKey = "library_downloads",
                     defaultSortLabel = "Recently downloaded",
                     heroActions = {
+                        if (downloads.isNotEmpty()) {
+                            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? com.whiplash.music.WhiplashApplication
+                            val saving = app?.deviceExporter?.isSaving?.collectAsState()?.value ?: false
+                            PlainIconButton(
+                                contentDescription = if (saving) "Saving downloads to device" else "Save all downloads to device",
+                                onClick = { if (!saving) confirmSaveAll = true },
+                                size = 48.dp,
+                            ) {
+                                if (saving) {
+                                    androidx.compose.material3.CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
+                                        color = WhiplashColors.textSecondary,
+                                    )
+                                } else {
+                                    Icon(Icons.Filled.SaveAlt, contentDescription = null, tint = WhiplashColors.textSecondary)
+                                }
+                            }
+                        }
                         if (rows.isNotEmpty()) {
                             PlainIconButton(contentDescription = "Clear all downloads", onClick = { confirmClear = true }, size = 48.dp) {
                                 Icon(Icons.Filled.DeleteOutline, contentDescription = null, tint = WhiplashColors.textSecondary)
@@ -504,6 +527,21 @@ internal fun LibrarySectionPage(
             section == LibrarySection.ALBUMS -> ModernAlbumGrid(albums, songs, onAlbumClick)
             else -> ModernArtistList(artists, songs, onArtistClick)
         }
+    }
+
+    if (confirmSaveAll) {
+        val count = downloads.size
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Save to device?",
+            message = "${if (count == 1) "1 song" else "$count songs"} will be saved to Download/Whiplash.",
+            confirmLabel = "Save",
+            destructive = false,
+            onConfirm = {
+                confirmSaveAll = false
+                saveToDevice(downloads.map { it.id })
+            },
+            onDismiss = { confirmSaveAll = false },
+        )
     }
 
     if (confirmClear) {
