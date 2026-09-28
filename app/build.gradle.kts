@@ -76,6 +76,11 @@ android {
         jvmTarget = "17"
     }
 
+    // Plain JVM unit tests: android.util.Log etc. return defaults instead of throwing.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     buildFeatures {
         compose = true
     }

@@ -31,7 +31,12 @@ interface PlaybackProvider {
      * when an exact match isn't available.
      * Throws a [ProviderFailure] subtype on any failure.
      */
-    suspend fun getStream(songId: String, quality: AudioQuality = AudioQuality.AUTO): ResolvedStream
+    suspend fun getStream(
+        songId: String,
+        quality: AudioQuality = AudioQuality.AUTO,
+        /** Format to use if it's still offered (5.2 pinning); otherwise pick by [quality]. */
+        preferredItag: Int? = null,
+    ): ResolvedStream
 
     /**
      * Resolves richer metadata for [songId]. Throws a [ProviderFailure]

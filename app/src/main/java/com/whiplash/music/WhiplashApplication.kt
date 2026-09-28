@@ -140,7 +140,17 @@ class WhiplashApplication : Application() {
      * call-site changes required.
      */
     val playbackManager: PlaybackManager by lazy {
-        PlaybackManager(providers = listOf(newPipePlaybackProvider))
+        PlaybackManager(
+            providers = listOf(newPipePlaybackProvider),
+            streamChoices = com.whiplash.music.playback.provider.StreamChoiceStore.sharedPrefs(this),
+            // Same key as PlayableItemMediaItemMapper.mediaIdOf for a YouTube track.
+            onFormatChanged = { videoId, knownChange ->
+                val key = "YOUTUBE:$videoId"
+                // A complete cached copy is one consistent file, so keep it
+                // unless the format is known to have changed.
+                if (knownChange || !audioCacheManager.isFullyCached(key)) audioCacheManager.removeResource(key)
+            },
+        )
     }
 
     val playbackController: PlaybackController by lazy {

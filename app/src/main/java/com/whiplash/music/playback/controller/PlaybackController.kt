@@ -292,14 +292,17 @@ class PlaybackController(
         }
 
         errorRecoveryAttemptedForItemId = track.id
-        // A stale prefetched URL for this same item would just fail again.
+        // A stale prefetched URL for this same item would just fail again,
+        // and so would the one remembered for reuse (5.2).
         if (prefetched?.forItemId == track.id) prefetched = null
+        playbackManager.invalidateStream(track.id)
 
         scope.launch {
             val quality = settingsRepository.effectiveAudioQuality()
             val result = try {
                 kotlinx.coroutines.withTimeout(RESOLVE_STREAM_TIMEOUT_MS) {
-                    playbackManager.resolveStream(track, quality)
+                    // Same format as the bytes already played/cached for this song.
+                    playbackManager.resolveStream(track, quality, keepAnyPinnedFormat = true)
                 }
             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
                 null
@@ -629,6 +632,7 @@ class PlaybackController(
                     // could disappear from Speed dial/Favorites/Playlists.
                     scope.launch { libraryRepository.cacheSong(item) }
                     _state.update { it.copy(isResolvingStream = false) }
+                    android.util.Log.i("PlaybackController", "Playing ${item.id} from the disk cache")
                     startMediaItem(displayItem, resolvedStreamUrl = "cache://$mediaId")
                     maybeExtendQueueWithRecommendations(item)
                     // Skipping the resolve also skipped the artwork upgrade the
@@ -792,7 +796,11 @@ class PlaybackController(
                     // falling through to the existing "prefetch is only a
                     // latency optimization" catch block below.
                     val result = kotlinx.coroutines.withTimeout(RESOLVE_STREAM_TIMEOUT_MS) {
-                        playbackManager.resolveStream(nextItem, quality)
+                        // Repeat-one / a one-song queue: the "next" song is the
+                        // one playing now, possibly from the disk cache, so its
+                        // format must not change underneath it (5.2).
+                        val isCurrent = _state.value.currentItem?.id == nextItem.id
+                        playbackManager.resolveStream(nextItem, quality, keepAnyPinnedFormat = isCurrent)
                     }
                     if (result is FallbackResult.Success) {
                         val art = firstLoadableArtwork(result.value.resolvedArtworkCandidates)

@@ -123,6 +123,11 @@ class AudioCacheManager(context: Context) {
         contentLength > 0 && cache.isCached(cacheKey, 0, contentLength)
     }.getOrDefault(false)
 
+    /** Drops every cached byte of one song (5.2: its stream format changed). */
+    fun removeResource(cacheKey: String) {
+        runCatching { getOrCreateCache().removeResource(cacheKey) }
+    }
+
     /**
      * Deletes every cached byte (the real "Clear cache" action Spotify's
      * own storage settings expose — see class doc). Safe to call whether

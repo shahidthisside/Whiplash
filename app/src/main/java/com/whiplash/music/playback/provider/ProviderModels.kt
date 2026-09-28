@@ -31,6 +31,8 @@ data class ResolvedStream(
      * so callers try these in order and use the first that actually loads.
      */
     val resolvedArtworkCandidates: List<String> = listOfNotNull(resolvedArtworkUrl),
+    /** YouTube format id of the chosen audio (e.g. 251 Opus, 140 AAC), for pinning (5.2). */
+    val itag: Int? = null,
 )
 
 /**

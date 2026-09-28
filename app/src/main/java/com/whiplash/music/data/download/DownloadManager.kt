@@ -307,7 +307,9 @@ class DownloadManager(
         // genuinely fetches a smaller/lower-bitrate file, not just a
         // cosmetic label.
         val quality = settingsRepository?.downloadQuality?.first() ?: com.whiplash.music.domain.model.AudioQuality.AUTO
-        val streamResult = playbackManager.resolveStream(track, quality)
+        // useStreamChoices = false: a download is its own file at its own
+        // quality, so it never reuses or changes the streaming format (5.2).
+        val streamResult = playbackManager.resolveStream(track, quality, useStreamChoices = false)
         val resolved = when (streamResult) {
             is FallbackResult.Success -> streamResult.value
             is FallbackResult.Failure -> error("Stream resolution failed: ${streamResult.failure.message}")

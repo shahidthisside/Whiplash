@@ -74,7 +74,14 @@ class WhiplashPlaybackService : MediaSessionService() {
                 val videoId = cacheKey.substringAfter(':', missingDelimiterValue = cacheKey)
                 kotlinx.coroutines.runBlocking(Dispatchers.IO) {
                     val quality = app.settingsRepository.effectiveAudioQuality()
-                    runCatching { app.newPipePlaybackProvider.getStream(videoId, quality).streamUrl }.getOrNull()
+                    // Through PlaybackManager so the pinned format is kept (this
+                    // song's bytes may be mid-read from the cache) and a
+                    // still-valid URL is reused.
+                    val item = com.whiplash.music.domain.model.PlayableItem.YoutubeTrack(
+                        id = videoId, title = "", artist = "", album = null, artworkUri = null, durationMs = 0L,
+                    )
+                    (app.playbackManager.resolveStream(item, quality, keepAnyPinnedFormat = true)
+                        as? com.whiplash.music.playback.provider.FallbackResult.Success)?.value?.streamUrl
                 }
             },
         )

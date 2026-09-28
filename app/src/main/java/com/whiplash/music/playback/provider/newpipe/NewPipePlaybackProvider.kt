@@ -44,7 +44,7 @@ class NewPipePlaybackProvider(
 
     override fun supports(item: PlayableItem): Boolean = item is PlayableItem.YoutubeTrack
 
-    override suspend fun getStream(songId: String, quality: AudioQuality): ResolvedStream = withContext(Dispatchers.IO) {
+    override suspend fun getStream(songId: String, quality: AudioQuality, preferredItag: Int?): ResolvedStream = withContext(Dispatchers.IO) {
         runCatchingProviderFailure {
             val youtube = NewPipe.getService(YOUTUBE_SERVICE_NAME)
             val streamInfo = StreamInfo.getInfo(youtube, watchUrlFor(songId))
@@ -55,7 +55,22 @@ class NewPipePlaybackProvider(
                     "No audio stream returned for $songId",
                 )
             }
-            val selected = selectAudioStream(audioStreams, quality)
+            // 5.6: only the plain music audio (original track, plain file),
+            // never an empty list. Timed so the logs show it costs nothing.
+            val rankStartNs = System.nanoTime()
+            val pool = preferredAudioPool(audioStreams)
+            // 5.2: keep the format this song was played in before, if it's
+            // still offered. Matched inside the pool: a dubbed track can share
+            // the same itag as the original.
+            val selected = preferredItag
+                ?.let { itag -> pool.firstOrNull { it.itag == itag && !it.content.isNullOrBlank() } }
+                ?: selectAudioStream(pool, quality)
+            Log.i(
+                TAG,
+                "$songId: ${audioStreams.size} audio streams -> ${pool.size} preferred, " +
+                    "itag ${selected.itag} (${selected.audioTrackType ?: "unlabelled"}), " +
+                    "ranked in ${(System.nanoTime() - rankStartNs) / 1000} µs",
+            )
 
             val url = selected.content
             if (url.isNullOrBlank()) {
@@ -70,12 +85,10 @@ class NewPipePlaybackProvider(
                 // NewPipe reports AudioStream.averageBitrate in kbps
                 // (e.g. 160), so convert to the bps this field promises.
                 bitrateBps = selected.averageBitrate.takeIf { it > 0 }?.let { it * 1000 },
-                // NewPipeExtractor does not expose an explicit expiry, but
-                // resolved googlevideo.com URLs are time-limited in
-                // practice; treat any URL as stale after this window so a
-                // long-idle queue entry gets a fresh resolve rather than a
-                // stale-link playback failure at the moment of use.
-                expiresAtEpochMs = System.currentTimeMillis() + STREAM_ASSUMED_TTL_MS,
+                // googlevideo URLs carry their real expiry (`expire=`, epoch
+                // seconds). Fall back to a short assumed window if it's missing.
+                expiresAtEpochMs = com.whiplash.music.playback.provider.StreamChoiceStore.parseExpiryMs(url)
+                    ?: (System.currentTimeMillis() + STREAM_ASSUMED_TTL_MS),
                 providerId = id,
                 // The full watch-page response (streamInfo) usually has a
                 // higher-resolution thumbnail than the search result item
@@ -84,9 +97,28 @@ class NewPipePlaybackProvider(
                 // upgrade the displayed artwork once this resolves.
                 resolvedArtworkUrl = streamInfo.thumbnails.maxByOrNull { it.height }?.url,
                 resolvedArtworkCandidates = streamInfo.thumbnails.sortedByDescending { it.height }.mapNotNull { it.url }.distinct(),
+                itag = selected.itag.takeIf { it > 0 },
             )
         }
     }
+
+    private fun preferredAudioPool(streams: List<AudioStream>): List<AudioStream> =
+        com.whiplash.music.playback.provider.AudioStreamRanking.preferredPool(
+            streams.map { s ->
+                com.whiplash.music.playback.provider.AudioStreamRanking.Candidate(
+                    stream = s,
+                    kind = when (s.audioTrackType) {
+                        org.schabi.newpipe.extractor.stream.AudioTrackType.ORIGINAL -> com.whiplash.music.playback.provider.AudioStreamRanking.Kind.ORIGINAL
+                        org.schabi.newpipe.extractor.stream.AudioTrackType.DUBBED -> com.whiplash.music.playback.provider.AudioStreamRanking.Kind.DUBBED
+                        org.schabi.newpipe.extractor.stream.AudioTrackType.SECONDARY -> com.whiplash.music.playback.provider.AudioStreamRanking.Kind.SECONDARY
+                        org.schabi.newpipe.extractor.stream.AudioTrackType.DESCRIPTIVE -> com.whiplash.music.playback.provider.AudioStreamRanking.Kind.DESCRIPTIVE
+                        null -> com.whiplash.music.playback.provider.AudioStreamRanking.Kind.UNLABELLED
+                    },
+                    progressive = s.deliveryMethod == org.schabi.newpipe.extractor.stream.DeliveryMethod.PROGRESSIVE_HTTP,
+                    hasUrl = !s.content.isNullOrBlank(),
+                )
+            },
+        ).ifEmpty { streams }
 
     /**
      * Picks the audio stream closest to the requested [quality] tier

@@ -19,7 +19,20 @@ import com.whiplash.music.domain.model.PlayableItem
  * this list — no call-site changes (section 7: "architecture must make
  * future providers easy to add").
  */
-class PlaybackManager(private val providers: List<PlaybackProvider>) {
+class PlaybackManager(
+    private val providers: List<PlaybackProvider>,
+    /** 5.2: pinned formats and still-valid URLs. Null disables both (plain resolve every time). */
+    private val streamChoices: StreamChoiceStore? = null,
+    /**
+     * Called before a stream is returned whose format might not match the
+     * song's cached bytes: [knownChange] true when it differs from the pinned
+     * format (quality setting changed, or YouTube stopped offering it), false
+     * when there was no pin yet (bytes cached before pinning existed). The
+     * app drops that song's partial cached audio here so bytes of two
+     * different files never mix.
+     */
+    private val onFormatChanged: (videoId: String, knownChange: Boolean) -> Unit = { _, _ -> },
+) {
 
     init {
         require(providers.isNotEmpty()) { "PlaybackManager requires at least one provider" }
@@ -34,7 +47,29 @@ class PlaybackManager(private val providers: List<PlaybackProvider>) {
      * deleted/private content) stops immediately since every provider would
      * fail identically.
      */
-    suspend fun resolveStream(item: PlayableItem, quality: AudioQuality = AudioQuality.AUTO): FallbackResult<ResolvedStream> {
+    suspend fun resolveStream(
+        item: PlayableItem,
+        quality: AudioQuality = AudioQuality.AUTO,
+        /**
+         * Keep whatever format is pinned even if it was chosen under another
+         * quality setting. Used when refetching a URL for a song that may be
+         * reading from the disk cache right now, where changing format isn't
+         * safe.
+         */
+        keepAnyPinnedFormat: Boolean = false,
+        /**
+         * False for downloads: they save their own separate file at their own
+         * quality, so they must neither reuse nor change the streaming choice.
+         */
+        useStreamChoices: Boolean = true,
+    ): FallbackResult<ResolvedStream> {
+        val store = streamChoices.takeIf { useStreamChoices }
+        store?.freshUrl(item.id, quality, item.durationMs)?.let { reused ->
+            Log.i(TAG, "Reusing still-valid stream for ${item.id} (itag ${reused.itag})")
+            return FallbackResult.Success(reused, attempts = emptyList())
+        }
+        val pin = store?.pin(item.id)
+        val preferredItag = if (keepAnyPinnedFormat) pin?.itag else store?.pinnedItag(item.id, quality)
         val candidates = providers.filter { it.supports(item) }
         if (candidates.isEmpty()) {
             return FallbackResult.Failure(
@@ -53,8 +88,17 @@ class PlaybackManager(private val providers: List<PlaybackProvider>) {
             }
 
             try {
-                val stream = provider.getStream(item.id, quality)
+                val stream = provider.getStream(item.id, quality, preferredItag)
                 attempts += ProviderAttempt(provider.id, skipped = false, failure = null)
+                if (store != null) {
+                    if (pin == null) {
+                        runCatching { onFormatChanged(item.id, false) }
+                    } else if (stream.itag != null && stream.itag != pin.itag) {
+                        Log.i(TAG, "${item.id}: format ${pin.itag} -> ${stream.itag}, dropping its cached audio")
+                        runCatching { onFormatChanged(item.id, true) }
+                    }
+                    store.remember(item.id, quality, stream)
+                }
                 return FallbackResult.Success(stream, attempts)
             } catch (failure: ProviderFailure) {
                 attempts += ProviderAttempt(provider.id, skipped = false, failure = failure)
@@ -72,6 +116,11 @@ class PlaybackManager(private val providers: List<PlaybackProvider>) {
         val lastFailure = attempts.lastOrNull { it.failure != null }?.failure
             ?: ProviderFailure.UnknownPlaybackFailure("All providers unavailable for ${item.id}")
         return FallbackResult.Failure(lastFailure, attempts)
+    }
+
+    /** The URL resolved for [videoId] failed in the player (expired/403): don't reuse it. */
+    fun invalidateStream(videoId: String) {
+        streamChoices?.invalidateUrl(videoId)
     }
 
     /** Same fallback algorithm, for metadata resolution. */
