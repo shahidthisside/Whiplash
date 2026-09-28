@@ -84,4 +84,7 @@ interface ReplayTallyDao {
 
     @Query("DELETE FROM replay_tally")
     suspend fun clear()
+
+    @Query("DELETE FROM replay_tally WHERE monthKey = :monthKey AND trackId = :trackId")
+    suspend fun deleteRow(monthKey: String, trackId: String)
 }

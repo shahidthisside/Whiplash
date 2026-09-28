@@ -166,10 +166,32 @@ class WhiplashApplication : Application() {
         com.whiplash.music.data.download.DeviceExporter(this, database.downloadDao())
     }
 
+    /** Optional Google Drive sync (Settings > Account & sync). */
+    val cloudSyncManager: com.whiplash.music.data.sync.CloudSyncManager by lazy {
+        com.whiplash.music.data.sync.CloudSyncManager(
+            context = this,
+            settingsRepository = settingsRepository,
+            database = database,
+            lyricOffsetStore = lyricOffsetStore,
+            localStore = com.whiplash.music.data.sync.LocalSyncStore(database, backupManager, lyricOffsetStore, profileStore) { id ->
+                libraryRepository.deletePlaylist(id)
+            },
+            drive = com.whiplash.music.data.sync.DriveAppDataClient(okHttpClient),
+            auth = com.whiplash.music.data.sync.GoogleDriveAuth(this),
+            profileStore = profileStore,
+        )
+    }
+
+    private val profileStore: com.whiplash.music.data.sync.ProfileStore by lazy {
+        com.whiplash.music.data.sync.ProfileStore(this)
+    }
+
     override fun onCreate() {
         super.onCreate()
         NewPipe.init(OkHttpNewPipeDownloader(okHttpClient))
         playbackController.connect()
+        // Does nothing until the user turns on Account & sync and signs in.
+        cloudSyncManager.start()
 
         // Clean up any download left in an inconsistent state by a
         // process death mid-download (section: offline downloads) —

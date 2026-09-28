@@ -12,6 +12,14 @@ interface HistoryDao {
     @Insert
     suspend fun insert(entry: HistoryEntity)
 
+    /** Every online play (cloud sync reads the whole table). */
+    @Query("SELECT * FROM history WHERE source IN ('YOUTUBE', 'DOWNLOAD')")
+    suspend fun getAllOnline(): List<HistoryEntity>
+
+    /** Removes one play of a song (cloud sync applying a deletion from another device). */
+    @Query("DELETE FROM history WHERE trackId = :trackId AND source IN ('YOUTUBE', 'DOWNLOAD') AND playedAtEpochMs = :playedAtEpochMs")
+    suspend fun deletePlay(trackId: String, playedAtEpochMs: Long)
+
     /**
      * Most recent play per distinct track, newest first — YOUTUBE/DOWNLOAD
      * only.

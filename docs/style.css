@@ -1,0 +1,17 @@
+:root { color-scheme: dark light; --bg: #0b0b0c; --fg: #ecebe6; --muted: #a3a29c; --accent: #7cc4ff; --card: #17171a; }
+@media (prefers-color-scheme: light) { :root { --bg: #fafaf8; --fg: #1a1a1c; --muted: #5d5d62; --accent: #0b64b3; --card: #efefec; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 720px; margin: 0 auto; padding: 48px 20px 64px; }
+h1 { font-size: 2.2rem; margin: 0 0 8px; }
+h2 { font-size: 1.2rem; margin: 32px 0 8px; }
+a { color: var(--accent); }
+code { background: var(--card); padding: 1px 6px; border-radius: 6px; font-size: 0.9em; }
+.muted, .back { color: var(--muted); }
+.back a { color: var(--muted); text-decoration: none; }
+.lead { font-size: 1.15rem; color: var(--muted); }
+.actions { margin: 28px 0; display: flex; gap: 12px; flex-wrap: wrap; }
+.button { display: inline-block; padding: 12px 22px; border-radius: 999px; background: var(--fg); color: var(--bg); text-decoration: none; font-weight: 600; }
+.button.ghost { background: var(--card); color: var(--fg); }
+footer { margin-top: 48px; color: var(--muted); font-size: 0.9rem; }
+footer a { color: var(--muted); }

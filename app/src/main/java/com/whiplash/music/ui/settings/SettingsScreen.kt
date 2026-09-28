@@ -31,6 +31,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.AlternateEmail
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Search
@@ -156,6 +163,146 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val backupResult by viewModel.backupResult.collectAsState()
 
     var showRestoreConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<android.net.Uri?>(null) }
+
+    // Optional Google account sync (Settings > Account & sync).
+    val cloudSync = app.cloudSyncManager
+    val cloudSyncEnabled by app.settingsRepository.cloudSyncEnabled.collectAsState(initial = null)
+    val showAccountEmail by app.settingsRepository.showAccountEmail.collectAsState(initial = true)
+    val cloudScope = androidx.compose.runtime.rememberCoroutineScope()
+    val rawCloudState by cloudSync.state.collectAsState()
+    val customProfile by cloudSync.profileStore.profile.collectAsState()
+    // Your Whiplash name and photo, when set, replace Google's everywhere in the app.
+    val cloudState = rawCloudState.copy(
+        account = rawCloudState.account?.let { a ->
+            a.copy(
+                name = customProfile?.name ?: a.name,
+                photoUrl = cloudSync.profileStore.photoFile()?.takeIf { customProfile?.photoJpeg != null }?.path ?: a.photoUrl,
+            )
+        },
+    )
+    val photoVersion = customProfile?.updatedAtEpochMs ?: 0L
+    var showEditNameDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) {
+            cloudScope.launch {
+                val ok = cloudSync.profileStore.setPhoto(context, uri)
+                com.whiplash.music.ui.common.ToastController.show(if (ok) "Profile photo updated" else "Couldn't use that picture")
+            }
+        }
+    }
+    val pickPhoto: () -> Unit = {
+        runCatching {
+            photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }.onFailure { com.whiplash.music.ui.common.ToastController.show("No photo picker on this device") }
+    }
+
+    if (showEditNameDialog) {
+        com.whiplash.music.ui.theme.GlassTextInputDialog(
+            title = "Edit name",
+            initialValue = cloudState.account?.name.orEmpty(),
+            placeholder = "Your name",
+            onConfirm = { name ->
+                showEditNameDialog = false
+                cloudSync.profileStore.setName(name)
+                com.whiplash.music.ui.common.ToastController.show("Name updated")
+            },
+            onDismiss = { showEditNameDialog = false },
+        )
+    }
+    var showCloudOffConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showSignOutConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showDeleteCloudConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val signInLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            cloudScope.launch { showSignInResult(cloudSync.finishSignIn(result.data)) }
+        } else {
+            cloudSync.cancelSignIn()
+        }
+    }
+    val startSignIn: () -> Unit = {
+        cloudScope.launch {
+            when (val step = cloudSync.beginSignIn()) {
+                is com.whiplash.music.data.sync.CloudSyncManager.SignInStep.NeedsUi -> runCatching {
+                    signInLauncher.launch(androidx.activity.result.IntentSenderRequest.Builder(step.intent).build())
+                }.onFailure {
+                    cloudSync.cancelSignIn()
+                    com.whiplash.music.ui.common.ToastController.show("Couldn't sign in")
+                }
+                else -> showSignInResult(step)
+            }
+        }
+    }
+    val syncNow: () -> Unit = {
+        cloudScope.launch {
+            when (val r = cloudSync.sync()) {
+                com.whiplash.music.data.sync.CloudSyncManager.SyncResult.Synced -> com.whiplash.music.ui.common.ToastController.show("Library synced")
+                is com.whiplash.music.data.sync.CloudSyncManager.SyncResult.Failed -> com.whiplash.music.ui.common.ToastController.show(r.message)
+            }
+        }
+    }
+    val setCloudSyncEnabled: (Boolean) -> Unit = { enabled ->
+        if (!enabled && cloudState.account != null) {
+            showCloudOffConfirm = true
+        } else {
+            cloudScope.launch { app.settingsRepository.setCloudSyncEnabled(enabled) }
+        }
+    }
+
+    if (showCloudOffConfirm) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Turn off Account & sync?",
+            message = "You'll be signed out. Your library stays on this phone and in your Google Drive.",
+            confirmLabel = "Turn off",
+            destructive = false,
+            onConfirm = {
+                showCloudOffConfirm = false
+                cloudScope.launch {
+                    app.settingsRepository.setCloudSyncEnabled(false)
+                    cloudSync.signOut()
+                }
+            },
+            onDismiss = { showCloudOffConfirm = false },
+        )
+    }
+
+    if (showSignOutConfirm) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Sign out?",
+            message = "Your library stays on this phone and in your Google Drive.",
+            confirmLabel = "Sign out",
+            destructive = false,
+            onConfirm = {
+                showSignOutConfirm = false
+                cloudScope.launch {
+                    cloudSync.signOut()
+                    com.whiplash.music.ui.common.ToastController.show("Signed out")
+                }
+            },
+            onDismiss = { showSignOutConfirm = false },
+        )
+    }
+
+    if (showDeleteCloudConfirm) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Delete synced data?",
+            message = "This removes your Whiplash data from Google Drive and signs you out. This phone keeps everything.",
+            confirmLabel = "Delete",
+            onConfirm = {
+                showDeleteCloudConfirm = false
+                cloudScope.launch {
+                    when (val r = cloudSync.deleteCloudCopy()) {
+                        com.whiplash.music.data.sync.CloudSyncManager.SyncResult.Synced -> com.whiplash.music.ui.common.ToastController.show("Synced data deleted")
+                        is com.whiplash.music.data.sync.CloudSyncManager.SyncResult.Failed -> com.whiplash.music.ui.common.ToastController.show(r.message)
+                    }
+                }
+            },
+            onDismiss = { showDeleteCloudConfirm = false },
+        )
+    }
 
     // Advanced backup category selection — replaces the old unconditional
     // "back up literally everything" tap-and-go flow with real per-
@@ -871,6 +1018,125 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                 }
             }
 
+            if (SettingsSection.ACCOUNT in sections) {
+                item(key = "section:ACCOUNT") {
+                    if (flat) {
+                        SectionLabel(SettingsSection.ACCOUNT.label)
+                        Spacer(Modifier.height(GlassTokens.spaceSm))
+                    }
+                    val enabled = cloudSyncEnabled == true
+                    val signedIn = cloudState.account != null
+                    Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceLg)) {
+                        if (enabled && shown(SettingEntry.ACCOUNT_SYNC)) {
+                            SettingsCardColumn(SettingsSection.ACCOUNT) {
+                                Box(Modifier.padding(horizontal = 16.dp, vertical = 20.dp)) {
+                                    if (signedIn) {
+                                        AccountProfileHero(
+                                            state = cloudState,
+                                            onSyncNow = syncNow,
+                                            onSignOut = { showSignOutConfirm = true },
+                                            onSignInAgain = startSignIn,
+                                            onEditPhoto = pickPhoto,
+                                            onEditName = { showEditNameDialog = true },
+                                            photoVersion = photoVersion,
+                                            showEmail = showAccountEmail,
+                                        )
+                                    } else {
+                                        AccountSignInPrompt(cloudState, startSignIn)
+                                    }
+                                }
+                            }
+                        }
+                        SettingsCardColumn(SettingsSection.ACCOUNT) {
+                            val rows = SettingsRowCounter()
+                            if (shown(SettingEntry.ACCOUNT_SYNC)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingToggleRow(
+                                        title = "Account & sync",
+                                        icon = Icons.Filled.CloudSync,
+                                        subtitle = "Sign in with Google to sync your library between devices. Off hides it and stops all syncing.",
+                                        checked = enabled,
+                                        onCheckedChange = setCloudSyncEnabled,
+                                    )
+                                }
+                            }
+                            if (enabled && signedIn && shown(SettingEntry.AUTO_SYNC)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingToggleRow(
+                                        title = "Auto-sync",
+                                        icon = Icons.Filled.Sync,
+                                        subtitle = "Sync changes in the background while Whiplash is open.",
+                                        checked = cloudState.autoSync,
+                                        onCheckedChange = cloudSync::setAutoSync,
+                                    )
+                                }
+                            }
+                            if (enabled && signedIn && shown(SettingEntry.SHOW_EMAIL)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingToggleRow(
+                                        title = "Show email",
+                                        icon = Icons.Filled.AlternateEmail,
+                                        subtitle = "Show your email address on your profile in Settings.",
+                                        checked = showAccountEmail,
+                                        onCheckedChange = { show -> cloudScope.launch { app.settingsRepository.setShowAccountEmail(show) } },
+                                    )
+                                }
+                            }
+                            if (enabled && signedIn && shown(SettingEntry.PROFILE)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingActionRow(
+                                        title = "Edit name",
+                                        icon = Icons.Filled.Badge,
+                                        subtitle = cloudState.account?.name ?: "Add a name",
+                                        onClick = { showEditNameDialog = true },
+                                    )
+                                }
+                                SettingItem(divider = rows.next()) {
+                                    SettingActionRow(
+                                        title = "Change profile photo",
+                                        icon = Icons.Filled.AccountCircle,
+                                        subtitle = "Pick a picture from your gallery.",
+                                        onClick = pickPhoto,
+                                    )
+                                }
+                                if (customProfile?.name != null || customProfile?.photoJpeg != null) {
+                                    SettingItem(divider = rows.next()) {
+                                        SettingActionRow(
+                                            title = "Use Google name and photo",
+                                            icon = Icons.Filled.Restore,
+                                            subtitle = "Undo your changes to the profile.",
+                                            onClick = {
+                                                cloudSync.profileStore.reset()
+                                                com.whiplash.music.ui.common.ToastController.show("Profile reset")
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                            if (enabled && shown(SettingEntry.ACCOUNT_SYNC)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingRow(
+                                        title = "What syncs",
+                                        icon = Icons.Filled.Info,
+                                        subtitle = "Playlists, favourites, history, Speed dial, Monthly Replay, lyric timing and settings. Downloaded songs and gallery covers stay on each device.",
+                                    )
+                                }
+                            }
+                            if (enabled && signedIn && shown(SettingEntry.ACCOUNT_SYNC)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingActionRow(
+                                        title = "Delete synced data",
+                                        icon = Icons.Filled.CloudOff,
+                                        subtitle = "Remove your Whiplash data from Google Drive.",
+                                        onClick = { showDeleteCloudConfirm = true },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if (SettingsSection.STORAGE in sections) {
                 item(key = "section:STORAGE") {
                     if (flat) {
@@ -1103,7 +1369,24 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     "$cache · $downloads"
                                 }
                                 SettingsSection.BACKUP -> formatLastBackupSubtitle(lastBackupTimeMs).removeSuffix(".")
+                                SettingsSection.ACCOUNT -> accountFolderSummary(cloudSyncEnabled == true, cloudState, showAccountEmail)
                             }
+                        },
+                        // Drawn inside the first group's list item rather than as its own
+                        // item, so the list stays at the top when the card appears.
+                        header = if (cloudSyncEnabled == true) {
+                            {
+                                AccountHeaderCard(
+                                    state = cloudState,
+                                    cardColor = settingsCardColor(),
+                                    onOpen = { openSection = SettingsSection.ACCOUNT },
+                                    onSignIn = startSignIn,
+                                    photoVersion = photoVersion,
+                                    showEmail = showAccountEmail,
+                                )
+                            }
+                        } else {
+                            null
                         },
                         onOpen = { openSection = it },
                         onQuit = { showQuitConfirm = true },
@@ -1773,6 +2056,7 @@ private fun SettingsSection.folderIcon(): ImageVector = when (this) {
     SettingsSection.APPEARANCE -> Icons.Filled.Palette
     SettingsSection.STORAGE -> Icons.Filled.SdStorage
     SettingsSection.BACKUP -> Icons.Filled.Backup
+    SettingsSection.ACCOUNT -> Icons.Filled.CloudSync
 }
 
 private fun SettingsSection.folderTint(): androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color(
@@ -1785,6 +2069,7 @@ private fun SettingsSection.folderTint(): androidx.compose.ui.graphics.Color = a
         SettingsSection.APPEARANCE -> 0xFFC29BFF
         SettingsSection.STORAGE -> 0xFF9DB0BA
         SettingsSection.BACKUP -> 0xFFF59BBE
+        SettingsSection.ACCOUNT -> 0xFF7CC4FF
     },
 )
 
@@ -1800,6 +2085,7 @@ private fun SettingsFolderList(
     onOpen: (SettingsSection) -> Unit,
     onQuit: () -> Unit,
     modifier: Modifier = Modifier,
+    header: (@Composable () -> Unit)? = null,
 ) {
     val cardColor = settingsCardColor()
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.large)
@@ -1817,6 +2103,10 @@ private fun SettingsFolderList(
         SettingsGroup.entries.forEach { group ->
             item(key = "group:${group.name}") {
                 Column {
+                    if (header != null && group == SettingsGroup.entries.first()) {
+                        header()
+                        Spacer(Modifier.height(GlassTokens.spaceLg))
+                    }
                     Text(
                         text = group.label.uppercase(),
                         style = MaterialTheme.typography.labelMedium.copy(
@@ -2072,4 +2362,14 @@ private fun quitApp(activity: android.app.Activity) {
     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
         android.os.Process.killProcess(android.os.Process.myPid())
     }, 600L)
+}
+
+/** Toast for the end of a sign-in attempt. */
+private fun showSignInResult(step: com.whiplash.music.data.sync.CloudSyncManager.SignInStep) {
+    val message = when (step) {
+        is com.whiplash.music.data.sync.CloudSyncManager.SignInStep.Done -> "Signed in as ${step.account.email}"
+        is com.whiplash.music.data.sync.CloudSyncManager.SignInStep.Failed -> step.message
+        is com.whiplash.music.data.sync.CloudSyncManager.SignInStep.NeedsUi -> "Couldn't sign in"
+    }
+    com.whiplash.music.ui.common.ToastController.show(message)
 }

@@ -296,63 +296,7 @@ class BackupManager(
             }
 
             if (BackupCategory.SETTINGS in categories) {
-                categoryPayloads[BackupCategory.SETTINGS] = JSONArray().put(
-                    JSONObject().apply {
-                        put("audioQuality", settingsRepository.audioQuality.first().name)
-                        put("downloadQuality", settingsRepository.downloadQuality.first().name)
-                        put("autoplayEnabled", settingsRepository.autoplayEnabled.first())
-                        put("themeVariant", settingsRepository.themeVariant.first().name)
-                        put("appTheme", settingsRepository.appTheme.first().name)
-                        settingsRepository.customThemeColors.first().let { c ->
-                            put("customThemeBackground", c.background.toArgb())
-                            put("customThemeAccent", c.accent.toArgb())
-                            put("glassBackground", c.glassBackground.name)
-                            put("glassBackgroundColor", c.glassColor.toArgb())
-                        }
-                        put("glassOpacity", settingsRepository.glassOpacity.first().toDouble())
-                        put("glassLens", settingsRepository.glassLens.first().toDouble())
-                        put("seekBarStyle", settingsRepository.seekBarStyle.first().name)
-                        put("crossfadeDurationMs", settingsRepository.crossfadeDurationMs.first())
-                        put("gaplessEnabled", settingsRepository.gaplessEnabled.first())
-                        put("playbackSpeed", settingsRepository.playbackSpeed.first().toDouble())
-                        put("audioCacheEnabled", settingsRepository.audioCacheEnabled.first())
-                        // Real silent data-loss gap this closes: these four
-                        // real, user-facing settings were simply absent from
-                        // the SETTINGS payload (and from the restore side),
-                        // so a user who had enabled Skip Silence or
-                        // Per-Network Quality — including their separate
-                        // Wi-Fi/cellular quality tiers — silently lost those
-                        // choices on any reinstall-and-restore, with the
-                        // backup reporting complete success. Added purely
-                        // additively: an older backup file that lacks these
-                        // keys still restores exactly as before, because the
-                        // restore side reads each one only if present.
-                        put("skipSilenceEnabled", settingsRepository.skipSilenceEnabled.first())
-                        put("statsForNerdsEnabled", settingsRepository.statsForNerdsEnabled.first())
-                        put("downloadWifiOnly", settingsRepository.downloadWifiOnly.first())
-                        put("reduceAnimations", settingsRepository.reduceAnimations.first())
-                        put("playerArtworkColors", settingsRepository.playerArtworkColors.first())
-                        put("playerLyricStrip", settingsRepository.playerLyricStrip.first())
-                        put("lyricsSource", settingsRepository.lyricsSource.first().name)
-                        put("lyricsBlurUnfocused", settingsRepository.lyricsBlurUnfocused.first())
-                        put("speedDialListView", settingsRepository.speedDialListView.first())
-                        put("quickPicksGridView", settingsRepository.quickPicksGridView.first())
-                        put("quickPicksGridCount", settingsRepository.quickPicksGridCount.first())
-                        put("playlistsListView", settingsRepository.playlistsListView.first())
-                        put("homeShelvesEnabled", settingsRepository.homeShelvesEnabled.first())
-                        put("exploreEnabled", settingsRepository.exploreEnabled.first())
-                        put("replayEnabled", settingsRepository.replayEnabled.first())
-                        put("playerHeroArtwork", settingsRepository.playerHeroArtwork.first())
-                        put("perNetworkQualityEnabled", settingsRepository.perNetworkQualityEnabled.first())
-                        put("audioQualityWifi", settingsRepository.audioQualityWifi.first().name)
-                        put("audioQualityCellular", settingsRepository.audioQualityCellular.first().name)
-                        // Per-track lyrics timing corrections, as a trackId -> ms
-                        // object. Only non-zero offsets exist, so this stays small.
-                        lyricOffsetStore?.let { store ->
-                            put("lyricOffsets", JSONObject(store.offsets.value.mapValues { it.value }))
-                        }
-                    }
-                )
+                categoryPayloads[BackupCategory.SETTINGS] = JSONArray().put(settingsJson())
             }
 
             // Every song id any selected category referenced, resolved
@@ -402,6 +346,171 @@ class BackupManager(
             } ?: return@withContext false
             true
         }.onFailure { Log.w(TAG, "backupSelective() failed", it) }.getOrDefault(false)
+    }
+
+
+    /**
+     * Every user setting as one flat JSON object — the SETTINGS payload of a
+     * selective backup, and the settings half of cloud sync
+     * ([com.whiplash.music.data.sync.CloudSyncManager]).
+     */
+    suspend fun settingsJson(): JSONObject = JSONObject().apply {
+        put("audioQuality", settingsRepository.audioQuality.first().name)
+        put("downloadQuality", settingsRepository.downloadQuality.first().name)
+        put("autoplayEnabled", settingsRepository.autoplayEnabled.first())
+        put("themeVariant", settingsRepository.themeVariant.first().name)
+        put("appTheme", settingsRepository.appTheme.first().name)
+        settingsRepository.customThemeColors.first().let { c ->
+            put("customThemeBackground", c.background.toArgb())
+            put("customThemeAccent", c.accent.toArgb())
+            put("glassBackground", c.glassBackground.name)
+            put("glassBackgroundColor", c.glassColor.toArgb())
+        }
+        put("glassOpacity", settingsRepository.glassOpacity.first().toDouble())
+        put("glassLens", settingsRepository.glassLens.first().toDouble())
+        put("seekBarStyle", settingsRepository.seekBarStyle.first().name)
+        put("crossfadeDurationMs", settingsRepository.crossfadeDurationMs.first())
+        put("gaplessEnabled", settingsRepository.gaplessEnabled.first())
+        put("playbackSpeed", settingsRepository.playbackSpeed.first().toDouble())
+        put("audioCacheEnabled", settingsRepository.audioCacheEnabled.first())
+        // Real silent data-loss gap this closes: these four
+        // real, user-facing settings were simply absent from
+        // the SETTINGS payload (and from the restore side),
+        // so a user who had enabled Skip Silence or
+        // Per-Network Quality — including their separate
+        // Wi-Fi/cellular quality tiers — silently lost those
+        // choices on any reinstall-and-restore, with the
+        // backup reporting complete success. Added purely
+        // additively: an older backup file that lacks these
+        // keys still restores exactly as before, because the
+        // restore side reads each one only if present.
+        put("skipSilenceEnabled", settingsRepository.skipSilenceEnabled.first())
+        put("statsForNerdsEnabled", settingsRepository.statsForNerdsEnabled.first())
+        put("downloadWifiOnly", settingsRepository.downloadWifiOnly.first())
+        put("reduceAnimations", settingsRepository.reduceAnimations.first())
+        put("playerArtworkColors", settingsRepository.playerArtworkColors.first())
+        put("playerLyricStrip", settingsRepository.playerLyricStrip.first())
+        put("lyricsSource", settingsRepository.lyricsSource.first().name)
+        put("lyricsBlurUnfocused", settingsRepository.lyricsBlurUnfocused.first())
+        put("speedDialListView", settingsRepository.speedDialListView.first())
+        put("quickPicksGridView", settingsRepository.quickPicksGridView.first())
+        put("quickPicksGridCount", settingsRepository.quickPicksGridCount.first())
+        put("playlistsListView", settingsRepository.playlistsListView.first())
+        put("homeShelvesEnabled", settingsRepository.homeShelvesEnabled.first())
+        put("exploreEnabled", settingsRepository.exploreEnabled.first())
+        put("replayEnabled", settingsRepository.replayEnabled.first())
+        put("playerHeroArtwork", settingsRepository.playerHeroArtwork.first())
+        put("perNetworkQualityEnabled", settingsRepository.perNetworkQualityEnabled.first())
+        put("audioQualityWifi", settingsRepository.audioQualityWifi.first().name)
+        put("audioQualityCellular", settingsRepository.audioQualityCellular.first().name)
+        // Per-track lyrics timing corrections, as a trackId -> ms
+        // object. Only non-zero offsets exist, so this stays small.
+        lyricOffsetStore?.let { store ->
+            put("lyricOffsets", JSONObject(store.offsets.value.mapValues { it.value }))
+        }
+    }
+
+    /**
+     * Applies a [settingsJson]-shaped object. Keys that are missing are left
+     * unchanged, so a partial object (cloud sync sends only what changed)
+     * touches only those settings.
+     */
+    suspend fun applySettings(s: JSONObject) {
+        runCatching { settingsRepository.setAudioQuality(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("audioQuality"))) }
+        runCatching { settingsRepository.setDownloadQuality(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("downloadQuality"))) }
+        runCatching { settingsRepository.setAutoplayEnabled(s.getBoolean("autoplayEnabled")) }
+        runCatching { settingsRepository.setThemeVariant(com.whiplash.music.ui.theme.ThemeVariant.valueOf(s.getString("themeVariant"))) }
+        runCatching { settingsRepository.setAppTheme(com.whiplash.music.ui.theme.AppTheme.valueOf(s.getString("appTheme"))) }
+        runCatching {
+            settingsRepository.setCustomThemeColors(
+                com.whiplash.music.ui.theme.CustomThemeColors(
+                    background = androidx.compose.ui.graphics.Color(s.getInt("customThemeBackground")),
+                    accent = androidx.compose.ui.graphics.Color(s.getInt("customThemeAccent")),
+                    glassBackground = s.optString("glassBackground").let { name ->
+                        runCatching { com.whiplash.music.ui.theme.GlassBackground.valueOf(name) }.getOrNull()
+                    } ?: com.whiplash.music.ui.theme.GlassBackground.NOW_PLAYING,
+                    glassColor = if (s.has("glassBackgroundColor")) androidx.compose.ui.graphics.Color(s.getInt("glassBackgroundColor")) else com.whiplash.music.ui.theme.CustomThemeColors().glassColor,
+                ),
+            )
+        }
+        runCatching { settingsRepository.setGlassOpacity(s.getDouble("glassOpacity").toFloat()) }
+        runCatching { settingsRepository.setGlassLens(s.getDouble("glassLens").toFloat()) }
+        runCatching { settingsRepository.setSeekBarStyle(com.whiplash.music.ui.theme.SeekBarStyle.valueOf(s.getString("seekBarStyle"))) }
+        runCatching { settingsRepository.setCrossfadeDurationMs(s.getInt("crossfadeDurationMs")) }
+        runCatching { settingsRepository.setGaplessEnabled(s.getBoolean("gaplessEnabled")) }
+        runCatching { settingsRepository.setPlaybackSpeed(s.getDouble("playbackSpeed").toFloat()) }
+        runCatching { settingsRepository.setAudioCacheEnabled(s.getBoolean("audioCacheEnabled")) }
+        // Restore side of the four settings that used to be
+        // omitted from backups entirely (see the backup payload's
+        // own comment). Each is guarded on the key being present
+        // so a backup taken before this fix restores unchanged
+        // rather than resetting these to their defaults.
+        s.optJSONObject("lyricOffsets")?.let { offsets ->
+            offsets.keys().forEach { trackId ->
+                runCatching { lyricOffsetStore?.setOffset(trackId, offsets.getLong(trackId)) }
+            }
+        }
+        if (s.has("playerHeroArtwork")) {
+            runCatching { settingsRepository.setPlayerHeroArtwork(s.getBoolean("playerHeroArtwork")) }
+        }
+        if (s.has("replayEnabled")) {
+            runCatching { settingsRepository.setReplayEnabled(s.getBoolean("replayEnabled")) }
+        }
+        if (s.has("exploreEnabled")) {
+            runCatching { settingsRepository.setExploreEnabled(s.getBoolean("exploreEnabled")) }
+        }
+        if (s.has("homeShelvesEnabled")) {
+            runCatching { settingsRepository.setHomeShelvesEnabled(s.getBoolean("homeShelvesEnabled")) }
+        }
+        if (s.has("playlistsListView")) {
+            runCatching { settingsRepository.setPlaylistsListView(s.getBoolean("playlistsListView")) }
+        }
+        if (s.has("quickPicksGridCount")) {
+            runCatching { settingsRepository.setQuickPicksGridCount(s.getInt("quickPicksGridCount")) }
+        }
+        if (s.has("quickPicksGridView")) {
+            runCatching { settingsRepository.setQuickPicksGridView(s.getBoolean("quickPicksGridView")) }
+        }
+        if (s.has("speedDialListView")) {
+            runCatching { settingsRepository.setSpeedDialListView(s.getBoolean("speedDialListView")) }
+        }
+        if (s.has("lyricsBlurUnfocused")) {
+            runCatching { settingsRepository.setLyricsBlurUnfocused(s.getBoolean("lyricsBlurUnfocused")) }
+        }
+        if (s.has("lyricsSource")) {
+            runCatching {
+                settingsRepository.setLyricsSource(
+                    com.whiplash.music.data.lyrics.LyricsSourcePreference.valueOf(s.getString("lyricsSource")),
+                )
+            }
+        }
+        if (s.has("playerLyricStrip")) {
+            runCatching { settingsRepository.setPlayerLyricStrip(s.getBoolean("playerLyricStrip")) }
+        }
+        if (s.has("playerArtworkColors")) {
+            runCatching { settingsRepository.setPlayerArtworkColors(s.getBoolean("playerArtworkColors")) }
+        }
+        if (s.has("reduceAnimations")) {
+            runCatching { settingsRepository.setReduceAnimations(s.getBoolean("reduceAnimations")) }
+        }
+        if (s.has("downloadWifiOnly")) {
+            runCatching { settingsRepository.setDownloadWifiOnly(s.getBoolean("downloadWifiOnly")) }
+        }
+        if (s.has("statsForNerdsEnabled")) {
+            runCatching { settingsRepository.setStatsForNerdsEnabled(s.getBoolean("statsForNerdsEnabled")) }
+        }
+        if (s.has("skipSilenceEnabled")) {
+            runCatching { settingsRepository.setSkipSilenceEnabled(s.getBoolean("skipSilenceEnabled")) }
+        }
+        if (s.has("perNetworkQualityEnabled")) {
+            runCatching { settingsRepository.setPerNetworkQualityEnabled(s.getBoolean("perNetworkQualityEnabled")) }
+        }
+        if (s.has("audioQualityWifi")) {
+            runCatching { settingsRepository.setAudioQualityWifi(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("audioQualityWifi"))) }
+        }
+        if (s.has("audioQualityCellular")) {
+            runCatching { settingsRepository.setAudioQualityCellular(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("audioQualityCellular"))) }
+        }
     }
 
     private fun WhiplashDatabase.query(sql: String, args: Array<Any?>?) =
@@ -466,104 +575,7 @@ class BackupManager(
             }
 
             json.optJSONArray(BackupCategory.SETTINGS.name)?.let { settingsArray ->
-                if (settingsArray.length() > 0) {
-                    val s = settingsArray.getJSONObject(0)
-                    runCatching { settingsRepository.setAudioQuality(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("audioQuality"))) }
-                    runCatching { settingsRepository.setDownloadQuality(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("downloadQuality"))) }
-                    runCatching { settingsRepository.setAutoplayEnabled(s.getBoolean("autoplayEnabled")) }
-                    runCatching { settingsRepository.setThemeVariant(com.whiplash.music.ui.theme.ThemeVariant.valueOf(s.getString("themeVariant"))) }
-                    runCatching { settingsRepository.setAppTheme(com.whiplash.music.ui.theme.AppTheme.valueOf(s.getString("appTheme"))) }
-                    runCatching {
-                        settingsRepository.setCustomThemeColors(
-                            com.whiplash.music.ui.theme.CustomThemeColors(
-                                background = androidx.compose.ui.graphics.Color(s.getInt("customThemeBackground")),
-                                accent = androidx.compose.ui.graphics.Color(s.getInt("customThemeAccent")),
-                                glassBackground = s.optString("glassBackground").let { name ->
-                                    runCatching { com.whiplash.music.ui.theme.GlassBackground.valueOf(name) }.getOrNull()
-                                } ?: com.whiplash.music.ui.theme.GlassBackground.NOW_PLAYING,
-                                glassColor = if (s.has("glassBackgroundColor")) androidx.compose.ui.graphics.Color(s.getInt("glassBackgroundColor")) else com.whiplash.music.ui.theme.CustomThemeColors().glassColor,
-                            ),
-                        )
-                    }
-                    runCatching { settingsRepository.setGlassOpacity(s.getDouble("glassOpacity").toFloat()) }
-                    runCatching { settingsRepository.setGlassLens(s.getDouble("glassLens").toFloat()) }
-                    runCatching { settingsRepository.setSeekBarStyle(com.whiplash.music.ui.theme.SeekBarStyle.valueOf(s.getString("seekBarStyle"))) }
-                    runCatching { settingsRepository.setCrossfadeDurationMs(s.getInt("crossfadeDurationMs")) }
-                    runCatching { settingsRepository.setGaplessEnabled(s.getBoolean("gaplessEnabled")) }
-                    runCatching { settingsRepository.setPlaybackSpeed(s.getDouble("playbackSpeed").toFloat()) }
-                    runCatching { settingsRepository.setAudioCacheEnabled(s.getBoolean("audioCacheEnabled")) }
-                    // Restore side of the four settings that used to be
-                    // omitted from backups entirely (see the backup payload's
-                    // own comment). Each is guarded on the key being present
-                    // so a backup taken before this fix restores unchanged
-                    // rather than resetting these to their defaults.
-                    s.optJSONObject("lyricOffsets")?.let { offsets ->
-                        offsets.keys().forEach { trackId ->
-                            runCatching { lyricOffsetStore?.setOffset(trackId, offsets.getLong(trackId)) }
-                        }
-                    }
-                    if (s.has("playerHeroArtwork")) {
-                        runCatching { settingsRepository.setPlayerHeroArtwork(s.getBoolean("playerHeroArtwork")) }
-                    }
-                    if (s.has("replayEnabled")) {
-                        runCatching { settingsRepository.setReplayEnabled(s.getBoolean("replayEnabled")) }
-                    }
-                    if (s.has("exploreEnabled")) {
-                        runCatching { settingsRepository.setExploreEnabled(s.getBoolean("exploreEnabled")) }
-                    }
-                    if (s.has("homeShelvesEnabled")) {
-                        runCatching { settingsRepository.setHomeShelvesEnabled(s.getBoolean("homeShelvesEnabled")) }
-                    }
-                    if (s.has("playlistsListView")) {
-                        runCatching { settingsRepository.setPlaylistsListView(s.getBoolean("playlistsListView")) }
-                    }
-                    if (s.has("quickPicksGridCount")) {
-                        runCatching { settingsRepository.setQuickPicksGridCount(s.getInt("quickPicksGridCount")) }
-                    }
-                    if (s.has("quickPicksGridView")) {
-                        runCatching { settingsRepository.setQuickPicksGridView(s.getBoolean("quickPicksGridView")) }
-                    }
-                    if (s.has("speedDialListView")) {
-                        runCatching { settingsRepository.setSpeedDialListView(s.getBoolean("speedDialListView")) }
-                    }
-                    if (s.has("lyricsBlurUnfocused")) {
-                        runCatching { settingsRepository.setLyricsBlurUnfocused(s.getBoolean("lyricsBlurUnfocused")) }
-                    }
-                    if (s.has("lyricsSource")) {
-                        runCatching {
-                            settingsRepository.setLyricsSource(
-                                com.whiplash.music.data.lyrics.LyricsSourcePreference.valueOf(s.getString("lyricsSource")),
-                            )
-                        }
-                    }
-                    if (s.has("playerLyricStrip")) {
-                        runCatching { settingsRepository.setPlayerLyricStrip(s.getBoolean("playerLyricStrip")) }
-                    }
-                    if (s.has("playerArtworkColors")) {
-                        runCatching { settingsRepository.setPlayerArtworkColors(s.getBoolean("playerArtworkColors")) }
-                    }
-                    if (s.has("reduceAnimations")) {
-                        runCatching { settingsRepository.setReduceAnimations(s.getBoolean("reduceAnimations")) }
-                    }
-                    if (s.has("downloadWifiOnly")) {
-                        runCatching { settingsRepository.setDownloadWifiOnly(s.getBoolean("downloadWifiOnly")) }
-                    }
-                    if (s.has("statsForNerdsEnabled")) {
-                        runCatching { settingsRepository.setStatsForNerdsEnabled(s.getBoolean("statsForNerdsEnabled")) }
-                    }
-                    if (s.has("skipSilenceEnabled")) {
-                        runCatching { settingsRepository.setSkipSilenceEnabled(s.getBoolean("skipSilenceEnabled")) }
-                    }
-                    if (s.has("perNetworkQualityEnabled")) {
-                        runCatching { settingsRepository.setPerNetworkQualityEnabled(s.getBoolean("perNetworkQualityEnabled")) }
-                    }
-                    if (s.has("audioQualityWifi")) {
-                        runCatching { settingsRepository.setAudioQualityWifi(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("audioQualityWifi"))) }
-                    }
-                    if (s.has("audioQualityCellular")) {
-                        runCatching { settingsRepository.setAudioQualityCellular(com.whiplash.music.domain.model.AudioQuality.valueOf(s.getString("audioQualityCellular"))) }
-                    }
-                }
+                if (settingsArray.length() > 0) applySettings(settingsArray.getJSONObject(0))
             }
 
             true

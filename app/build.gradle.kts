@@ -127,9 +127,11 @@ dependencies {
     // YouTube/YouTube Music extraction provider (Provider A per CLAUDE.md section 7).
     implementation(libs.newpipe.extractor)
     implementation(libs.okhttp)
+    implementation(libs.play.services.auth)
     coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
 
     testImplementation(libs.junit)
+    testImplementation(libs.org.json)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

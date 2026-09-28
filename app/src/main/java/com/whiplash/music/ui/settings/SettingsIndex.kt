@@ -13,6 +13,7 @@ enum class SettingsSection(val label: String) {
     NOW_PLAYING("Now Playing"),
     LYRICS("Lyrics"),
     APPEARANCE("Appearance"),
+    ACCOUNT("Account & sync"),
     STORAGE("Storage"),
     BACKUP("Backup & Restore"),
 }
@@ -24,7 +25,7 @@ enum class SettingsSection(val label: String) {
 enum class SettingsGroup(val label: String, val sections: List<SettingsSection>) {
     LISTENING("Listening", listOf(SettingsSection.AUDIO_QUALITY, SettingsSection.PLAYBACK, SettingsSection.DOWNLOADS)),
     LOOK_AND_FEEL("Look & feel", listOf(SettingsSection.NOW_PLAYING, SettingsSection.LYRICS, SettingsSection.APPEARANCE)),
-    YOUR_DATA("Your data", listOf(SettingsSection.STORAGE, SettingsSection.BACKUP)),
+    YOUR_DATA("Your data", listOf(SettingsSection.ACCOUNT, SettingsSection.STORAGE, SettingsSection.BACKUP)),
 }
 
 enum class SettingEntry(val section: SettingsSection, val title: String, val keywords: String) {
@@ -56,6 +57,10 @@ enum class SettingEntry(val section: SettingsSection, val title: String, val key
     CUSTOM_THEME(SettingsSection.APPEARANCE, "Custom theme", "create own theme background accent colours colors"),
     THEME(SettingsSection.APPEARANCE, "Accent colour", "accents color colour palette tint highlight"),
     REDUCE_ANIMATIONS(SettingsSection.APPEARANCE, "Reduce animations", "motion accessibility transitions"),
+    ACCOUNT_SYNC(SettingsSection.ACCOUNT, "Account & sync", "google sign in login profile cloud drive devices phone restore"),
+    AUTO_SYNC(SettingsSection.ACCOUNT, "Auto-sync", "background automatic cloud offline online"),
+    SHOW_EMAIL(SettingsSection.ACCOUNT, "Show email", "hide email address privacy profile"),
+    PROFILE(SettingsSection.ACCOUNT, "Profile name and photo", "edit change picture avatar display name"),
     CACHE_SONGS(SettingsSection.STORAGE, "Cache Songs", "offline storage space"),
     DOWNLOADED_DATA(SettingsSection.STORAGE, "Downloaded songs", "offline downloads delete clear remove space storage size"),
     CACHED_DATA(SettingsSection.STORAGE, "Cached data", "clear cache storage size space"),
