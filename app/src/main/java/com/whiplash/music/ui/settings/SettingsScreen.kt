@@ -1,5 +1,6 @@
 package com.whiplash.music.ui.settings
 
+import com.whiplash.music.ui.theme.glassFill
 import com.whiplash.music.ui.theme.appBackground
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -123,6 +124,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val appTheme by viewModel.appTheme.collectAsState()
     val customThemeColors by viewModel.customThemeColors.collectAsState()
     val glassOpacity by viewModel.glassOpacity.collectAsState()
+    val glassLens by viewModel.glassLens.collectAsState()
     val seekBarStyle by viewModel.seekBarStyle.collectAsState()
     val audioCacheEnabled by viewModel.audioCacheEnabled.collectAsState()
     val skipSilenceEnabled by viewModel.skipSilenceEnabled.collectAsState()
@@ -705,13 +707,49 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     SettingRow(
                                         title = "Glass opacity",
                                         icon = Icons.Filled.Tune,
-                                        subtitle = "Lower is clearer glass that shows more of what's behind it; higher is frosted and calmer.",
+                                        subtitle = "0% is fully clear glass, like Apple's Clear style; higher frosts and tints it.",
                                     )
                                     GlassOpacitySlider(
                                         value = glassOpacity,
                                         onPreview = viewModel::previewGlassOpacity,
                                         onCommit = viewModel::saveGlassOpacity,
                                     )
+                                }
+                            }
+                        }
+
+                        if (shown(SettingEntry.GLASS_LENS) && appTheme == com.whiplash.music.ui.theme.AppTheme.LIQUID_GLASS) {
+                            SettingItem(divider = rows.next()) {
+                                Column {
+                                    SettingRow(
+                                        title = "Lens bending",
+                                        icon = Icons.Filled.Tune,
+                                        subtitle = "How strongly the glass edges bend what's behind them.",
+                                    )
+                                    GlassOpacitySlider(
+                                        value = glassLens,
+                                        onPreview = viewModel::previewGlassLens,
+                                        onCommit = viewModel::saveGlassLens,
+                                        startLabel = "Flat",
+                                        endLabel = "Strong",
+                                        description = "Lens bending",
+                                        showSupportNote = false,
+                                        defaultValue = com.whiplash.music.ui.theme.WhiplashColors.DEFAULT_GLASS_LENS,
+                                    )
+                                }
+                            }
+                        }
+
+                        if (shown(SettingEntry.GLASS_BACKGROUND) && appTheme == com.whiplash.music.ui.theme.AppTheme.LIQUID_GLASS) {
+                            SettingItem(divider = rows.next()) {
+                                Column {
+                                    SettingRow(
+                                        title = "Glass background",
+                                        icon = Icons.Filled.Palette,
+                                        subtitle = "What shows through the glass behind every page.",
+                                    )
+                                    Spacer(Modifier.height(GlassTokens.spaceSm))
+                                    GlassBackgroundPicker(colors = customThemeColors, onChange = viewModel::setCustomThemeColors)
                                 }
                             }
                         }
@@ -1777,8 +1815,7 @@ private fun SettingsFolderList(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(shape)
-                            .background(cardColor),
+                            .glassFill(shape, cardColor),
                     ) {
                         group.sections.forEachIndexed { index, section ->
                             if (index > 0) {
@@ -1802,8 +1839,7 @@ private fun SettingsFolderList(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(shape)
-                    .background(cardColor),
+                    .glassFill(shape, cardColor),
             ) {
                 SettingsQuitRow(onClick = onQuit)
             }
@@ -1911,8 +1947,7 @@ private fun SettingsCardColumn(section: SettingsSection, content: @Composable ()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.large))
-                .background(settingsCardColor()),
+                .glassFill(androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.large), settingsCardColor()),
         ) {
             content()
         }

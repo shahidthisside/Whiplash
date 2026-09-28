@@ -1,5 +1,6 @@
 package com.whiplash.music.ui.localmusic
 
+import com.whiplash.music.ui.theme.glassFill
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -299,8 +300,7 @@ private fun QuickCard(
     val haptic = LocalHapticFeedback.current
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(WhiplashRadius.large))
-            .background(com.whiplash.music.ui.theme.collectionCardColor())
+            .glassFill(RoundedCornerShape(WhiplashRadius.large), com.whiplash.music.ui.theme.collectionCardColor())
             .clickable(enabled = enabled, role = Role.Button) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()

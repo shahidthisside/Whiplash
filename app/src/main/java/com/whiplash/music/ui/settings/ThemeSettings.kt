@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,6 +22,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -158,16 +162,88 @@ private fun ThemePreviewCard(theme: AppTheme, palette: GlassPalette, isSelected:
 
 /** How see-through Liquid Glass is: Clear ... Frosted. Live while dragging, saved on release. */
 @Composable
-internal fun GlassOpacitySlider(value: Float, onPreview: (Float) -> Unit, onCommit: (Float) -> Unit) {
+internal fun GlassOpacitySlider(
+    value: Float,
+    onPreview: (Float) -> Unit,
+    onCommit: (Float) -> Unit,
+    startLabel: String = "Clear",
+    endLabel: String = "Frosted",
+    description: String = "Glass opacity",
+    showSupportNote: Boolean = true,
+    /** Where the default sits: marked under the track, with a Reset button when moved off it. */
+    defaultValue: Float = WhiplashColors.DEFAULT_GLASS_OPACITY,
+) {
     var pending by remember { mutableStateOf<Float?>(null) }
     LaunchedEffect(value) { pending = null }
     val shown = pending ?: value
     val label = "${(shown * 100).roundToInt()}%"
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Clear", style = MaterialTheme.typography.labelMedium, color = WhiplashColors.textSecondary)
-            Text(label, style = MaterialTheme.typography.labelLarge, color = WhiplashColors.textPrimary)
-            Text("Frosted", style = MaterialTheme.typography.labelMedium, color = WhiplashColors.textSecondary)
+    val atDefault = kotlin.math.abs(shown - defaultValue) < 0.005f
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        // Value on the left, Reset on the right (only when moved off default).
+        Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.clip(CircleShape).background(WhiplashColors.tone(0.10f)).padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    if (atDefault) "$label · Default" else label,
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = WhiplashColors.textPrimary,
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            androidx.compose.animation.AnimatedVisibility(
+                visible = !atDefault,
+                enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(GlassTokens.animSlow)),
+                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(GlassTokens.animSlow)),
+            ) {
+                Row(
+                    Modifier
+                        .clip(CircleShape)
+                        .background(WhiplashColors.accent)
+                        .clickable(role = Role.Button, onClickLabel = "Reset $description to default") {
+                            pending = null
+                            onPreview(defaultValue)
+                            onCommit(defaultValue)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.RestartAlt, null, tint = WhiplashColors.onAccent, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "Reset",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = WhiplashColors.onAccent,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        // Default marker above the track: a caption and a notch pointing at it.
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(24.dp)) {
+            val inset = 10.dp
+            val x = inset + (maxWidth - inset * 2) * defaultValue
+            val w = 56.dp
+            val left = (x - w / 2).coerceIn(0.dp, maxWidth - w)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.width(w).offset(x = left),
+            ) {
+                Text(
+                    "Default",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (atDefault) WhiplashColors.accent else WhiplashColors.textTertiary,
+                    maxLines = 1,
+                )
+            }
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .offset(x = x - 1.dp)
+                    .size(width = 2.dp, height = 7.dp)
+                    .clip(CircleShape)
+                    .background(if (atDefault) WhiplashColors.accent else WhiplashColors.textTertiary),
+            )
         }
         Slider(
             value = shown,
@@ -180,11 +256,15 @@ internal fun GlassOpacitySlider(value: Float, onPreview: (Float) -> Unit, onComm
                 inactiveTrackColor = WhiplashColors.glassBorderStrong,
             ),
             modifier = Modifier.fillMaxWidth().semantics {
-                contentDescription = "Glass opacity"
-                stateDescription = label
+                contentDescription = description
+                stateDescription = if (atDefault) "$label, default" else label
             },
         )
-        if (!glassRefractionSupported) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(startLabel, style = MaterialTheme.typography.labelMedium, color = WhiplashColors.textSecondary)
+            Text(endLabel, style = MaterialTheme.typography.labelMedium, color = WhiplashColors.textSecondary)
+        }
+        if (showSupportNote && !glassRefractionSupported) {
             Text(
                 text = if (glassBlurSupported) {
                     "This Android version shows blurred glass without the lens bending (needs Android 13)."
@@ -295,4 +375,73 @@ private fun Color.toHsv(): FloatArray {
     val out = FloatArray(3)
     android.graphics.Color.RGBToHSV((red * 255).roundToInt(), (green * 255).roundToInt(), (blue * 255).roundToInt(), out)
     return out
+}
+
+/**
+ * Liquid Glass background: the current cover (blurred, like Apple Music),
+ * a few calm solid tones, or a custom colour with hue/brightness sliders.
+ */
+@Composable
+internal fun GlassBackgroundPicker(colors: CustomThemeColors, onChange: (CustomThemeColors) -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(com.whiplash.music.ui.theme.GlassBackground.entries, key = { it.name }) { option ->
+                val isSel = option == colors.glassBackground
+                val fill = when (option) {
+                    com.whiplash.music.ui.theme.GlassBackground.CUSTOM -> colors.glassColor
+                    com.whiplash.music.ui.theme.GlassBackground.NOW_PLAYING -> Color(0xFF2A2230)
+                    else -> option.color!!
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .width(64.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(role = Role.RadioButton, onClickLabel = "Use ${option.displayName} glass background") {
+                            onChange(colors.copy(glassBackground = option))
+                        }
+                        .semantics(mergeDescendants = true) { selected = isSel }
+                        .padding(vertical = 4.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .border(if (isSel) 2.5.dp else 1.dp, if (isSel) WhiplashColors.accent else WhiplashColors.glassBorderStrong, CircleShape)
+                            .padding(3.dp)
+                            .clip(CircleShape)
+                            .background(fill),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val ink = com.whiplash.music.ui.theme.inkOn(fill)
+                        when {
+                            isSel -> Icon(Icons.Filled.Check, null, tint = ink, modifier = Modifier.size(20.dp))
+                            option == com.whiplash.music.ui.theme.GlassBackground.NOW_PLAYING ->
+                                Icon(Icons.Filled.MusicNote, null, tint = ink, modifier = Modifier.size(20.dp))
+                            option == com.whiplash.music.ui.theme.GlassBackground.CUSTOM ->
+                                Icon(Icons.Filled.Palette, null, tint = ink, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        option.displayName,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isSel) WhiplashColors.textPrimary else WhiplashColors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        if (colors.glassBackground == com.whiplash.music.ui.theme.GlassBackground.CUSTOM) {
+            HueToneSliders("Glass background", colors.glassColor) { onChange(colors.copy(glassColor = it)) }
+        }
+        if (colors.glassBackground == com.whiplash.music.ui.theme.GlassBackground.NOW_PLAYING) {
+            Text(
+                "Uses the cover of the song that's playing, softly blurred behind the glass.",
+                style = MaterialTheme.typography.bodySmall,
+                color = WhiplashColors.textTertiary,
+            )
+        }
+    }
 }

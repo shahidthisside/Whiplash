@@ -39,6 +39,15 @@ class ThemesTest {
     }
 
     @Test
+    fun everyGlassBackgroundIsReadable() {
+        for (bg in GlassBackground.entries) for (accent in ThemeVariant.entries) {
+            val c = CustomThemeColors(glassBackground = bg, glassColor = Color(0xFF3060FF))
+            assertReadable(resolvePalette(AppTheme.LIQUID_GLASS, accent, c), "glass $bg/$accent")
+        }
+        assertTrue(resolvePalette(AppTheme.LIQUID_GLASS, ThemeVariant.CLASSIC, CustomThemeColors(glassBackground = GlassBackground.PEARL)).isLight)
+    }
+
+    @Test
     fun lightThemesReportLight() {
         assertTrue(resolvePalette(AppTheme.LIGHT, ThemeVariant.CLASSIC, CustomThemeColors()).isLight)
         assertTrue(resolvePalette(AppTheme.ROSE_PINE_DAWN, ThemeVariant.CLASSIC, CustomThemeColors()).isLight)

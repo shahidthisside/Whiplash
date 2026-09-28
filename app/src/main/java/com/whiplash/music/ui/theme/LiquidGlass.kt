@@ -19,6 +19,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -27,9 +28,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -37,6 +40,7 @@ import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -78,6 +82,32 @@ class GlassBackdrop internal constructor(internal val layer: GraphicsLayer) {
 /** The backdrop glass elements sample; null outside the Liquid Glass theme. */
 val LocalGlassBackdrop = staticCompositionLocalOf<GlassBackdrop?> { null }
 
+/**
+ * The glass background alone (no page content), for glass *inside* pages:
+ * cards, buttons and fields refract the backdrop behind them without ever
+ * sampling the page they belong to.
+ */
+val LocalContentGlassBackdrop = staticCompositionLocalOf<GlassBackdrop?> { null }
+
+/**
+ * Fills a control or card: real glass over the Liquid Glass background in
+ * that theme, a plain [fallback] fill in every other theme. Use in place of
+ * .clip(shape).background(color) on surfaces that sit on the page.
+ */
+@Composable
+fun Modifier.glassFill(shape: CornerBasedShape, fallback: Color): Modifier {
+    val source = LocalContentGlassBackdrop.current
+    if (source == null || !WhiplashColors.isGlass) return this.clip(shape).background(fallback)
+    return this.clip(shape).liquidGlass(
+        shape = shape,
+        fallback = fallback,
+        tint = WhiplashColors.surfaceElevated,
+        refractionHeight = 12.dp,
+        refractionAmount = 16.dp,
+        source = source,
+    )
+}
+
 @Composable
 fun rememberGlassBackdrop(): GlassBackdrop {
     val layer = rememberGraphicsLayer()
@@ -106,9 +136,16 @@ val glassRefractionSupported: Boolean get() = Build.VERSION.SDK_INT >= Build.VER
  * floor is much higher there.
  */
 fun glassTintAlpha(opacity: Float): Float {
-    val floor = if (glassBlurSupported) 0.24f else 0.78f
-    return (floor + (0.92f - floor) * opacity.coerceIn(0f, 1f)).coerceAtMost(0.92f)
+    // Clear glass (Apple's "Clear" style) is almost untinted: the backdrop is
+    // only slightly dimmed inside the effect chain (see [buildGlassEffect]),
+    // which is what keeps labels readable, not a milky fill.
+    // At 0 the glass is fully clear: no tint at all, only the lens and rim.
+    val floor = if (glassBlurSupported) 0f else 0.78f
+    return (floor + (0.85f - floor) * opacity.coerceIn(0f, 1f)).coerceAtMost(0.85f)
 }
+
+/** Blur behind glass: none when fully clear, heavier as it frosts. */
+fun glassBlurDp(opacity: Float): Float = 14f * opacity.coerceIn(0f, 1f)
 
 private class GlassState {
     var coordinates: LayoutCoordinates? by mutableStateOf(null, neverEqualPolicy())
@@ -128,11 +165,20 @@ fun Modifier.liquidGlass(
     shape: CornerBasedShape,
     fallback: Color,
     tint: Color = WhiplashColors.surfaceGlass,
-    blurRadius: Dp = 14.dp,
-    refractionHeight: Dp = 18.dp,
-    refractionAmount: Dp = 26.dp,
+    /**
+     * Minimum softening (0..1) for glass carrying text: blurs and dims what's
+     * behind just enough that labels never clash with content under them,
+     * while the tint stays at the user's setting (fully clear at 0).
+     */
+    legibility: Float = 0f,
+    blurRadius: Dp = glassBlurDp(maxOf(WhiplashColors.glassOpacity, legibility)).dp,
+    refractionHeight: Dp = 24.dp,
+    refractionAmount: Dp = 30.dp,
+    source: GlassBackdrop? = LocalGlassBackdrop.current,
+    /** Lens strength 0..1 (the "Lens bending" setting); 0.5 is the designed look. */
+    lens: Float = WhiplashColors.glassLens,
 ): Modifier {
-    val backdrop = LocalGlassBackdrop.current
+    val backdrop = source
     if (backdrop == null) {
         return this.drawWithContent {
             val outline = shape.createOutline(size, layoutDirection, this)
@@ -150,7 +196,16 @@ fun Modifier.liquidGlass(
             val path = outline.toPath()
             val src = backdrop.coordinates
             val me = state.coordinates
-            if (src != null && me != null && src.isAttached && me.isAttached) {
+            // Only sample a backdrop in this same window: inside a dialog or
+            // sheet (another window) the page's layer must never be drawn.
+            val sameWindow = src != null && me != null && src.isAttached && me.isAttached &&
+                src.findRootCoordinates() === me.findRootCoordinates()
+            if (!sameWindow) {
+                drawPath(path, fallback)
+                drawContent()
+                return@drawWithContent
+            }
+            if (src != null && me != null) {
                 val offset = runCatching { src.localPositionOf(me, Offset.Zero) }
                     .getOrElse { me.positionInWindow() - src.positionInWindow() }
                 val blurPx = blurRadius.toPx()
@@ -159,7 +214,9 @@ fun Modifier.liquidGlass(
                     translate(pad - offset.x, pad - offset.y) { drawLayer(backdrop.layer) }
                 }
                 layer.topLeft = IntOffset(-pad, -pad)
-                val key = listOf(size, blurPx, pad, shape.hashCode(), refractionHeight, refractionAmount)
+                val dim = WhiplashColors.isLight
+                val opacity = maxOf(WhiplashColors.glassOpacity, legibility)
+                val key = listOf(size, blurPx, pad, shape.hashCode(), refractionHeight, refractionAmount, dim, opacity, lens)
                 if (state.effectKey != key && glassBlurSupported) {
                     state.effectKey = key
                     state.effect = buildGlassEffect(
@@ -168,8 +225,10 @@ fun Modifier.liquidGlass(
                         pad = pad.toFloat(),
                         blurPx = blurPx,
                         radii = cornerRadii(shape, size, this),
-                        refractionHeight = refractionHeight.toPx(),
-                        refractionAmount = refractionAmount.toPx(),
+                        refractionHeight = refractionHeight.toPx() * (0.4f + 1.2f * lens),
+                        refractionAmount = refractionAmount.toPx() * lens * 2f,
+                        lightGlass = dim,
+                        opacity = opacity,
                     )
                 }
                 layer.renderEffect = state.effect
@@ -184,10 +243,10 @@ fun Modifier.liquidGlass(
             drawPath(
                 path,
                 brush = Brush.linearGradient(
-                    0f to rimTop.copy(alpha = 0.55f),
-                    0.35f to rimTop.copy(alpha = 0.10f),
-                    0.7f to rimTop.copy(alpha = 0.04f),
-                    1f to rimTop.copy(alpha = 0.28f),
+                    0f to rimTop.copy(alpha = 0.70f),
+                    0.3f to rimTop.copy(alpha = 0.12f),
+                    0.7f to rimTop.copy(alpha = 0.05f),
+                    1f to rimTop.copy(alpha = 0.40f),
                     start = Offset.Zero,
                     end = Offset(size.width, size.height),
                 ),
@@ -235,18 +294,44 @@ private fun buildGlassEffect(
     radii: FloatArray,
     refractionHeight: Float,
     refractionAmount: Float,
+    lightGlass: Boolean = false,
+    opacity: Float = 0f,
 ): androidx.compose.ui.graphics.RenderEffect? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
-    // Vibrancy: colours seen through glass look richer, not washed out.
+    // Vibrancy: colours seen through glass look richer, not washed out
+    // (saturation x1.5), then a gentle tone shift toward the glass's ink
+    // side (dark glass dims ~18%, light glass lifts) so white labels stay
+    // readable over a white cover without any milky tint.
     val vibrancy = RenderEffect.createColorFilterEffect(
-        ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(1.5f) }),
+        ColorMatrixColorFilter(
+            ColorMatrix().apply {
+                // Clear glass keeps colours as they are (a touch richer);
+                // frosting adds saturation and the tone shift.
+                setSaturation(1.15f + 0.35f * opacity)
+                // Light glass needs a stronger lift: dark ink over a dark
+                // cover has to be pulled toward white to stay readable.
+                val shift = (if (lightGlass) 0.6f else 0.25f) * opacity
+                val k = 1f - shift
+                val lift = if (lightGlass) 255f * shift else 0f
+                postConcat(
+                    ColorMatrix(
+                        floatArrayOf(
+                            k, 0f, 0f, 0f, lift,
+                            0f, k, 0f, 0f, lift,
+                            0f, 0f, k, 0f, lift,
+                            0f, 0f, 0f, 1f, 0f,
+                        ),
+                    ),
+                )
+            },
+        ),
     )
-    val blurred = if (blurPx > 0f) {
+    val blurred = if (blurPx > 0.5f) {
         RenderEffect.createBlurEffect(blurPx, blurPx, vibrancy, Shader.TileMode.CLAMP)
     } else {
         vibrancy
     }
-    val full = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && size.minDimension > 0f) {
+    val full = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && size.minDimension > 0f && refractionAmount > 0.5f) {
         lensEffect(state, size, pad, radii, refractionHeight.coerceAtMost(size.minDimension / 2f), refractionAmount, blurred)
     } else {
         blurred
@@ -335,26 +420,125 @@ fun GlassWallpaper(modifier: Modifier = Modifier) {
 }
 
 /**
- * The page background for the current theme: the Liquid Glass wallpaper in
- * that theme, the plain background colour in every other one. Opaque.
+ * The page background for the current theme. In every theme but Liquid
+ * Glass it's the plain background colour. In Liquid Glass it's the chosen
+ * glass background: a calm solid tone, or ("Now playing") the current cover,
+ * blurred into soft light and dimmed like Apple Music's backdrop.
+ *
+ * Drawn in window coordinates, so every page that paints it (the root and
+ * each detail page sliding over it) lines up exactly, and glass sampling it
+ * sees the same pixels that are on screen. Opaque.
  */
 @Composable
 fun Modifier.appBackground(): Modifier {
     val base = WhiplashColors.background
     if (!WhiplashColors.isGlass) return this.background(base)
-    val accent = WhiplashColors.accent
-    val cool = androidx.compose.ui.graphics.lerp(accent, Color(0xFF3D7BFF), 0.6f)
-    val warm = androidx.compose.ui.graphics.lerp(accent, Color(0xFFFF6FA8), 0.55f)
-    return this.drawBehind {
-        drawRect(base)
-        val r = size.maxDimension * 0.7f
-        fun pool(c: Color, x: Float, y: Float, a: Float) = drawRect(
-            Brush.radialGradient(listOf(c.copy(alpha = a), Color.Transparent), Offset(size.width * x, size.height * y), r),
-        )
-        pool(cool, 0.1f, 0.08f, 0.30f)
-        pool(warm, 0.95f, 0.45f, 0.22f)
-        pool(accent, 0.2f, 0.95f, 0.20f)
+    val choice = WhiplashColors.customColors.glassBackground
+    if (choice != GlassBackground.NOW_PLAYING) return this.background(base)
+    val art = rememberBlurredArtwork(WhiplashColors.nowPlayingArtwork)
+    val view = androidx.compose.ui.platform.LocalView.current
+    val origin = remember { mutableStateOf(Offset.Zero) }
+    return this
+        .onGloballyPositioned { origin.value = it.positionInWindow() }
+        .drawBehind {
+            drawRect(base)
+            val bmp = art.value ?: return@drawBehind
+            val winW = view.rootView.width.toFloat().coerceAtLeast(size.width)
+            val winH = view.rootView.height.toFloat().coerceAtLeast(size.height)
+            // Cover-crop the square art to the window's tall shape.
+            val scale = maxOf(winW / bmp.width, winH / bmp.height)
+            val dw = bmp.width * scale
+            val dh = bmp.height * scale
+            val left = (winW - dw) / 2f - origin.value.x
+            val top = (winH - dh) / 2f - origin.value.y
+            // The image is placed in window coordinates, so it extends past
+            // this page's own bounds; clip it, or it spills (undimmed) over
+            // the header and anything else outside the page.
+            clipRect {
+                drawImage(
+                    image = bmp,
+                    dstOffset = IntOffset(left.toInt(), top.toInt()),
+                    dstSize = IntSize(dw.toInt(), dh.toInt()),
+                    filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
+                )
+            }
+            // Dim so white text and icons always read (like Apple Music's
+            // darkened backdrop), a little deeper at the bottom where the
+            // tab bar and mini player sit.
+            drawRect(
+                Brush.verticalGradient(
+                    0f to Color.Black.copy(alpha = 0.50f),
+                    1f to Color.Black.copy(alpha = 0.66f),
+                    startY = -origin.value.y,
+                    endY = winH - origin.value.y,
+                ),
+            )
+        }
+}
+
+/** Blurred, small copies of covers, shared by every page drawing the backdrop. */
+private val blurredArtCache = object : LinkedHashMap<String, androidx.compose.ui.graphics.ImageBitmap>(8, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, androidx.compose.ui.graphics.ImageBitmap>?) = size > 6
+}
+
+/**
+ * The cover at [url] as a 64px, heavily blurred bitmap. Separate small Coil
+ * request that stays out of the memory cache, so the full-size artwork shown
+ * elsewhere keeps its quality. Keeps the previous image until the next is
+ * ready, so track changes don't flash.
+ */
+@Composable
+private fun rememberBlurredArtwork(url: String?): androidx.compose.runtime.State<androidx.compose.ui.graphics.ImageBitmap?> {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+        initialValue = url?.let { synchronized(blurredArtCache) { blurredArtCache[it] } },
+        url,
+    ) {
+        if (url == null) { value = null; return@produceState }
+        synchronized(blurredArtCache) { blurredArtCache[url] }?.let { value = it; return@produceState }
+        val request = coil.request.ImageRequest.Builder(context)
+            .data(url)
+            .size(64)
+            .allowHardware(false)
+            .memoryCachePolicy(coil.request.CachePolicy.DISABLED)
+            .build()
+        val result = runCatching { coil.Coil.imageLoader(context).execute(request) }.getOrNull()
+        val bitmap = ((result as? coil.request.SuccessResult)?.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+            ?: return@produceState
+        val blurred = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { boxBlur(bitmap) }
+        synchronized(blurredArtCache) { blurredArtCache[url] = blurred }
+        value = blurred
     }
+}
+
+/** Three-pass box blur (close to Gaussian) of a small bitmap, done on the CPU. */
+private fun boxBlur(src: android.graphics.Bitmap): androidx.compose.ui.graphics.ImageBitmap {
+    val w = 48
+    val h = 48
+    val small = android.graphics.Bitmap.createScaledBitmap(src, w, h, true)
+    val px = IntArray(w * h)
+    small.getPixels(px, 0, w, 0, 0, w, h)
+    val tmp = IntArray(w * h)
+    val r = 4
+    repeat(3) {
+        for (pass in 0..1) {
+            val from = if (pass == 0) px else tmp
+            val to = if (pass == 0) tmp else px
+            for (y in 0 until h) for (x in 0 until w) {
+                var rs = 0; var gs = 0; var bs = 0; var n = 0
+                for (k in -r..r) {
+                    val xx = if (pass == 0) (x + k).coerceIn(0, w - 1) else x
+                    val yy = if (pass == 1) (y + k).coerceIn(0, h - 1) else y
+                    val c = from[yy * w + xx]
+                    rs += (c shr 16) and 0xFF; gs += (c shr 8) and 0xFF; bs += c and 0xFF; n++
+                }
+                to[y * w + x] = (0xFF shl 24) or ((rs / n) shl 16) or ((gs / n) shl 8) or (bs / n)
+            }
+        }
+    }
+    val out = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+    out.setPixels(px, 0, w, 0, 0, w, h)
+    return out.asImageBitmap()
 }
 
 /**
@@ -383,3 +567,15 @@ fun GlassWindowBlur(radius: Dp = 28.dp) {
         onDispose { }
     }
 }
+
+
+/**
+ * A soft halo behind text sitting on clear glass, so labels stay readable
+ * over bright content without tinting the glass. Null (no shadow) outside
+ * Liquid Glass and on light glass, where dark text needs no help.
+ */
+@Composable
+fun glassTextShadow(): androidx.compose.ui.graphics.Shadow? =
+    if (LocalGlassBackdrop.current != null && !WhiplashColors.isLight) {
+        androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.6f), blurRadius = 8f)
+    } else null

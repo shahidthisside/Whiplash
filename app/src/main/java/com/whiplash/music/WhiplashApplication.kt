@@ -184,6 +184,9 @@ class WhiplashApplication : Application() {
                 com.whiplash.music.ui.theme.WhiplashColors.applyTheme(theme, accent, custom, opacity)
             }.collect { }
         }
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate).launch {
+            settingsRepository.glassLens.collect { com.whiplash.music.ui.theme.WhiplashColors.glassLens = it }
+        }
 
         // Warm Home's Speed dial artwork and Quick Picks (both data and
         // artwork) in the background as early as possible in app startup

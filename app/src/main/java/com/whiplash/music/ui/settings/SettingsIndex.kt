@@ -51,6 +51,8 @@ enum class SettingEntry(val section: SettingsSection, val title: String, val key
     HOME_SHELVES(SettingsSection.APPEARANCE, "Home shelves", "recommendations feed albums playlists for you"),
     APP_THEME(SettingsSection.APPEARANCE, "Theme", "theme dark light liquid glass oled black catppuccin nord rose pine custom mode appearance"),
     GLASS_OPACITY(SettingsSection.APPEARANCE, "Glass opacity", "liquid glass transparency frosted clear tint blur"),
+    GLASS_LENS(SettingsSection.APPEARANCE, "Lens bending", "liquid glass lens refraction bend distortion edge"),
+    GLASS_BACKGROUND(SettingsSection.APPEARANCE, "Glass background", "liquid glass wallpaper background now playing cover colour color"),
     CUSTOM_THEME(SettingsSection.APPEARANCE, "Custom theme", "create own theme background accent colours colors"),
     THEME(SettingsSection.APPEARANCE, "Accent colour", "accents color colour palette tint highlight"),
     REDUCE_ANIMATIONS(SettingsSection.APPEARANCE, "Reduce animations", "motion accessibility transitions"),

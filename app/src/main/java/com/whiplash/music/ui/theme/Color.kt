@@ -108,10 +108,16 @@ object WhiplashColors {
     /** Liquid Glass tint strength, 0 = clear glass, 1 = frosted and nearly solid. */
     var glassOpacity by mutableStateOf(DEFAULT_GLASS_OPACITY)
         private set
+    /** Liquid Glass lens bending, 0 = flat glass, 1 = strong refraction at the edges. */
+    var glassLens by mutableStateOf(DEFAULT_GLASS_LENS)
+
     /** True when the current background is light (dark status bar icons, etc.). */
     var isLight by mutableStateOf(false)
         private set
     val isGlass: Boolean get() = theme == AppTheme.LIQUID_GLASS
+
+    /** Cover of the current song, for the "Now playing" glass background. */
+    var nowPlayingArtwork by mutableStateOf<String?>(null)
 
     /** Sets whichever parts are given and re-resolves the whole palette. */
     fun applyTheme(
@@ -143,7 +149,8 @@ object WhiplashColors {
     @androidx.compose.runtime.Composable @androidx.compose.runtime.ReadOnlyComposable
     fun tone(amount: Float): Color = androidx.compose.ui.graphics.lerp(background, textPrimary, amount)
 
-    const val DEFAULT_GLASS_OPACITY: Float = 0.35f
+    const val DEFAULT_GLASS_OPACITY: Float = 0.12f
+    const val DEFAULT_GLASS_LENS: Float = 0.5f
 }
 
 /** Immutable palette definition backing one [ThemeVariant]. */

@@ -30,11 +30,38 @@ enum class AppTheme(
     CUSTOM("Custom", "Your own background and accent", false),
 }
 
-/** The two colours a Custom theme is built from; everything else is derived. */
+/**
+ * User colours: the Custom theme's background and accent, plus the Liquid
+ * Glass theme's background choice (and its custom colour).
+ */
 data class CustomThemeColors(
     val background: Color = Color(0xFF101418),
     val accent: Color = Color(0xFF7FB8FF),
+    val glassBackground: GlassBackground = GlassBackground.NOW_PLAYING,
+    val glassColor: Color = Color(0xFF1A2230),
 )
+
+/**
+ * What sits behind Liquid Glass. "Now playing" is the current cover, blurred
+ * and dimmed like Apple Music's backdrop; the rest are calm solid tones (a
+ * flat colour under clear glass reads as real glass, a busy gradient doesn't).
+ */
+enum class GlassBackground(val displayName: String, val color: Color?) {
+    NOW_PLAYING("Now playing", null),
+    GRAPHITE("Graphite", Color(0xFF0E0F12)),
+    MIDNIGHT("Midnight", Color(0xFF0A1322)),
+    FOREST("Forest", Color(0xFF0C1712)),
+    PLUM("Plum", Color(0xFF170F1C)),
+    PEARL("Pearl", Color(0xFFE9EAEE)),
+    CUSTOM("Custom", null),
+}
+
+/** The solid base colour under Liquid Glass for [c]'s choice. */
+fun glassBaseColor(c: CustomThemeColors): Color = when (c.glassBackground) {
+    GlassBackground.NOW_PLAYING -> Color(0xFF101114)
+    GlassBackground.CUSTOM -> readableBackground(c.glassColor.copy(alpha = 1f))
+    else -> c.glassBackground.color!!
+}
 
 /** WCAG contrast ratio between two opaque colours (1..21). */
 fun contrastRatio(a: Color, b: Color): Float {
@@ -154,7 +181,10 @@ fun resolvePalette(theme: AppTheme, accentVariant: ThemeVariant, custom: CustomT
         AppTheme.LIGHT -> derivePalette(Color(0xFFF4F4F6), lightAccent(accentVariant), Color(0xFF15151A), 0.045f)
             .copy(surfaceSheet = Color(0xFFFFFFFF))
         // Deep blue-black base; the glass layers and wallpaper sit over it.
-        AppTheme.LIQUID_GLASS -> derivePalette(Color(0xFF0A0C14), chosen.accent, Color(0xFFF5F6FA), 0.07f)
+        AppTheme.LIQUID_GLASS -> glassBaseColor(custom).let { base ->
+            val light = base.luminance() > 0.4f
+            derivePalette(base, if (light) lightAccent(accentVariant) else chosen.accent, surfaceStep = 0.07f)
+        }
         AppTheme.CATPPUCCIN -> GlassPalette(
             background = Color(0xFF1E1E2E), surfaceGlass = Color(0xFF26263A), surfaceElevated = Color(0xFF313244),
             surfaceSheet = Color(0xFF2A2B3C), textPrimary = Color(0xFFCDD6F4), textSecondary = Color(0xFFBAC2DE),

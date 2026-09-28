@@ -353,6 +353,18 @@ class SettingsViewModel(
         WhiplashColors.applyTheme(glassOpacity = value)
     }
 
+    val glassLens: StateFlow<Float> = repository.glassLens
+        .stateIn(viewModelScope, SharingStarted.Eagerly, WhiplashColors.glassLens)
+
+    fun previewGlassLens(value: Float) {
+        WhiplashColors.glassLens = value
+    }
+
+    fun saveGlassLens(value: Float) {
+        WhiplashColors.glassLens = value
+        viewModelScope.launch { repository.setGlassLens(value) }
+    }
+
     fun saveGlassOpacity(value: Float) {
         WhiplashColors.applyTheme(glassOpacity = value)
         viewModelScope.launch { repository.setGlassOpacity(value) }

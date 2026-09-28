@@ -74,7 +74,7 @@ fun <T> FadeBottomBar(
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(start = 12.dp, end = 12.dp, bottom = 8.dp)
                 .androidxShadow(capsule)
-                .liquidGlass(shape = capsule, fallback = WhiplashColors.surfaceElevated)
+                .liquidGlass(shape = capsule, fallback = WhiplashColors.surfaceElevated, legibility = 0.4f)
                 .padding(vertical = 2.dp, horizontal = 4.dp)
         } else {
             modifier
@@ -190,7 +190,7 @@ private fun FadeBottomBarItem(
                 text = label,
                 style = MaterialTheme.typography.labelSmall.copy(
                     // On glass, a soft shadow keeps labels readable over bright art.
-                    shadow = if (LocalGlassBackdrop.current != null) {
+                    shadow = if (LocalGlassBackdrop.current != null && !WhiplashColors.isLight) {
                         androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.55f), blurRadius = 6f)
                     } else null,
                     fontSize = 10.5.sp,

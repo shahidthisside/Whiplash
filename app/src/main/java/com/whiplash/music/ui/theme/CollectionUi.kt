@@ -106,8 +106,10 @@ fun CollectionPillButton(
         modifier = modifier
             .graphicsLayer { scaleX = scale; scaleY = scale; alpha = if (enabled) 1f else GlassTokens.opacityDisabled }
             .heightIn(min = 46.dp)
-            .clip(RoundedCornerShape(WhiplashRadius.pill))
-            .background(container)
+            .then(
+                if (primary) Modifier.clip(RoundedCornerShape(WhiplashRadius.pill)).background(container)
+                else Modifier.glassFill(RoundedCornerShape(WhiplashRadius.pill), container),
+            )
             .clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.Center,
@@ -362,7 +364,7 @@ fun RoundActionButton(
 @Composable
 fun RoundActionSurface(content: @Composable () -> Unit) {
     Box(
-        Modifier.size(46.dp).clip(androidx.compose.foundation.shape.CircleShape).background(WhiplashColors.tone(0.10f)),
+        Modifier.size(46.dp).glassFill(androidx.compose.foundation.shape.CircleShape, WhiplashColors.tone(0.10f)),
         contentAlignment = Alignment.Center,
     ) { content() }
 }

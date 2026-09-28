@@ -449,6 +449,10 @@ private fun WhiplashApp() {
     // dark, artwork-lit look in light themes (dark palette just for them).
     val glass = WhiplashColors.isGlass
     val glassBackdrop = com.whiplash.music.ui.theme.rememberGlassBackdrop()
+    // The glass background by itself, for glass cards and buttons on pages.
+    val wallpaperBackdrop = com.whiplash.music.ui.theme.rememberGlassBackdrop()
+    val nowPlayingArt = playbackState.currentItem?.artworkUri
+    LaunchedEffect(nowPlayingArt) { WhiplashColors.nowPlayingArtwork = nowPlayingArt }
     val darkOnlyPalette = if (WhiplashColors.isLight) {
         com.whiplash.music.ui.theme.resolvePalette(
             com.whiplash.music.ui.theme.AppTheme.DARK, WhiplashColors.accentVariant, WhiplashColors.customColors,
@@ -477,6 +481,12 @@ private fun WhiplashApp() {
         // navigation bars, with its own insets), so only the tab content,
         // mini player and bottom nav get the Scaffold's system-bar padding.
         Box(modifier = Modifier.fillMaxSize()) {
+          if (glass) {
+              Box(Modifier.fillMaxSize().glassSource(wallpaperBackdrop).appBackground())
+          }
+          androidx.compose.runtime.CompositionLocalProvider(
+              com.whiplash.music.ui.theme.LocalContentGlassBackdrop provides if (glass) wallpaperBackdrop else null,
+          ) {
           Box(
               modifier = Modifier
                   .fillMaxSize()
@@ -785,6 +795,7 @@ private fun WhiplashApp() {
 
             }
 
+          }
           }
           }
 

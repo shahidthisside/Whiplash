@@ -83,7 +83,7 @@ fun GlassMiniPlayer(
                     // other themes: the flat tinted card with a hairline edge.
                     Modifier
                         .clip(shape)
-                        .liquidGlass(shape = shape, fallback = containerColor, tint = WhiplashColors.surfaceElevated)
+                        .liquidGlass(shape = shape, fallback = containerColor, tint = WhiplashColors.surfaceElevated, legibility = 0.35f)
                         .then(
                             if (LocalGlassBackdrop.current == null) {
                                 Modifier.border(0.5.dp, WhiplashColors.glassBorder, shape)
@@ -133,14 +133,14 @@ fun GlassMiniPlayer(
             ) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleMedium.copy(shadow = glassTextShadow()),
                     color = WhiplashColors.textPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = artist,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodySmall.copy(shadow = glassTextShadow()),
                     color = WhiplashColors.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

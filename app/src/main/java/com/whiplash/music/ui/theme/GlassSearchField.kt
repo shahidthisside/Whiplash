@@ -87,8 +87,7 @@ fun GlassSearchField(
     Row(
         modifier = modifier
             .heightIn(min = 52.dp)
-            .clip(shape)
-            .background(fill)
+            .glassFill(shape as androidx.compose.foundation.shape.CornerBasedShape, fill)
             .border(0.75.dp, edge, shape)
             .padding(start = GlassTokens.spaceMd, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,

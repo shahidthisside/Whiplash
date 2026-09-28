@@ -306,8 +306,11 @@ class BackupManager(
                         settingsRepository.customThemeColors.first().let { c ->
                             put("customThemeBackground", c.background.toArgb())
                             put("customThemeAccent", c.accent.toArgb())
+                            put("glassBackground", c.glassBackground.name)
+                            put("glassBackgroundColor", c.glassColor.toArgb())
                         }
                         put("glassOpacity", settingsRepository.glassOpacity.first().toDouble())
+                        put("glassLens", settingsRepository.glassLens.first().toDouble())
                         put("seekBarStyle", settingsRepository.seekBarStyle.first().name)
                         put("crossfadeDurationMs", settingsRepository.crossfadeDurationMs.first())
                         put("gaplessEnabled", settingsRepository.gaplessEnabled.first())
@@ -469,10 +472,15 @@ class BackupManager(
                             com.whiplash.music.ui.theme.CustomThemeColors(
                                 background = androidx.compose.ui.graphics.Color(s.getInt("customThemeBackground")),
                                 accent = androidx.compose.ui.graphics.Color(s.getInt("customThemeAccent")),
+                                glassBackground = s.optString("glassBackground").let { name ->
+                                    runCatching { com.whiplash.music.ui.theme.GlassBackground.valueOf(name) }.getOrNull()
+                                } ?: com.whiplash.music.ui.theme.GlassBackground.NOW_PLAYING,
+                                glassColor = if (s.has("glassBackgroundColor")) androidx.compose.ui.graphics.Color(s.getInt("glassBackgroundColor")) else com.whiplash.music.ui.theme.CustomThemeColors().glassColor,
                             ),
                         )
                     }
                     runCatching { settingsRepository.setGlassOpacity(s.getDouble("glassOpacity").toFloat()) }
+                    runCatching { settingsRepository.setGlassLens(s.getDouble("glassLens").toFloat()) }
                     runCatching { settingsRepository.setSeekBarStyle(com.whiplash.music.ui.theme.SeekBarStyle.valueOf(s.getString("seekBarStyle"))) }
                     runCatching { settingsRepository.setCrossfadeDurationMs(s.getInt("crossfadeDurationMs")) }
                     runCatching { settingsRepository.setGaplessEnabled(s.getBoolean("gaplessEnabled")) }

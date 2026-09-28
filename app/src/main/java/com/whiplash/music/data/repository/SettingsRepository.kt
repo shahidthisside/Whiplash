@@ -101,6 +101,10 @@ class SettingsRepository(context: Context) {
         com.whiplash.music.ui.theme.CustomThemeColors(
             background = prefs[CUSTOM_BG_KEY]?.let { androidx.compose.ui.graphics.Color(it) } ?: d.background,
             accent = prefs[CUSTOM_ACCENT_KEY]?.let { androidx.compose.ui.graphics.Color(it) } ?: d.accent,
+            glassBackground = prefs[GLASS_BG_KEY]?.let { stored ->
+                runCatching { com.whiplash.music.ui.theme.GlassBackground.valueOf(stored) }.getOrNull()
+            } ?: d.glassBackground,
+            glassColor = prefs[GLASS_BG_COLOR_KEY]?.let { androidx.compose.ui.graphics.Color(it) } ?: d.glassColor,
         )
     }
 
@@ -108,12 +112,23 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs ->
             prefs[CUSTOM_BG_KEY] = colors.background.toArgbInt()
             prefs[CUSTOM_ACCENT_KEY] = colors.accent.toArgbInt()
+            prefs[GLASS_BG_KEY] = colors.glassBackground.name
+            prefs[GLASS_BG_COLOR_KEY] = colors.glassColor.toArgbInt()
         }
     }
 
     /** Liquid Glass tint strength, 0..1. */
     val glassOpacity: Flow<Float> = dataStore.data.map { prefs ->
         (prefs[GLASS_OPACITY_KEY] ?: com.whiplash.music.ui.theme.WhiplashColors.DEFAULT_GLASS_OPACITY).coerceIn(0f, 1f)
+    }
+
+    /** Liquid Glass lens bending, 0..1. */
+    val glassLens: Flow<Float> = dataStore.data.map { prefs ->
+        (prefs[GLASS_LENS_KEY] ?: com.whiplash.music.ui.theme.WhiplashColors.DEFAULT_GLASS_LENS).coerceIn(0f, 1f)
+    }
+
+    suspend fun setGlassLens(value: Float) {
+        dataStore.edit { prefs -> prefs[GLASS_LENS_KEY] = value.coerceIn(0f, 1f) }
     }
 
     suspend fun setGlassOpacity(value: Float) {
@@ -427,6 +442,9 @@ class SettingsRepository(context: Context) {
         val CUSTOM_BG_KEY: Preferences.Key<Int> = intPreferencesKey("custom_theme_background")
         val CUSTOM_ACCENT_KEY: Preferences.Key<Int> = intPreferencesKey("custom_theme_accent")
         val GLASS_OPACITY_KEY: Preferences.Key<Float> = floatPreferencesKey("glass_opacity")
+        val GLASS_LENS_KEY: Preferences.Key<Float> = floatPreferencesKey("glass_lens")
+        val GLASS_BG_KEY: Preferences.Key<String> = stringPreferencesKey("glass_background")
+        val GLASS_BG_COLOR_KEY: Preferences.Key<Int> = intPreferencesKey("glass_background_color")
         val SEEK_BAR_STYLE_KEY: Preferences.Key<String> = stringPreferencesKey("seek_bar_style")
         val CROSSFADE_KEY: Preferences.Key<Int> = intPreferencesKey("crossfade_duration_ms")
         val GAPLESS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("gapless_enabled")

@@ -1,5 +1,6 @@
 package com.whiplash.music.ui.search
 
+import com.whiplash.music.ui.theme.glassFill
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -146,8 +147,7 @@ internal fun ModernSearchFilters(
     androidx.compose.foundation.layout.BoxWithConstraints(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(tonal(0.07f))
+            .glassFill(RoundedCornerShape(20.dp), tonal(0.07f))
             .padding(4.dp),
     ) {
         val segment = maxWidth / tabs.size
