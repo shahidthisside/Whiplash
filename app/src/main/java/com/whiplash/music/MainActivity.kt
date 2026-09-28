@@ -458,7 +458,12 @@ private fun WhiplashApp() {
             com.whiplash.music.ui.theme.AppTheme.DARK, WhiplashColors.accentVariant, WhiplashColors.customColors,
         )
     } else null
-    val lightSystemBars = WhiplashColors.isLight && !isPlayerExpanded && !showReplay
+    // The full player keeps its dark look only when it's lit by the artwork
+    // (artwork colours or full-bleed art); otherwise it wears the theme too.
+    val playerArtworkLit by playerViewModel.playerArtworkColors.collectAsState()
+    val playerHeroLit by playerViewModel.playerHeroArtwork.collectAsState()
+    val playerDarkPalette = if (playerArtworkLit || playerHeroLit) darkOnlyPalette else null
+    val lightSystemBars = WhiplashColors.isLight && (!isPlayerExpanded || playerDarkPalette == null) && !showReplay
     val rootView = androidx.compose.ui.platform.LocalView.current
     androidx.compose.runtime.SideEffect {
         val window = (rootView.context as? android.app.Activity)?.window ?: return@SideEffect
@@ -882,7 +887,7 @@ private fun WhiplashApp() {
                             enabled = !playerBackGestureActive,
                             onDismiss = { isPlayerExpanded = false },
                         )
-                        .background(darkOnlyPalette?.background ?: MaterialTheme.colorScheme.background)
+                        .background(playerDarkPalette?.background ?: MaterialTheme.colorScheme.background)
                         .clickable(
                             interactionSource = scrimInteractionSource,
                             indication = null,
@@ -900,7 +905,7 @@ private fun WhiplashApp() {
                     val playlistsForPlayer by playerViewModel.playlists.collectAsState()
                     val downloadedIds by app.libraryRepository.observeDownloadedIds().collectAsState(initial = emptySet())
                     val currentItemForDownload = playbackState.currentItem
-                    androidx.compose.runtime.CompositionLocalProvider(com.whiplash.music.ui.theme.LocalPaletteOverride provides darkOnlyPalette) {
+                    androidx.compose.runtime.CompositionLocalProvider(com.whiplash.music.ui.theme.LocalPaletteOverride provides playerDarkPalette) {
                     WhiplashTheme {
                     FullPlayerScreen(
                         state = playbackState,

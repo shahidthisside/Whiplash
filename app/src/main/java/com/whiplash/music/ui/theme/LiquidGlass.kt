@@ -152,6 +152,7 @@ private class GlassState {
     var effectKey: Any? = null
     var effect: androidx.compose.ui.graphics.RenderEffect? = null
     var shader: Any? = null
+    var material: Any? = null
 }
 
 /**
@@ -177,6 +178,8 @@ fun Modifier.liquidGlass(
     source: GlassBackdrop? = LocalGlassBackdrop.current,
     /** Lens strength 0..1 (the "Lens bending" setting); 0.5 is the designed look. */
     lens: Float = WhiplashColors.glassLens,
+    /** Fixed tint strength instead of the opacity setting (e.g. accent-tinted glass). */
+    tintAlpha: Float? = null,
 ): Modifier {
     val backdrop = source
     if (backdrop == null) {
@@ -188,7 +191,6 @@ fun Modifier.liquidGlass(
     }
     val layer = rememberGraphicsLayer()
     val state = remember { GlassState() }
-    val rimTop = Color.White
     return this
         .onGloballyPositioned { state.coordinates = it }
         .drawWithContent {
@@ -235,32 +237,10 @@ fun Modifier.liquidGlass(
                 clipPath(path) { drawLayer(layer) }
             }
             // Tint: how "frosted" the glass is, from the opacity setting.
-            val alpha = glassTintAlpha(WhiplashColors.glassOpacity)
+            val alpha = tintAlpha ?: glassTintAlpha(WhiplashColors.glassOpacity)
             drawPath(path, tint.copy(alpha = alpha))
-            // Rim light: a bright specular edge top-left fading round the
-            // shape, fainter again at the bottom-right, like light caught
-            // in the thickness of the glass.
-            drawPath(
-                path,
-                brush = Brush.linearGradient(
-                    0f to rimTop.copy(alpha = 0.70f),
-                    0.3f to rimTop.copy(alpha = 0.12f),
-                    0.7f to rimTop.copy(alpha = 0.05f),
-                    1f to rimTop.copy(alpha = 0.40f),
-                    start = Offset.Zero,
-                    end = Offset(size.width, size.height),
-                ),
-                style = Stroke(width = 1.2.dp.toPx()),
-            )
-            // Soft inner glow along the top edge.
-            clipPath(path) {
-                drawRect(
-                    Brush.verticalGradient(
-                        0f to Color.White.copy(alpha = 0.10f),
-                        0.35f to Color.Transparent,
-                    ),
-                )
-            }
+            // 3D glass material: specular rim, bevelled thickness and gloss.
+            drawGlassMaterial(state, path, shape, light = WhiplashColors.isLight)
             drawContent()
         }
 }
@@ -579,3 +559,169 @@ fun glassTextShadow(): androidx.compose.ui.graphics.Shadow? =
     if (LocalGlassBackdrop.current != null && !WhiplashColors.isLight) {
         androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.6f), blurRadius = 8f)
     } else null
+
+
+/**
+ * Makes glass read as a solid, curved object even over a flat background
+ * (where there's nothing for the lens to bend), the way Apple's controls do:
+ *
+ *  - a thin specular rim, bright where the edge faces the light (top-left)
+ *    and a faint bounce light on the opposite edge;
+ *  - a bevel: the glass's thickness catching light on the lit side and
+ *    falling into shade on the far side, fading toward the flat middle;
+ *  - a soft gloss over the upper half.
+ *
+ * Android 13+: an AGSL shader over the shape's signed distance field, so it
+ * follows any rounded shape exactly. Older: gradient strokes approximating it.
+ */
+private fun DrawScope.drawGlassMaterial(state: GlassState, path: Path, shape: CornerBasedShape, light: Boolean) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && size.minDimension > 0f) {
+        val shader = (state.material as? RuntimeShader) ?: RuntimeShader(MATERIAL_SHADER).also { state.material = it }
+        shader.setFloatUniform("size", size.width, size.height)
+        shader.setFloatUniform("cornerRadii", cornerRadii(shape, size, this))
+        // Big surfaces (cards, bars) get a narrower bevel than small buttons,
+        // or their whole border turns into a glowing band.
+        val big = size.minDimension > 96.dp.toPx()
+        shader.setFloatUniform("rim", (if (light) 1.4.dp else 1.0.dp).toPx())
+        shader.setFloatUniform("bevel", minOf(if (big) 8.dp.toPx() else 14.dp.toPx(), size.minDimension * 0.25f))
+        shader.setFloatUniform("lightDir", -0.55f, -0.83f)
+        // Dark glass: Apple-style crisp, thin highlight that only catches at
+        // the edges facing the light, a faint bounce opposite, and depth from
+        // a slightly darker far edge; never a white glow round the border.
+        // Light glass: more light (white on white is subtle) and more shade.
+        shader.setFloatUniform("lightAmount", if (light) 0.95f else 0.60f)
+        shader.setFloatUniform("bevelLight", if (light) 0.45f else 0.07f)
+        shader.setFloatUniform("bounce", if (light) 0.35f else 0.14f)
+        shader.setFloatUniform("specPower", if (light) 1.4f else 3.0f)
+        shader.setFloatUniform("glossAmount", if (light) 0.12f else 0.035f)
+        shader.setFloatUniform("shadeAmount", if (light) 0.22f else 0.32f)
+        clipPath(path) { drawRect(androidx.compose.ui.graphics.ShaderBrush(shader)) }
+    } else {
+        drawPath(
+            path,
+            brush = Brush.linearGradient(
+                0f to Color.White.copy(alpha = 0.75f),
+                0.3f to Color.White.copy(alpha = 0.12f),
+                0.7f to Color.White.copy(alpha = 0.05f),
+                1f to Color.White.copy(alpha = 0.40f),
+                start = Offset.Zero,
+                end = Offset(size.width, size.height),
+            ),
+            style = Stroke(width = 1.3.dp.toPx()),
+        )
+        clipPath(path) {
+            drawRect(Brush.verticalGradient(0f to Color.White.copy(alpha = 0.16f), 0.45f to Color.Transparent))
+            drawRect(Brush.verticalGradient(0.6f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.10f)))
+        }
+    }
+}
+
+private const val MATERIAL_SHADER = """
+uniform float2 size;
+uniform float4 cornerRadii;
+uniform float rim;
+uniform float bevel;
+uniform float2 lightDir;
+uniform float lightAmount;
+uniform float shadeAmount;
+uniform float bevelLight;
+uniform float bounce;
+uniform float specPower;
+uniform float glossAmount;
+
+float radiusAt(float2 c, float4 r) {
+    if (c.x >= 0.0) { return c.y <= 0.0 ? r.y : r.z; }
+    return c.y <= 0.0 ? r.x : r.w;
+}
+
+float sdRoundedRect(float2 c, float2 halfSize, float radius) {
+    float2 q = abs(c) - (halfSize - float2(radius));
+    return length(max(q, 0.0)) - radius + min(max(q.x, q.y), 0.0);
+}
+
+float2 gradSdRoundedRect(float2 c, float2 halfSize, float radius) {
+    float2 q = abs(c) - (halfSize - float2(radius));
+    if (q.x >= 0.0 || q.y >= 0.0) {
+        return sign(c) * normalize(max(q, 0.0) + float2(0.0001));
+    }
+    float gx = step(q.y, q.x);
+    return sign(c) * float2(gx, 1.0 - gx);
+}
+
+half4 main(float2 coord) {
+    float2 halfSize = size * 0.5;
+    float2 c = coord - halfSize;
+    float radius = radiusAt(c, cornerRadii);
+    float d = -sdRoundedRect(c, halfSize, radius);
+    if (d < 0.0) { return half4(0.0); }
+    float2 n = gradSdRoundedRect(c, halfSize, min(radius * 1.5, min(halfSize.x, halfSize.y)));
+    // How much this bit of edge faces the light (outward normal vs light).
+    float facing = dot(normalize(n), -normalize(lightDir));
+    float lit = max(facing, 0.0);
+    float away = max(-facing, 0.0);
+
+    // Specular rim, plus a softer bounce on the far edge.
+    float rimMask = 1.0 - smoothstep(0.0, rim, d);
+    float spec = rimMask * (0.12 + 0.88 * pow(lit, specPower)) + rimMask * bounce * pow(away, 3.0);
+
+    // Bevel: thickness lit on the near side, shaded on the far side.
+    float b = 1.0 - smoothstep(0.0, bevel, d);
+    b = b * b;
+    float bevelLit = b * pow(lit, 1.2) * bevelLight;
+    float bevelShade = b * pow(away, 1.2) * shadeAmount;
+
+    // Gloss: a soft sheen over the upper half, fading to nothing by the middle.
+    float t = (c.y + halfSize.y) / size.y;
+    float gloss = (1.0 - smoothstep(0.0, 0.55, t)) * glossAmount * (1.0 - rimMask);
+
+    float aLight = clamp((spec * 0.85 + bevelLit + gloss) * lightAmount, 0.0, 1.0);
+    float aShade = clamp(bevelShade, 0.0, 1.0);
+    // Premultiplied: white light over black shade.
+    float a = aLight + aShade * (1.0 - aLight);
+    return half4(aLight, aLight, aLight, a);
+}
+"""
+
+/**
+ * A soft shadow under a glass control, drawn only *outside* its shape (a
+ * normal elevation shadow would show through clear glass as a dark smudge).
+ * Lifts the control off the page so it reads as a 3D object.
+ */
+fun Modifier.glassShadow(shape: CornerBasedShape, elevation: Dp = 10.dp, strength: Float = 0.22f): Modifier =
+    this.drawBehind {
+        val outline = shape.createOutline(size, layoutDirection, this)
+        val body = outline.toPath()
+        val e = elevation.toPx()
+        clipPath(body, clipOp = androidx.compose.ui.graphics.ClipOp.Difference) {
+            val steps = 8
+            for (i in steps downTo 1) {
+                val f = i / steps.toFloat()
+                val grow = e * f
+                val r = cornerRadii(shape, size, this)
+                val rr = androidx.compose.ui.geometry.RoundRect(
+                    left = -grow, top = -grow + e * 0.45f, right = size.width + grow, bottom = size.height + grow + e * 0.45f,
+                    topLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius(r[0] + grow),
+                    topRightCornerRadius = androidx.compose.ui.geometry.CornerRadius(r[1] + grow),
+                    bottomRightCornerRadius = androidx.compose.ui.geometry.CornerRadius(r[2] + grow),
+                    bottomLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius(r[3] + grow),
+                )
+                drawPath(Path().apply { addRoundRect(rr) }, Color.Black.copy(alpha = strength / steps * (1.2f - f)))
+            }
+        }
+    }
+
+/**
+ * Just the 3D glass shading (rim, bevel, gloss) over this element, for
+ * surfaces that move within an already-glass container, e.g. the selected
+ * segment of a glass tab bar.
+ */
+@Composable
+fun Modifier.glassMaterial(shape: CornerBasedShape): Modifier {
+    val state = remember { GlassState() }
+    val light = WhiplashColors.isLight
+    return this.drawWithContent {
+        val path = shape.createOutline(size, layoutDirection, this).toPath()
+        drawGlassMaterial(state, path, shape, light)
+        drawContent()
+    }
+}

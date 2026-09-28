@@ -1,5 +1,10 @@
 package com.whiplash.music.ui.search
 
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import com.whiplash.music.ui.theme.glassMaterial
+import com.whiplash.music.ui.theme.glassShadow
 import com.whiplash.music.ui.theme.glassFill
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -156,21 +161,47 @@ internal fun ModernSearchFilters(
             tween(GlassTokens.animSlow, easing = androidx.compose.animation.core.FastOutSlowInEasing),
             label = "filterIndicator",
         )
-        val indicator = WhiplashColors.accent
-        Row(
-            Modifier.fillMaxWidth().drawBehind {
-                drawRoundRect(
-                    color = indicator,
-                    topLeft = androidx.compose.ui.geometry.Offset(offset.toPx(), 0f),
-                    size = androidx.compose.ui.geometry.Size(segment.toPx(), size.height),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx()),
-                )
-            },
+        // The selected segment: in Liquid Glass a raised 3D glass puck (rim,
+        // bevel, gloss and a soft lift); otherwise a solid accent pill. It's
+        // one element that slides, and the tabs have no press ripple, so
+        // nothing else flashes at the destination while it moves.
+        val glassPuck = WhiplashColors.isGlass
+        val puckShape = RoundedCornerShape(16.dp)
+        Box(
+            Modifier
+                .matchParentSize()
+                .wrapContentWidth(Alignment.Start),
         ) {
+            Box(
+                Modifier
+                    .offset { androidx.compose.ui.unit.IntOffset(offset.roundToPx(), 0) }
+                    .width(segment)
+                    .fillMaxHeight()
+                    .then(
+                        if (glassPuck) {
+                            Modifier
+                                .glassShadow(puckShape, elevation = 6.dp, strength = if (WhiplashColors.isLight) 0.16f else 0.28f)
+                                .clip(puckShape)
+                                .background(
+                                    if (WhiplashColors.isLight) Color.White.copy(alpha = 0.55f)
+                                    else WhiplashColors.textPrimary.copy(alpha = 0.14f),
+                                )
+                                .glassMaterial(puckShape)
+                        } else {
+                            Modifier.clip(puckShape).background(WhiplashColors.accent)
+                        },
+                    ),
+            )
+        }
+        Row(Modifier.fillMaxWidth()) {
             tabs.forEach { tab ->
                 val isSelected = tab == selected
                 val content by animateColorAsState(
-                    if (isSelected) WhiplashColors.onAccent else WhiplashColors.textSecondary,
+                    when {
+                        isSelected && glassPuck -> WhiplashColors.textPrimary
+                        isSelected -> WhiplashColors.onAccent
+                        else -> WhiplashColors.textSecondary
+                    },
                     tween(GlassTokens.animSlow),
                     label = "filterContent",
                 )
@@ -180,7 +211,13 @@ internal fun ModernSearchFilters(
                         .weight(1f)
                         .heightIn(min = 52.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(tab) })
+                        .selectable(
+                            selected = isSelected,
+                            role = Role.Tab,
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = { onSelect(tab) },
+                        )
                         .semantics { contentDescription = if (n > 0) "${tab.label}, $n results" else tab.label }
                         .padding(vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,

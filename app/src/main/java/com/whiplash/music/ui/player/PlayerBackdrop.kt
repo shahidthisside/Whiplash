@@ -31,6 +31,7 @@ import com.whiplash.music.domain.model.ArtworkPalette
 import com.whiplash.music.domain.model.extractArtworkPalette
 import com.whiplash.music.domain.model.relativeLuminance
 import com.whiplash.music.ui.theme.WhiplashColors
+import com.whiplash.music.ui.theme.appBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.PI
@@ -49,6 +50,8 @@ data class PlayerColors(
     val onAccent: Color,
     /** Top-left, top-right, bottom-left, bottom-right backdrop colours. */
     val mesh: List<Color>,
+    /** False when the colours are just the theme (artwork colours off or not loaded yet). */
+    val fromArtwork: Boolean = true,
 )
 
 /**
@@ -136,7 +139,7 @@ fun animatedPlayerColors(palette: ArtworkPalette?): PlayerColors {
     val m1 by animateColorAsState(targetMesh[1], spec, label = "mesh1")
     val m2 by animateColorAsState(targetMesh[2], spec, label = "mesh2")
     val m3 by animateColorAsState(targetMesh[3], spec, label = "mesh3")
-    return PlayerColors(accent, onAccent, listOf(m0, m1, m2, m3))
+    return PlayerColors(accent, onAccent, listOf(m0, m1, m2, m3), fromArtwork = palette != null)
 }
 
 /**
@@ -168,6 +171,13 @@ fun PlayerMeshBackdrop(
         remember { mutableStateOf(0f) }
     }
 
+    // Without artwork colours the player is simply the theme's own page
+    // (Nord blue-grey, Light white, the Liquid Glass background...), with no
+    // darkening scrim, rather than a near-black slab.
+    if (!colors.fromArtwork) {
+        androidx.compose.foundation.layout.Box(modifier.fillMaxSize().then(Modifier.appBackground()))
+        return
+    }
     Canvas(modifier = modifier.fillMaxSize()) {
         drawRect(base)
         val phase = driftState.value * 2f * PI.toFloat()

@@ -1,5 +1,6 @@
 package com.whiplash.music.ui.player
 
+import com.whiplash.music.ui.theme.glassSource
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.requiredHeight
@@ -144,6 +145,7 @@ fun FullPlayerScreen(
     // of the cover, so the displayed artwork itself is untouched.
     val artworkPalette by rememberArtworkPalette(item?.artworkUri, enabled = artworkColorsEnabled)
     val playerColors = animatedPlayerColors(artworkPalette)
+        .copy(fromArtwork = artworkColorsEnabled && item?.artworkUri != null)
     var isQueueSheetOpen by remember { mutableStateOf(false) }
     var isSleepTimerSheetOpen by remember { mutableStateOf(false) }
     var isLyricsSheetOpen by remember { mutableStateOf(false) }
@@ -214,6 +216,13 @@ fun FullPlayerScreen(
     )
     val density = androidx.compose.ui.platform.LocalDensity.current
 
+    // Liquid Glass: the player's own backdrop (cover-lit mesh + hero art) is
+    // recorded so its buttons can be real glass refracting it.
+    val playerBackdrop = com.whiplash.music.ui.theme.rememberGlassBackdrop()
+    val playerGlass = WhiplashColors.isGlass
+    androidx.compose.runtime.CompositionLocalProvider(
+        com.whiplash.music.ui.theme.LocalGlassBackdrop provides if (playerGlass) playerBackdrop else null,
+    ) {
     androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -236,6 +245,11 @@ fun FullPlayerScreen(
     val wideWindow = maxWidth >= TWO_PANE_MIN_WIDTH
     val twoPane = wideWindow && maxWidth > maxHeight
     val useHero = heroArtwork && !twoPane
+    Box(
+        Modifier
+            .fillMaxSize()
+            .then(if (playerGlass) Modifier.glassSource(playerBackdrop) else Modifier),
+    ) {
     PlayerMeshBackdrop(
         colors = playerColors,
         animate = state.isPlaying && !reducedMotion,
@@ -252,6 +266,8 @@ fun FullPlayerScreen(
                 .graphicsLayer { alpha = 1f - collapse * (1f - COLLAPSED_BODY_ALPHA) },
         )
     }
+    }
+
     val TopBar: @Composable () -> Unit = {
     Row(
         modifier = Modifier
@@ -421,7 +437,9 @@ fun FullPlayerScreen(
             Icon(
                 imageVector = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                 contentDescription = null,
-                tint = playerColors.onAccent,
+                // On clear glass the icon is the page's text colour, not the
+                // ink meant for a solid accent fill.
+                tint = if (WhiplashColors.isGlass) WhiplashColors.textPrimary else playerColors.onAccent,
                 modifier = Modifier.size(38.dp),
             )
         }
@@ -619,6 +637,7 @@ fun FullPlayerScreen(
                 }
                 .padding(horizontal = GlassTokens.spaceLg, vertical = GlassTokens.spaceMd),
         )
+    }
     }
     }
 

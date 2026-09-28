@@ -114,11 +114,29 @@ fun GlassIconButton(
         label = "glassIconButtonOpacity",
     )
 
+    // Liquid Glass (a backdrop is provided, e.g. over the full player's
+    // artwork): a real glass disc; otherwise the tinted round button.
+    val onGlass = LocalGlassBackdrop.current != null
     Box(
         modifier = modifier
+            .then(if (onGlass) Modifier.glassShadow(CircleShape, elevation = 8.dp, strength = 0.18f) else Modifier)
             .clip(CircleShape)
-            .background(WhiplashColors.surfaceElevated.copy(alpha = opacity))
-            .border(GlassTokens.borderWidth, WhiplashColors.glassBorder, CircleShape)
+            .then(
+                if (onGlass) {
+                    Modifier.liquidGlass(
+                        shape = CircleShape,
+                        fallback = WhiplashColors.surfaceElevated.copy(alpha = opacity),
+                        tint = WhiplashColors.surfaceElevated,
+                        legibility = 0.3f,
+                        refractionHeight = 14.dp,
+                        refractionAmount = 18.dp,
+                    )
+                } else {
+                    Modifier
+                        .background(WhiplashColors.surfaceElevated.copy(alpha = opacity))
+                        .border(GlassTokens.borderWidth, WhiplashColors.glassBorder, CircleShape)
+                },
+            )
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -282,9 +300,40 @@ fun GlassPrimaryPlayButton(
         modifier = modifier
             .size(size)
             .graphicsLayer(scaleX = scale, scaleY = scale)
-            .shadow(elevation = GlassTokens.elevationElevated, shape = CircleShape, clip = false)
+            // Clear glass gets a shadow drawn only outside the disc (an
+            // elevation shadow would show through it as a smudge).
+            .then(
+                if (LocalGlassBackdrop.current != null) {
+                    Modifier.glassShadow(CircleShape, elevation = 14.dp, strength = 0.30f)
+                } else {
+                    Modifier.shadow(elevation = GlassTokens.elevationElevated, shape = CircleShape, clip = false)
+                },
+            )
             .clip(CircleShape)
-            .background(containerColor)
+            .then(
+                // Liquid Glass: clear glass like the other controls, with only
+                // a faint wash of the accent; the lens and rim make it read as
+                // the main button.
+                if (LocalGlassBackdrop.current != null) {
+                    Modifier.liquidGlass(
+                        shape = CircleShape,
+                        fallback = containerColor,
+                        tint = containerColor,
+                        // Light glass: a colourless disc (an ink-dark accent wash would
+                        // just read as grey); dark glass: a faint accent wash.
+                        tintAlpha = if (WhiplashColors.isLight) {
+                            glassTintAlpha(WhiplashColors.glassOpacity)
+                        } else {
+                            (0.10f + 0.6f * WhiplashColors.glassOpacity).coerceAtMost(0.7f)
+                        },
+                        legibility = 0.3f,
+                        refractionHeight = 20.dp,
+                        refractionAmount = 26.dp,
+                    )
+                } else {
+                    Modifier.background(containerColor)
+                },
+            )
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
