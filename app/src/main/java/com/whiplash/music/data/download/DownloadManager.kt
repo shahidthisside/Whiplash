@@ -396,75 +396,77 @@ class DownloadManager(
         )
     }
 
+    /**
+     * Fetches [url] into [destination] as a run of bounded `Range` requests
+     * ([DOWNLOAD_CHUNK_BYTES] each) instead of one open-ended GET.
+     *
+     * Real, reproduced bug this closes: googlevideo paces an unbounded GET
+     * down to roughly real-time and frequently rejects or stalls it — on the
+     * emulator a fresh download got HTTP 403 on the first attempt, then the
+     * retry stalled at 1.7 MB until the 60 s read timeout and the download
+     * failed. Streaming never hit this because [com.whiplash.music.playback.cache.ChunkedDataSource]
+     * already reads the same URLs in bounded ranges; this is the same
+     * technique applied to downloads.
+     *
+     * A server that ignores `Range` and answers 200 with the whole body is
+     * still handled: that single response is read to the end. Cancellation
+     * is checked on every buffer read, and the final size is compared
+     * against the declared total so a truncated file is never saved as
+     * complete (routes into the caller's retry-then-fail path).
+     */
     private suspend fun downloadToFile(url: String, destination: File, onProgress: (Long, Long) -> Unit) {
         withContext(Dispatchers.IO) {
             val downloadScope = this
-            val request = Request.Builder().url(url).build()
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) error("HTTP ${response.code} downloading $url")
-                val body = response.body ?: error("Empty response body downloading $url")
-                val totalBytes = body.contentLength()
-                body.byteStream().use { input ->
-                    FileOutputStream(destination).use { output ->
-                        val buffer = ByteArray(8 * 1024)
-                        var downloaded = 0L
-                        while (true) {
-                            // Real, reported bug: this loop only ever
-                            // called plain blocking I/O (InputStream.read,
-                            // not a suspend function), so it never
-                            // actually checked for cancellation — tapping
-                            // "Cancel download" called Job.cancel() (which
-                            // only *requests* cooperative cancellation)
-                            // and deleted the file, but this loop kept
-                            // running regardless, re-writing to the
-                            // now-deleted file's fd and re-emitting
-                            // onProgress() (which re-added the track to
-                            // DownloadManager.progress) for as long as the
-                            // underlying socket kept delivering bytes —
-                            // "cancel download" visibly did nothing until
-                            // the transfer happened to finish or stall on
-                            // its own, sometimes tens of seconds later.
-                            // ensureActive() makes this loop check the
-                            // coroutine's own cancellation state on every
-                            // iteration, so a cancelled job now stops
-                            // reading (and therefore stops re-emitting
-                            // progress) within one buffer-read's worth of
-                            // latency instead of waiting for the whole
-                            // response body to drain.
-                            downloadScope.ensureActive()
-                            val read = input.read(buffer)
-                            if (read == -1) break
-                            output.write(buffer, 0, read)
-                            downloaded += read
-                            onProgress(downloaded, totalBytes)
+            var downloaded = 0L
+            var totalBytes = -1L
+            FileOutputStream(destination).use { output ->
+                val buffer = ByteArray(8 * 1024)
+                while (totalBytes < 0 || downloaded < totalBytes) {
+                    downloadScope.ensureActive()
+                    val end = downloaded + DOWNLOAD_CHUNK_BYTES - 1
+                    val request = Request.Builder()
+                        .url(url)
+                        .header("Range", "bytes=$downloaded-$end")
+                        .build()
+                    val fullBody = okHttpClient.newCall(request).execute().use { response ->
+                        // Unknown total and the previous chunk ended exactly on a
+                        // chunk boundary: 416 here just means "nothing left".
+                        if (response.code == 416 && totalBytes < 0 && downloaded > 0) return@use true
+                        if (!response.isSuccessful) error("HTTP ${response.code} downloading $url")
+                        val body = response.body ?: error("Empty response body downloading $url")
+                        val isPartial = response.code == 206
+                        if (isPartial) {
+                            // "bytes start-end/total"; total may be "*" (unknown).
+                            val total = response.header("Content-Range")
+                                ?.substringAfterLast('/', "")?.toLongOrNull()
+                            if (total != null && total > 0) totalBytes = total
+                        } else {
+                            // Range ignored: this one response is the whole file.
+                            if (downloaded > 0) error("Server ignored Range mid-download for $url")
+                            totalBytes = body.contentLength()
                         }
-                        // Real silent-failure gap this closes: the loop above
-                        // exits on read() == -1, and that was treated as
-                        // unconditional success — attemptDownload went
-                        // straight on to persist a COMPLETED row. But -1 only
-                        // means "this stream produced no more bytes", which is
-                        // also exactly what a connection dropped mid-transfer
-                        // looks like once the body has been partially
-                        // consumed. Content-Length was being read into
-                        // totalBytes and used for the progress ring, yet never
-                        // compared against what actually landed on disk, so a
-                        // truncated file could be saved, marked COMPLETED with
-                        // a full checkmark, and never retried — the user's
-                        // "downloaded for offline" song silently cut off part
-                        // way through, with no error anywhere.
-                        //
-                        // Throwing here routes into runDownload's existing
-                        // retry-once-then-fail-visibly path, which already
-                        // deletes the partial file and surfaces a toast.
-                        // Guarded on totalBytes > 0 so a chunked/gzip response
-                        // with no declared length (contentLength() == -1)
-                        // keeps its previous behaviour rather than failing
-                        // every time.
-                        if (totalBytes > 0 && downloaded != totalBytes) {
-                            error("Truncated download: wrote $downloaded of $totalBytes bytes for $url")
+                        var chunkRead = 0L
+                        body.byteStream().use { input ->
+                            while (true) {
+                                downloadScope.ensureActive()
+                                val read = input.read(buffer)
+                                if (read == -1) break
+                                output.write(buffer, 0, read)
+                                downloaded += read
+                                chunkRead += read
+                                onProgress(downloaded, totalBytes)
+                            }
                         }
+                        if (isPartial && chunkRead == 0L) error("Empty range response at $downloaded for $url")
+                        !isPartial
                     }
+                    if (fullBody) break
+                    // 206 without a parseable total: stop once a short chunk says the end was reached.
+                    if (totalBytes < 0 && downloaded % DOWNLOAD_CHUNK_BYTES != 0L) break
                 }
+            }
+            if (totalBytes > 0 && downloaded != totalBytes) {
+                error("Truncated download: wrote $downloaded of $totalBytes bytes for $url")
             }
         }
     }
@@ -614,6 +616,9 @@ class DownloadManager(
 
         /** How long a failed download's progress-ring badge stays visible (showing the failure) before the row disappears entirely. */
         const val FAILED_STATE_VISIBLE_MS = 2_500L
+
+        /** Bytes per `Range` request in [downloadToFile]; same size streaming uses (ChunkedDataSource). */
+        const val DOWNLOAD_CHUNK_BYTES = 2L * 1024 * 1024
 
         /** Longest a track title is allowed to run inside a toast message before being ellipsized — a real YouTube video title can run 50+ characters, which previously stretched the "Download failed: <title>" toast into an oversized banner. */
         const val TOAST_TITLE_MAX_CHARS = 40

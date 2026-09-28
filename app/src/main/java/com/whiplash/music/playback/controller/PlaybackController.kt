@@ -1,3 +1,7 @@
+// Media3 caching/data-source/forwarding APIs used here are @UnstableApi;
+// opting in file-wide records that this is a deliberate dependency.
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.whiplash.music.playback.controller
 // Developed by Shahid Ansari — github.com/shahidthisside (-SA)
 
@@ -88,6 +92,62 @@ class PlaybackController(
 
     /** Domain-level queue, source of truth for section 21 queue features. */
     private var queue: MutableList<PlayableItem> = mutableListOf()
+
+    /*
+     * Shuffle state. Shuffle used to pick a fresh random index on every
+     * call to nextIndex()/previousIndex(), which meant: songs repeated
+     * before the rest had played; Previous jumped to a random song instead
+     * of the one just heard; the neighbour prefetch resolved a different
+     * "next" than the one Next then played (wasted network work every
+     * skip); and nextIndex() never returned null, so the End-of-queue sleep
+     * timer and autoplay's end-of-queue extension never fired with shuffle
+     * on. Now each item plays once per cycle, the upcoming pick is chosen
+     * once and reused until played, and Previous walks back through what
+     * actually played.
+     *
+     * Items are tracked by identity, not index, so inserting, moving,
+     * removing or trimming queue entries can never desync this state (a
+     * removed item simply stops matching). The two places that swap the
+     * current entry for an artwork-upgraded copy go through
+     * [replaceQueueItem] to carry its identity over.
+     */
+    private val shufflePlayed: MutableSet<PlayableItem> =
+        java.util.Collections.newSetFromMap(java.util.IdentityHashMap())
+    private val shuffleHistory = ArrayDeque<PlayableItem>()
+    /**
+     * What Next plays with shuffle on, top = next: tracks stepped back from
+     * with Previous, a "Play next" pick, or the random pick already made
+     * (so prefetch, Next and the end-of-track advance all agree).
+     */
+    private val shuffleForward = ArrayDeque<PlayableItem>()
+
+    private fun indexOfIdentity(item: PlayableItem): Int = queue.indexOfFirst { it === item }
+
+    /** Starts a fresh shuffle cycle with only the current track counted as played. */
+    private fun resetShuffleState() {
+        shufflePlayed.clear()
+        shuffleHistory.clear()
+        shuffleForward.clear()
+        queue.getOrNull(currentIndex)?.let { shufflePlayed.add(it) }
+    }
+
+    /** Records [item] as the track shuffle came from, so Previous can return to it. */
+    private fun pushShuffleHistory(item: PlayableItem) {
+        shuffleHistory.addLast(item)
+        while (shuffleHistory.size > MAX_SHUFFLE_HISTORY) shuffleHistory.removeFirst()
+    }
+
+    /** Replaces the queue entry at [index], keeping shuffle's identity tracking pointed at the new copy. */
+    private fun replaceQueueItem(index: Int, updated: PlayableItem) {
+        val old = queue[index]
+        queue[index] = updated
+        if (old === updated) return
+        if (shufflePlayed.remove(old)) shufflePlayed.add(updated)
+        for (stack in listOf(shuffleHistory, shuffleForward)) {
+            val it = stack.listIterator()
+            while (it.hasNext()) if (it.next() === old) it.set(updated)
+        }
+    }
     private var currentIndex: Int = -1
 
     /** Tracks which queue indices have already had a Media3 MediaItem prepared, to avoid re-resolving. */
@@ -372,9 +432,18 @@ class PlaybackController(
     /** Replaces the queue with [items] and starts playback at [startIndex] (section 21). */
     fun playQueue(items: List<PlayableItem>, startIndex: Int) {
         if (items.isEmpty()) return
+        // Tapping a row in the Queue sheet replays the very same list: keep
+        // the shuffle cycle and let Previous return to the track left.
+        val sameQueue = items.size == queue.size && items.indices.all { items[it] === queue[it] }
+        val leaving = queue.getOrNull(currentIndex)
         queue = items.toMutableList()
         preparedIndices.clear()
         currentIndex = startIndex.coerceIn(0, queue.lastIndex)
+        if (sameQueue) {
+            if (leaving != null && leaving !== queue[currentIndex]) pushShuffleHistory(leaving)
+        } else {
+            resetShuffleState()
+        }
         _state.update { it.copy(queue = queue.toList(), currentIndex = currentIndex) }
         playIndex(currentIndex)
     }
@@ -394,6 +463,8 @@ class PlaybackController(
         val insertAt = (currentIndex + 1).coerceIn(0, queue.size)
         queue.add(insertAt, item)
         shiftPreparedIndicesAfterInsert(insertAt)
+        // "Play next" means next, shuffle or not.
+        if (_state.value.shuffleEnabled) shuffleForward.addLast(item)
         _state.update { it.copy(queue = queue.toList()) }
         ToastController.show("Playing next")
     }
@@ -416,8 +487,15 @@ class PlaybackController(
                 _state.update { it.copy(queue = emptyList(), currentIndex = -1, currentItem = null, isPlaying = false) }
             }
             index < currentIndex -> {
+                // The currently playing track keeps playing untouched: the
+                // player only ever holds this one resolved MediaItem (single-
+                // item timeline — everything uses setMediaItem, never
+                // addMediaItem), so its timeline has no entry at this domain
+                // queue index to remove. Calling removeMediaItem(index) here
+                // would either throw (index >= mediaItemCount of 1) or wrongly
+                // drop the one item that is actually playing. Only the domain
+                // queue and currentIndex shift.
                 currentIndex -= 1
-                controller?.removeMediaItem(index)
                 _state.update { it.copy(queue = queue.toList(), currentIndex = currentIndex) }
             }
             index == currentIndex -> {
@@ -496,6 +574,8 @@ class PlaybackController(
         if (index !in queue.indices) return
         val item = queue[index]
         currentIndex = index
+        shufflePlayed.add(item)
+        if (shuffleForward.lastOrNull() === item) shuffleForward.removeLast()
         val generation = ++resolveGeneration
         prefetchJob?.cancel()
 
@@ -526,7 +606,7 @@ class PlaybackController(
         val displayItem = if (cachedArtwork != null && item is PlayableItem.YoutubeTrack) {
             item.copy(artworkUri = cachedArtwork)
         } else item
-        if (displayItem !== item && currentIndex in queue.indices) queue[currentIndex] = displayItem
+        if (displayItem !== item && currentIndex in queue.indices) replaceQueueItem(currentIndex, displayItem)
 
         // Pre-warm Coil's cache for whatever artwork the immediate previous
         // and next queue items already have (their existing artworkUri —
@@ -1035,7 +1115,7 @@ class PlaybackController(
             return current
         }
         val updated = current.copy(artworkUri = betterArtworkUrl)
-        if (currentIndex in queue.indices) queue[currentIndex] = updated
+        if (currentIndex in queue.indices) replaceQueueItem(currentIndex, updated)
         return updated
     }
 
@@ -1305,6 +1385,9 @@ class PlaybackController(
     /** Advances to the next queue item, honoring shuffle/repeat (section 21). */
     fun seekToNext() {
         val next = nextIndex() ?: return
+        if (_state.value.shuffleEnabled && next != currentIndex) {
+            queue.getOrNull(currentIndex)?.let { pushShuffleHistory(it) }
+        }
         playIndex(next)
     }
 
@@ -1326,12 +1409,14 @@ class PlaybackController(
             return
         }
         val prev = previousIndex() ?: return
+        consumeShuffleHistoryFor(prev)
         playIndex(prev)
     }
 
     /** Goes to the previous queue item unconditionally, never restarting (Media3's seekToPreviousMediaItem). */
     fun seekToPreviousItem() {
         val prev = previousIndex() ?: return
+        consumeShuffleHistoryFor(prev)
         playIndex(prev)
     }
 
@@ -1352,7 +1437,7 @@ class PlaybackController(
         val state = _state.value
         return when {
             state.repeatMode == RepeatMode.ONE -> currentIndex
-            state.shuffleEnabled -> queue.indices.filter { it != currentIndex }.randomOrNull() ?: currentIndex
+            state.shuffleEnabled -> shuffleNextIndex(repeatAll = state.repeatMode == RepeatMode.ALL)
             currentIndex + 1 <= queue.lastIndex -> currentIndex + 1
             state.repeatMode == RepeatMode.ALL -> 0
             else -> null
@@ -1363,7 +1448,7 @@ class PlaybackController(
         if (queue.isEmpty()) return null
         val state = _state.value
         return when {
-            state.shuffleEnabled -> queue.indices.filter { it != currentIndex }.randomOrNull() ?: currentIndex
+            state.shuffleEnabled -> shufflePreviousIndex()
             currentIndex - 1 >= 0 -> currentIndex - 1
             state.repeatMode == RepeatMode.ALL -> queue.lastIndex
             else -> null
@@ -1399,7 +1484,58 @@ class PlaybackController(
     fun hasPrevious(): Boolean = previousIndex() != null || shouldRestartOnPrevious()
 
     fun setShuffleEnabled(enabled: Boolean) {
+        if (enabled != _state.value.shuffleEnabled) resetShuffleState()
         _state.update { it.copy(shuffleEnabled = enabled) }
+    }
+
+    /**
+     * The shuffled next track: the pick already made (so prefetch, Next and
+     * the end-of-track advance all agree), else a random track not yet
+     * played this cycle. When every track has played, null (end of queue)
+     * unless repeat-all starts a new cycle. Called from queries too (hasNext,
+     * prefetch); the first call records its pick and later calls return that
+     * same pick, so asking is idempotent.
+     */
+    private fun shuffleNextIndex(repeatAll: Boolean): Int? {
+        while (shuffleForward.isNotEmpty()) {
+            val i = indexOfIdentity(shuffleForward.last())
+            if (i >= 0 && i != currentIndex) return i
+            shuffleForward.removeLast() // removed from the queue since; skip it
+        }
+        var pool = queue.indices.filter { it != currentIndex && queue[it] !in shufflePlayed }
+        if (pool.isEmpty()) {
+            if (!repeatAll) return null
+            if (queue.size == 1) return currentIndex
+            shufflePlayed.clear()
+            queue.getOrNull(currentIndex)?.let { shufflePlayed.add(it) }
+            pool = queue.indices.filter { it != currentIndex }
+        }
+        val pick = pool.random()
+        shuffleForward.addLast(queue[pick])
+        return pick
+    }
+
+    /** The track shuffle played before this one, if it's still in the queue. */
+    private fun shufflePreviousIndex(): Int? {
+        while (shuffleHistory.isNotEmpty()) {
+            val i = indexOfIdentity(shuffleHistory.last())
+            if (i >= 0 && i != currentIndex) return i
+            shuffleHistory.removeLast() // removed from the queue since; skip it
+        }
+        return null
+    }
+
+    /** Going back to [index] via shuffle history uses up that history entry. */
+    private fun consumeShuffleHistoryFor(index: Int) {
+        if (!_state.value.shuffleEnabled) return
+        val last = shuffleHistory.lastOrNull() ?: return
+        if (queue.getOrNull(index) !== last) return
+        shuffleHistory.removeLast()
+        // Next after Previous walks forward again through the tracks left.
+        queue.getOrNull(currentIndex)?.let { leaving ->
+            shuffleForward.addLast(leaving)
+            while (shuffleForward.size > MAX_SHUFFLE_HISTORY) shuffleForward.removeFirst()
+        }
     }
 
     fun setRepeatMode(mode: RepeatMode) {
@@ -1674,6 +1810,9 @@ class PlaybackController(
 
         /** How many already-played tracks stay reachable behind the current one when trimming. */
         const val MAX_PLAYED_HISTORY_IN_QUEUE = 50
+
+        /** Tracks Previous can walk back through with shuffle on. */
+        const val MAX_SHUFFLE_HISTORY = 200
 
         /**
          * Caps how many getPlayerInfo() category-checks run at once during

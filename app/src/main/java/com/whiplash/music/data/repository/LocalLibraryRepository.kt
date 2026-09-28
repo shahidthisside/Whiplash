@@ -81,25 +81,37 @@ class LocalLibraryRepository(
         val removedSongIds = (previousSongIds - currentSongIds).toList()
 
         localSongDao.upsertAll(result.songs)
-        if (removedSongIds.isNotEmpty()) {
-            localSongDao.deleteByIds(removedSongIds)
-        }
+        // Delete removed rows in chunks: `deleteByIds` uses `WHERE id IN (:ids)`,
+        // one bound variable per id, and SQLite caps a statement at
+        // SQLITE_MAX_VARIABLE_NUMBER (999 on the SQLite bundled with API < 30,
+        // and minSdk here is 26). Deleting a folder of 1000+ local tracks at
+        // once makes `removedSongIds` exceed that limit, throwing
+        // SQLiteException ("too many SQL variables") and aborting this whole
+        // reconcile transaction — and refresh() is driven by a ContentObserver
+        // that can fire on exactly such a bulk deletion. Chunking keeps every
+        // statement within the limit.
+        removedSongIds.chunked(SQLITE_MAX_VARIABLES).forEach { localSongDao.deleteByIds(it) }
 
         val previousAlbumIds = localAlbumDao.getAllIds().toSet()
         val currentAlbumIds = result.albums.map { it.albumId }.toSet()
         localAlbumDao.upsertAll(result.albums)
         val removedAlbumIds = (previousAlbumIds - currentAlbumIds).toList()
-        if (removedAlbumIds.isNotEmpty()) {
-            localAlbumDao.deleteByIds(removedAlbumIds)
-        }
+        removedAlbumIds.chunked(SQLITE_MAX_VARIABLES).forEach { localAlbumDao.deleteByIds(it) }
 
         val previousArtistIds = localArtistDao.getAllIds().toSet()
         val currentArtistIds = result.artists.map { it.artistId }.toSet()
         localArtistDao.upsertAll(result.artists)
         val removedArtistIds = (previousArtistIds - currentArtistIds).toList()
-        if (removedArtistIds.isNotEmpty()) {
-            localArtistDao.deleteByIds(removedArtistIds)
-        }
+        removedArtistIds.chunked(SQLITE_MAX_VARIABLES).forEach { localArtistDao.deleteByIds(it) }
+    }
+
+    private companion object {
+        /**
+         * Max ids per `WHERE id IN (:ids)` statement. Kept well under
+         * SQLite's SQLITE_MAX_VARIABLE_NUMBER (999 on the SQLite shipped with
+         * API < 30) so a bulk reconcile never overflows a single statement.
+         */
+        const val SQLITE_MAX_VARIABLES = 900
     }
 }
 

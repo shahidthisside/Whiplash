@@ -1,3 +1,7 @@
+// Media3 caching/data-source/forwarding APIs used here are @UnstableApi;
+// opting in file-wide records that this is a deliberate dependency.
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.whiplash.music.playback.cache
 
 import android.content.Context
@@ -139,8 +143,15 @@ class AudioCacheManager(context: Context) {
         synchronized(this) {
             cache?.release()
             cache = null
+            // Delete inside the same lock that guards creation/release:
+            // SimpleCache allows only one live instance per directory and
+            // throws if a second is constructed against a folder still in
+            // use. Doing the delete outside the lock left a window where a
+            // concurrent getOrCreateCache() (e.g. the service's loading
+            // thread) could construct a fresh SimpleCache on this directory
+            // mid-delete and crash. Serializing both under `this` closes it.
+            runCatching { SimpleCache.delete(cacheDir, StandaloneDatabaseProvider(appContext)) }
         }
-        runCatching { SimpleCache.delete(cacheDir, StandaloneDatabaseProvider(appContext)) }
     }
 
     private companion object {

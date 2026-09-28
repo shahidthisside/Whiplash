@@ -102,18 +102,25 @@ fun AlbumDetailScreen(
         // the same screen instance, but harmless either way) don't
         // needlessly replay the crossfade.
         AnimatedContent(
-            targetState = when (state) {
-                is AlbumDetailUiState.Loading -> "loading"
-                is AlbumDetailUiState.Error -> "error"
-                is AlbumDetailUiState.Loaded -> "loaded"
+            // Target is the state itself so each pane renders its OWN state
+            // while crossfading (the outgoing spinner stays a spinner instead
+            // of redrawing the new content twice); contentKey keeps the
+            // animation keyed by kind only, as before.
+            targetState = state,
+            contentKey = { s ->
+                when (s) {
+                    is AlbumDetailUiState.Loading -> "loading"
+                    is AlbumDetailUiState.Error -> "error"
+                    is AlbumDetailUiState.Loaded -> "loaded"
+                }
             },
             transitionSpec = {
                 fadeIn(animationSpec = tween(GlassTokens.animRegular))
                     .togetherWith(fadeOut(animationSpec = tween(GlassTokens.animFast)))
             },
             label = "albumDetailState",
-        ) { _ ->
-            when (val s = state) {
+        ) { s ->
+            when (s) {
                 is AlbumDetailUiState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = WhiplashColors.accent)
                 }

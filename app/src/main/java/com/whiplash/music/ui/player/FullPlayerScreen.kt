@@ -538,15 +538,16 @@ fun FullPlayerScreen(
                     ) {
                         ArtworkSwipeHint(artworkSwipe)
                     }
-                } else
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f, fill = false)
-                        .padding(vertical = GlassTokens.spaceXl),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    ArtworkCard(currentTrack, Modifier.aspectRatio(1f))
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .padding(vertical = GlassTokens.spaceXl),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ArtworkCard(currentTrack, Modifier.aspectRatio(1f))
+                    }
                 }
 
                 TitleBlock(currentTrack)

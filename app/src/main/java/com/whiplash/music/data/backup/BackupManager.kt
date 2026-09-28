@@ -360,7 +360,13 @@ class BackupManager(
             // function's own doc for why this isn't a separate checkbox.
             val songsJson = JSONArray()
             if (songIds.isNotEmpty()) {
-                database.songDao().getByIds(songIds.toList()).forEach { song ->
+                // Chunked to stay under SQLite's SQLITE_MAX_VARIABLE_NUMBER
+                // (999 on the SQLite bundled with API < 30; minSdk 26):
+                // getByIds binds one variable per id, and a backup spanning
+                // large playlists + history + favorites can easily reference
+                // more than 999 distinct song ids — a single IN (:ids) query
+                // would throw "too many SQL variables" and fail the backup.
+                songIds.toList().chunked(SQLITE_MAX_VARIABLES).flatMap { database.songDao().getByIds(it) }.forEach { song ->
                     songsJson.put(
                         JSONObject().apply {
                             put("id", song.id)
@@ -811,6 +817,13 @@ class BackupManager(
 
         /** Bumped only if the selective JSON schema itself changes shape; not tied to [WhiplashDatabase]'s own Room schema version. */
         private const val SELECTIVE_FORMAT_VERSION = 1
+
+        /**
+         * Max ids per `WHERE id IN (:ids)` query (see [backupSelective]). Kept
+         * well under SQLite's SQLITE_MAX_VARIABLE_NUMBER (999 on the SQLite
+         * shipped with API < 30; minSdk here is 26).
+         */
+        private const val SQLITE_MAX_VARIABLES = 900
 
         /** Suggested file name for the system "Save as" picker, timestamped so repeated backups don't silently collide. */
         fun suggestedFileName(): String {

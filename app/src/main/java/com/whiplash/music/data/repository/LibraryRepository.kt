@@ -396,7 +396,17 @@ class LibraryRepository(
         val localIds = refs.filter { it.second == MediaSource.LOCAL }.mapNotNull { it.first.toLongOrNull() }
         val downloadIds = refs.filter { it.second == MediaSource.DOWNLOAD }.map { it.first }
 
-        val songs = if (youtubeIds.isNotEmpty()) songDao.getByIds(youtubeIds).associateBy { it.id } else emptyMap()
+        val songs = if (youtubeIds.isNotEmpty()) {
+            // Chunked to stay under SQLite's SQLITE_MAX_VARIABLE_NUMBER (999 on
+            // API < 30, minSdk 26): `getByIds` binds one variable per id, and a
+            // large imported YouTube playlist (the app supports pasting a whole
+            // playlist link) can hold well over 999 tracks — resolving it in
+            // one IN (:ids) query would throw "too many SQL variables" and
+            // crash the screen showing that playlist.
+            youtubeIds.chunked(SQLITE_MAX_VARIABLES).flatMap { songDao.getByIds(it) }.associateBy { it.id }
+        } else {
+            emptyMap()
+        }
         val localSongs = if (localIds.isNotEmpty()) {
             localIds.mapNotNull { localSongDao.getById(it) }.associateBy { it.mediaStoreId.toString() }
         } else {
@@ -453,5 +463,12 @@ class LibraryRepository(
          * so the table can no longer grow past what is actually reachable.
          */
         const val MAX_HISTORY_ENTRIES = 200
+
+        /**
+         * Max ids per `WHERE id IN (:ids)` statement (see [flatMapResolve]).
+         * Kept well under SQLite's SQLITE_MAX_VARIABLE_NUMBER (999 on the
+         * SQLite shipped with API < 30; minSdk here is 26).
+         */
+        const val SQLITE_MAX_VARIABLES = 900
     }
 }

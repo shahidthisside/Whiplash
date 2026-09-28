@@ -201,7 +201,15 @@ fun PlayableItemsList(
         } else if (header != null) {
             item(key = "__header__") { header() }
         }
-        itemsIndexed(items, key = { _, item -> "${item.source}:${item.id}" }) { index, item ->
+        // Key includes the row index, not just source+id: an album,
+        // playlist or artist page's track list comes straight from YouTube
+        // extraction with no dedup, and can legitimately contain the same
+        // video id twice (a track appearing on a compilation twice, a song
+        // added to a playlist twice). A bare "source:id" key would then be
+        // duplicated and crash LazyColumn ("key was already used"), taking
+        // the whole screen down. Prefixing the index makes every key unique
+        // (matching QueueContent/LyricsContent's own convention here).
+        itemsIndexed(items, key = { index, item -> "$index:${item.source}:${item.id}" }) { index, item ->
             GlassListItem(
                 title = item.title,
                 subtitle = item.artist,

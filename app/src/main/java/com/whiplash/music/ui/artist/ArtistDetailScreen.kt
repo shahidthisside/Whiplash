@@ -22,7 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -117,18 +117,25 @@ fun ArtistDetailScreen(
 
         // Loading -> Error/Loaded crossfade, so the spinner doesn't vanish abruptly.
         AnimatedContent(
-            targetState = when (state) {
-                is ArtistDetailUiState.Loading -> "loading"
-                is ArtistDetailUiState.Error -> "error"
-                is ArtistDetailUiState.Loaded -> "loaded"
+            // Target is the state itself so each pane renders its OWN state
+            // while crossfading (the outgoing spinner stays a spinner instead
+            // of redrawing the new content twice); contentKey keeps the
+            // animation keyed by kind only, as before.
+            targetState = state,
+            contentKey = { s ->
+                when (s) {
+                    is ArtistDetailUiState.Loading -> "loading"
+                    is ArtistDetailUiState.Error -> "error"
+                    is ArtistDetailUiState.Loaded -> "loaded"
+                }
             },
             transitionSpec = {
                 fadeIn(animationSpec = tween(GlassTokens.animRegular))
                     .togetherWith(fadeOut(animationSpec = tween(GlassTokens.animFast)))
             },
             label = "artistDetailState",
-        ) { _ ->
-            when (val s = state) {
+        ) { s ->
+            when (s) {
                 is ArtistDetailUiState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = WhiplashColors.accent)
                 }
@@ -318,7 +325,10 @@ private fun AlbumShelf(
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(vertical = GlassTokens.spaceXs),
     ) {
-        items(albums, key = { it.url }) { album ->
+        // Index-prefixed so a repeated album URL (YouTube channel album
+        // lists are raw extraction and can contain the same playlist twice)
+        // can't produce a duplicate LazyRow key and crash the page.
+        itemsIndexed(albums, key = { index, album -> "$index:${album.url}" }) { _, album ->
             // Only the cover is clipped, so the title's first letter is never shaved.
             Column(
                 Modifier

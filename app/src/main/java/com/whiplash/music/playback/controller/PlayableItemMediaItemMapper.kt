@@ -1,3 +1,7 @@
+// Media3 caching/data-source/forwarding APIs used here are @UnstableApi;
+// opting in file-wide records that this is a deliberate dependency.
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.whiplash.music.playback.controller
 
 import android.net.Uri

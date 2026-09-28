@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.whiplash.music.domain.model.AudioQuality
 import com.whiplash.music.ui.theme.ThemeVariant
@@ -14,7 +16,20 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
-private val Context.settingsDataStore by preferencesDataStore(name = "whiplash_settings")
+/**
+ * DataStore is created with a [ReplaceFileCorruptionHandler]: without one, a
+ * corrupted preferences file makes every `dataStore.data` read throw
+ * CorruptionException, which crashes every settings collector app-wide with
+ * no recovery path. This is a genuinely reachable state here — [BackupManager.restore]
+ * copies raw zip-entry bytes straight into `whiplash_settings.preferences_pb`,
+ * so a truncated or foreign backup file, or an unclean shutdown mid-write, can
+ * leave an unparseable file. Replacing it with empty preferences degrades to
+ * built-in defaults instead of a permanent launch-crash loop.
+ */
+private val Context.settingsDataStore by preferencesDataStore(
+    name = "whiplash_settings",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 /**
  * Persists real, implemented user settings (CLAUDE.md section 59: "never
