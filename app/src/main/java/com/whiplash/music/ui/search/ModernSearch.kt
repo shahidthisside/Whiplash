@@ -618,6 +618,87 @@ internal fun CollectionMenuSheet(
     }
 }
 
+/**
+ * Round Save-to-Playlists toggle for an album/playlist page's header: an
+ * outlined "add" icon until saved, then a filled accent tick. Tapping the
+ * tick asks before deleting the saved copy. Same saved state as the
+ * long-press menu ([CollectionMenuSheet]), so both always agree.
+ */
+@Composable
+internal fun SaveCollectionIconButton(
+    url: String,
+    title: String,
+    isAlbum: Boolean,
+    tracks: List<PlayableItem.YoutubeTrack>,
+) {
+    val context = LocalContext.current
+    val app = context.applicationContext as WhiplashApplication
+    val store = remember { com.whiplash.music.data.repository.SavedCollectionStore.get(context) }
+    val savedMap by store.saved.collectAsState()
+    val playlists by app.libraryRepository.observePlaylists().collectAsState(initial = null)
+    val saved = savedMap[url]?.takeIf { s -> playlists?.any { it.id == s.playlistId && it.name == s.name } == true }
+    var confirmRemove by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    val kind = if (isAlbum) "album" else "playlist"
+    val tint by animateColorAsState(
+        if (saved != null) WhiplashColors.accent else WhiplashColors.textPrimary,
+        tween(GlassTokens.animSlow),
+        label = "saveTint",
+    )
+    PlainIconButton(
+        contentDescription = if (saved != null) "Remove $title from Playlists" else "Save $title to Playlists",
+        onClick = {
+            if (saved != null) {
+                confirmRemove = true
+            } else if (!saving && tracks.isNotEmpty()) {
+                saving = true
+                com.whiplash.music.ui.common.UiActionScope.scope.launch {
+                    try {
+                        val name = title.ifBlank { "Saved $kind" }
+                        val id = app.libraryRepository.createPlaylist(name)
+                        tracks.forEach { app.libraryRepository.addToPlaylist(id, it) }
+                        store.put(url, id, name)
+                        ToastController.show("Saved \"$name\" to Playlists (${tracks.size} songs)")
+                    } finally {
+                        saving = false
+                    }
+                }
+            }
+        },
+        size = 46.dp,
+        enabled = tracks.isNotEmpty(),
+    ) {
+        com.whiplash.music.ui.theme.RoundActionSurface {
+            if (saving) {
+                CircularProgressIndicator(color = WhiplashColors.accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+            } else {
+                Icon(
+                    if (saved != null) Icons.Filled.LibraryAddCheck else Icons.AutoMirrored.Filled.PlaylistAdd,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+    }
+    if (confirmRemove && saved != null) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Remove from Playlists?",
+            message = "The playlist \"${saved.name}\" you saved from this $kind will be deleted. Downloads aren't affected.",
+            confirmLabel = "Remove",
+            onConfirm = {
+                confirmRemove = false
+                com.whiplash.music.ui.common.UiActionScope.scope.launch {
+                    app.libraryRepository.deletePlaylist(saved.playlistId)
+                    store.remove(url)
+                    ToastController.show("Removed \"${saved.name}\" from Playlists")
+                }
+            },
+            onDismiss = { confirmRemove = false },
+        )
+    }
+}
+
 // ---------------------------------------------------------------- artists
 
 /** Artists as a grid of round photos. Tap opens; long-press or ⋮ offers Open and Share. */

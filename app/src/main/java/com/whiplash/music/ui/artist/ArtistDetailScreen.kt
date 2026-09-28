@@ -5,26 +5,32 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.DownloadDone
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Radio
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -38,13 +44,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -54,25 +63,24 @@ import com.whiplash.music.WhiplashApplication
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.domain.model.YoutubeArtistDetail
 import com.whiplash.music.domain.model.YoutubePlaylistResult
-import com.whiplash.music.ui.player.SongActionsContent
-import com.whiplash.music.ui.player.SongActionsViewModel
-import com.whiplash.music.ui.player.SongActionsViewModelFactory
-import com.whiplash.music.ui.player.shareYoutubeTrack
-import com.whiplash.music.ui.theme.GlassArtworkThumbnail
+import com.whiplash.music.ui.common.ToastController
+import com.whiplash.music.ui.common.artworkAtSize
+import com.whiplash.music.ui.player.PlayableItemsList
+import com.whiplash.music.ui.theme.CollectionPillButton
 import com.whiplash.music.ui.theme.GlassButton
-import com.whiplash.music.ui.theme.GlassListItem
-import com.whiplash.music.ui.theme.GlassSheet
 import com.whiplash.music.ui.theme.GlassTokens
 import com.whiplash.music.ui.theme.PlainIconButton
 import com.whiplash.music.ui.theme.WhiplashColors
+import com.whiplash.music.ui.theme.tintForName
 
 /**
- * Artist/channel detail screen (section 40): artwork, popular songs, real
- * albums when the channel exposes that tab, radio (reuses the existing,
- * already-verified autoplay/recommendation system — starting radio from an
- * artist just plays their first popular song, and the real autoplay
- * mechanism takes over from there, same honest reuse pattern as
- * "Start radio" in [com.whiplash.music.ui.player.SongActionsContent]).
+ * Artist/channel page: a large photo banner with the name over it, Play /
+ * Shuffle / Radio / Download, the popular songs (the app's usual song rows,
+ * with their long-press and ⋮ menus and download badges), then an Albums
+ * shelf whose covers open the album and long-press for the album menu.
+ *
+ * Radio plays the artist's top song and lets autoplay carry on with related
+ * music, the same as "Start radio" on a song.
  */
 @androidx.compose.material3.ExperimentalMaterial3Api
 @Composable
@@ -86,24 +94,28 @@ fun ArtistDetailScreen(
     val app = context.applicationContext as WhiplashApplication
     val viewModel: ArtistDetailViewModel = viewModel(
         key = "artist:$channelUrl",
-        factory = ArtistDetailViewModelFactory(app.youtubeDetailProvider, channelUrl),
+        factory = ArtistDetailViewModelFactory(app.youtubeDetailProvider, channelUrl, app.youtubeSearchRepository),
     )
     val state by viewModel.state.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceSm),
+            modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceXs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             PlainIconButton(contentDescription = "Back", onClick = onBack) {
                 Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = WhiplashColors.textPrimary)
             }
+            val loaded = (state as? ArtistDetailUiState.Loaded)?.detail
+            if (loaded != null) {
+                Spacer(Modifier.weight(1f))
+                PlainIconButton(contentDescription = "Share", onClick = { shareLink(context, displayName(loaded.name), loaded.channelUrl) }) {
+                    Icon(Icons.Filled.Share, contentDescription = null, tint = WhiplashColors.textPrimary)
+                }
+            }
         }
 
-        // Loading -> Error/Loaded crossfade — same rationale as
-        // AlbumDetailScreen's own identical fix: a plain fade so the
-        // loading spinner doesn't just vanish/appear abruptly once the
-        // real network fetch resolves.
+        // Loading -> Error/Loaded crossfade, so the spinner doesn't vanish abruptly.
         AnimatedContent(
             targetState = when (state) {
                 is ArtistDetailUiState.Loading -> "loading"
@@ -128,15 +140,21 @@ fun ArtistDetailScreen(
                             color = WhiplashColors.textPrimary,
                         )
                         Text(text = s.message, style = MaterialTheme.typography.bodySmall, color = WhiplashColors.textSecondary)
-                        androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
+                        Spacer(Modifier.padding(top = GlassTokens.spaceMd))
                         GlassButton(text = "Retry", onClick = viewModel::load)
                     }
                 }
-                is ArtistDetailUiState.Loaded -> ArtistDetailContent(s.detail, onPlayQueue, onOpenAlbum)
+                is ArtistDetailUiState.Loaded -> {
+                    val found by viewModel.foundAlbums.collectAsState()
+                    ArtistDetailContent(s.detail.copy(albums = s.detail.albums.ifEmpty { found }), onPlayQueue, onOpenAlbum)
+                }
             }
         }
     }
 }
+
+/** Auto-generated YouTube Music channels are named "Artist - Topic"; show just the artist. */
+private fun displayName(name: String): String = name.removeSuffix(" - Topic").ifBlank { name }
 
 @androidx.compose.material3.ExperimentalMaterial3Api
 @Composable
@@ -145,335 +163,210 @@ private fun ArtistDetailContent(
     onPlayQueue: (List<PlayableItem>, Int) -> Unit,
     onOpenAlbum: (YoutubePlaylistResult) -> Unit,
 ) {
-    val context = LocalContext.current
-    val app = context.applicationContext as WhiplashApplication
-    val haptic = LocalHapticFeedback.current
-    val songActionsViewModel: SongActionsViewModel = viewModel(
-        factory = SongActionsViewModelFactory(app.libraryRepository, app.downloadManager),
+    val songs = detail.popularSongs
+    var albumMenu by remember { mutableStateOf<YoutubePlaylistResult?>(null) }
+
+    PlayableItemsList(
+        items = songs,
+        onPlayQueue = onPlayQueue,
+        modifier = Modifier.fillMaxSize(),
+        header = {
+            Column {
+                ArtistHero(detail, onPlayQueue)
+                when {
+                    songs.isNotEmpty() -> SectionTitle("Popular songs")
+                    detail.albums.isEmpty() -> Text(
+                        text = "No songs or albums found for this artist.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = WhiplashColors.textSecondary,
+                        modifier = Modifier.fillMaxWidth().padding(GlassTokens.spaceLg),
+                    )
+                }
+            }
+        },
+        footer = if (detail.albums.isNotEmpty()) ({
+            Column(Modifier.padding(top = GlassTokens.spaceMd)) {
+                SectionTitle("Albums")
+                AlbumShelf(detail.albums, onOpenAlbum, onLongPress = { albumMenu = it })
+            }
+        }) else null,
     )
 
-    // Same live download-status subscriptions PlayableItemsList/HomeScreen
-    // already use for their own rows — hoisted once here rather than
-    // per-row, matching that existing pattern (see PlayableItemsList's
-    // own doc comment on why this needs to be a single shared
-    // subscription rather than one per row).
-    val downloadedIds by app.libraryRepository.observeDownloadedIds().collectAsState(initial = emptySet())
-    val downloadProgress by app.downloadManager.progress.collectAsState()
-    var cancelDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
-    var removeDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
-    var actionsSheetItem by remember { mutableStateOf<PlayableItem?>(null) }
-    var addToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
-    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    com.whiplash.music.ui.search.CollectionMenuSheet(albumMenu, onDismiss = { albumMenu = null }, onOpen = onOpenAlbum)
+}
 
-    LazyColumn(
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
+/**
+ * Photo banner: the artist picture at full width (fetched large, so it
+ * stays sharp), fading into the page at the bottom where the name sits,
+ * then the action row.
+ */
+@Composable
+private fun ArtistHero(detail: YoutubeArtistDetail, onPlayQueue: (List<PlayableItem>, Int) -> Unit) {
+    val context = LocalContext.current
+    val name = displayName(detail.name)
+    val songs = detail.popularSongs
+    Column(Modifier.fillMaxWidth().padding(bottom = GlassTokens.spaceSm)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1.1f)
+                .clip(RoundedCornerShape(28.dp))
+                .background(lerp(WhiplashColors.background, tintForName(name), 0.45f)),
+        ) {
+            if (detail.artworkUrl != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context).data(artworkAtSize(detail.artworkUrl, 1200)).crossfade(true).build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Text(
+                    text = name.take(1).uppercase(),
+                    style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White.copy(alpha = 0.85f),
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
+            // Fade to the page colour so the name reads on any photo.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.45f to Color.Transparent,
+                            1f to WhiplashColors.background.copy(alpha = 0.92f),
+                        ),
+                    ),
+            )
+            Column(Modifier.align(Alignment.BottomStart).padding(18.dp)) {
+                Text(
+                    text = "ARTIST",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = MaterialTheme.typography.labelSmall.letterSpacing * 1.5f,
+                    ),
+                    color = Color.White.copy(alpha = 0.75f),
+                )
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.semantics { heading() },
+                )
+                val facts = listOfNotNull(
+                    detail.subscriberCount?.let { "${com.whiplash.music.ui.common.formatCompactCount(it)} subscribers" },
+                    songs.size.takeIf { it > 0 }?.let { if (it == 1) "1 song" else "$it songs" },
+                    detail.albums.size.takeIf { it > 0 }?.let { if (it == 1) "1 album" else "${it} albums" },
+                ).joinToString(" · ")
+                if (facts.isNotBlank()) {
+                    Text(text = facts, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f))
+                }
+            }
+        }
+        if (songs.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CollectionPillButton("Play", Icons.Filled.PlayArrow, { onPlayQueue(songs, 0) }, primary = true, modifier = Modifier.weight(1f))
+                com.whiplash.music.ui.theme.RoundActionButton(
+                    contentDescription = "Shuffle $name",
+                    onClick = { onPlayQueue(songs.shuffled(), 0) },
+                ) {
+                    Icon(Icons.Filled.Shuffle, contentDescription = null, tint = WhiplashColors.textPrimary, modifier = Modifier.size(22.dp))
+                }
+                com.whiplash.music.ui.theme.RoundActionButton(
+                    contentDescription = "Start $name radio",
+                    onClick = { onPlayQueue(listOf(songs.first()), 0) },
+                ) {
+                    Icon(Icons.Filled.Radio, contentDescription = null, tint = WhiplashColors.textPrimary, modifier = Modifier.size(22.dp))
+                }
+                com.whiplash.music.ui.theme.RoundActionSurface {
+                    com.whiplash.music.ui.common.BatchDownloadIconButton(batchName = name, tracks = songs)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+        color = WhiplashColors.textPrimary,
+        modifier = Modifier.padding(top = GlassTokens.spaceSm, bottom = GlassTokens.spaceXs).semantics { heading() },
+    )
+}
+
+/** Sideways row of album covers. Tap opens the album; long-press opens its menu. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AlbumShelf(
+    albums: List<YoutubePlaylistResult>,
+    onOpen: (YoutubePlaylistResult) -> Unit,
+    onLongPress: (YoutubePlaylistResult) -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(vertical = GlassTokens.spaceXs),
     ) {
-        item {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+        items(albums, key = { it.url }) { album ->
+            // Only the cover is clipped, so the title's first letter is never shaved.
+            Column(
+                Modifier
+                    .width(150.dp)
+                    .combinedClickable(
+                        onClickLabel = "Open ${album.title}",
+                        onLongClickLabel = "More options",
+                        onClick = { onOpen(album) },
+                        onLongClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongPress(album)
+                        },
+                    ),
+            ) {
                 Box(
-                    modifier = Modifier
-                        .size(120.dp)
-                        .clip(CircleShape)
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(16.dp))
                         .background(WhiplashColors.surfaceElevated),
                 ) {
-                    if (detail.artworkUrl != null) {
+                    if (album.artworkUrl != null) {
                         AsyncImage(
-                            model = ImageRequest.Builder(context).data(detail.artworkUrl).crossfade(true).build(),
+                            model = ImageRequest.Builder(context).data(artworkAtSize(album.artworkUrl, 544)).crossfade(true).build(),
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
-                androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceSm))
                 Text(
-                    text = detail.name,
-                    style = MaterialTheme.typography.headlineSmall,
+                    text = album.title,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = WhiplashColors.textPrimary,
-                    // Same defect that affected playlist names: with no cap, a
-                    // long channel name wrapped down the page and pushed the
-                    // subscriber count and action row with it. Two lines rather
-                    // than one because this is the screen's own title at
-                    // headlineSmall and has the full width to itself.
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                )
-                detail.subscriberCount?.let {
-                    Text(
-                        text = "${com.whiplash.music.ui.common.formatCompactCount(it)} subscribers",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = WhiplashColors.textSecondary,
-                    )
-                }
-                if (detail.popularSongs.isNotEmpty()) {
-                    androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
-                    Row(horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm), verticalAlignment = Alignment.CenterVertically) {
-                        GlassButton(
-                            text = "Radio",
-                            onClick = { onPlayQueue(listOf(detail.popularSongs.first()), 0) },
-                        )
-                        com.whiplash.music.ui.common.BatchDownloadButton(batchName = detail.name, tracks = detail.popularSongs)
-                    }
-                }
-                androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceLg))
-            }
-        }
-
-        if (detail.popularSongs.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Popular songs",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = WhiplashColors.textPrimary,
-                    modifier = Modifier.padding(bottom = GlassTokens.spaceSm),
-                )
-            }
-            items(detail.popularSongs, key = { "song:${it.id}" }) { track ->
-                GlassListItem(
-                    title = track.title,
-                    subtitle = track.artist,
-                    onClick = { onPlayQueue(detail.popularSongs, detail.popularSongs.indexOf(track)) },
-                    onLongClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        actionsSheetItem = track
-                    },
-                    leading = { GlassArtworkThumbnail(artworkUri = track.artworkUri) },
-                    trailing = {
-                        // Same animated progress-ring/checkmark/failed
-                        // badge + 3-dot "more options" button every other
-                        // track list in the app already shows (Search,
-                        // Local Library, Home's Quick Picks, Downloads
-                        // tab) — a real, reported gap: Popular songs rows
-                        // here had neither, so a song downloaded from an
-                        // artist's page showed no progress/checkmark at
-                        // all, and there was no way to reach the
-                        // long-press-only actions sheet without knowing
-                        // long-press was even possible.
-                        val inFlightProgress = downloadProgress[track.id]
-                        val downloaded = track.id in downloadedIds
-                        androidx.compose.animation.AnimatedContent(
-                            targetState = when {
-                                inFlightProgress?.failed == true -> "failed"
-                                inFlightProgress != null -> "downloading"
-                                downloaded -> "downloaded"
-                                else -> "none"
-                            },
-                            label = "artistPopularSongDownloadStatusBadge",
-                        ) { state ->
-                            when (state) {
-                                "downloading" -> Box(
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .padding(end = GlassTokens.spaceXs)
-                                        .clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = null,
-                                            role = Role.Button,
-                                            onClick = { cancelDownloadTarget = track },
-                                        )
-                                        .semantics { contentDescription = "Cancel download of ${track.title}" },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    CircularProgressIndicator(
-                                        progress = { inFlightProgress?.fraction ?: 0f },
-                                        color = WhiplashColors.accent,
-                                        strokeWidth = 2.dp,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                                "failed" -> Icon(
-                                    Icons.Filled.ErrorOutline,
-                                    contentDescription = "Download failed for ${track.title}",
-                                    tint = WhiplashColors.error,
-                                    modifier = Modifier.size(18.dp).padding(end = GlassTokens.spaceXs),
-                                )
-                                "downloaded" -> Icon(
-                                    Icons.Filled.DownloadDone,
-                                    contentDescription = "Downloaded",
-                                    tint = WhiplashColors.accent,
-                                    modifier = Modifier.size(18.dp).padding(end = GlassTokens.spaceXs),
-                                )
-                                else -> androidx.compose.foundation.layout.Spacer(Modifier.size(0.dp))
-                            }
-                        }
-                        PlainIconButton(
-                            contentDescription = "More options for ${track.title}",
-                            onClick = { actionsSheetItem = track },
-                            size = 48.dp,
-                        ) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textSecondary)
-                        }
-                    },
+                    modifier = Modifier.padding(top = 8.dp),
                 )
             }
         }
-
-        if (detail.albums.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Albums",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = WhiplashColors.textPrimary,
-                    modifier = Modifier.padding(top = GlassTokens.spaceMd, bottom = GlassTokens.spaceSm),
-                )
-            }
-            items(detail.albums, key = { "album:${it.url}" }) { album ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenAlbum(album) }
-                        .padding(vertical = GlassTokens.spaceSm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    GlassArtworkThumbnail(artworkUri = album.artworkUrl)
-                    Column(modifier = Modifier.padding(start = GlassTokens.spaceSm)) {
-                        Text(
-                            text = album.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = WhiplashColors.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-        }
-
-        if (detail.popularSongs.isEmpty() && detail.albums.isEmpty()) {
-            item {
-                Box(modifier = Modifier.fillMaxWidth().padding(GlassTokens.spaceLg), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "No songs or albums found for this artist.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = WhiplashColors.textSecondary,
-                    )
-                }
-            }
-        }
     }
+}
 
-    // Cancel-download confirmation — tapping the in-flight progress ring
-    // opens this rather than cancelling immediately on a single
-    // accidental tap, matching PlayableItemsList/HomeScreen's own
-    // cancel-download confirmation.
-    val cancelTarget = cancelDownloadTarget
-    if (cancelTarget != null) {
-        com.whiplash.music.ui.theme.GlassConfirmDialog(
-            title = "Cancel download?",
-            message = "Downloading \"${cancelTarget.title}\" will be cancelled.",
-            confirmLabel = "Cancel download",
-            dismissLabel = "Keep downloading",
-            onConfirm = {
-                app.downloadManager.cancelDownload(cancelTarget.id)
-                cancelDownloadTarget = null
-            },
-            onDismiss = { cancelDownloadTarget = null },
-        )
+private fun shareLink(context: android.content.Context, title: String, url: String) {
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_TEXT, url)
     }
-
-    val removeTarget = removeDownloadTarget
-    if (removeTarget != null) {
-        com.whiplash.music.ui.theme.GlassConfirmDialog(
-            title = "Remove download?",
-            message = "\"${removeTarget.title}\" will be deleted from this device. You can download it again later.",
-            confirmLabel = "Remove",
-            dismissLabel = "Cancel",
-            onConfirm = {
-                songActionsViewModel.removeDownload(removeTarget.id)
-                removeDownloadTarget = null
-            },
-            onDismiss = { removeDownloadTarget = null },
-        )
-    }
-
-    // Long-press/3-dot song-actions sheet — same actions PlayableItemsList
-    // offers for a YoutubeTrack row (Search, Home, Local Library).
-    val sheetItem = actionsSheetItem
-    if (sheetItem != null) {
-        val isFavorite by app.libraryRepository.observeIsFavorite(sheetItem).collectAsState(initial = false)
-        GlassSheet(onDismissRequest = { actionsSheetItem = null }) {
-            SongActionsContent(
-                item = sheetItem,
-                isFavorite = isFavorite,
-                onPlayNext = {
-                    app.playbackController.playNext(sheetItem)
-                    actionsSheetItem = null
-                },
-                onAddToQueue = {
-                    app.playbackController.addToQueue(sheetItem)
-                    actionsSheetItem = null
-                },
-                onToggleFavorite = {
-                    songActionsViewModel.toggleFavorite(sheetItem, isCurrentlyFavorite = isFavorite)
-                    actionsSheetItem = null
-                },
-                onStartRadio = if (sheetItem is PlayableItem.YoutubeTrack) {
-                    { onPlayQueue(listOf(sheetItem), 0); actionsSheetItem = null }
-                } else null,
-                onShare = if (sheetItem is PlayableItem.YoutubeTrack) {
-                    { shareYoutubeTrack(context, sheetItem); actionsSheetItem = null }
-                } else null,
-                onAddToPlaylist = {
-                    addToPlaylistItem = sheetItem
-                    actionsSheetItem = null
-                },
-                isDownloaded = sheetItem.id in downloadedIds,
-                onDownload = if (sheetItem is PlayableItem.YoutubeTrack && sheetItem.id !in downloadedIds) {
-                    {
-                        app.downloadManager.startDownload(sheetItem)
-                        actionsSheetItem = null
-                    }
-                } else null,
-                onRemoveDownload = if (sheetItem.id in downloadedIds) {
-                    {
-                        // Same UAT-audit fix as PlayableItemsList.kt —
-                        // route through a confirm dialog rather than
-                        // deleting instantly, matching every other
-                        // download-destructive action.
-                        removeDownloadTarget = sheetItem
-                        actionsSheetItem = null
-                    }
-                } else null,
-            )
-        }
-    }
-
-    val playlistTargetItem = addToPlaylistItem
-    if (playlistTargetItem != null) {
-        val playlists by app.libraryRepository.observePlaylists().collectAsState(initial = emptyList())
-        GlassSheet(onDismissRequest = { addToPlaylistItem = null }) {
-            com.whiplash.music.ui.player.AddToPlaylistContent(
-                item = playlistTargetItem,
-                playlists = playlists,
-                onSelectPlaylist = { playlist ->
-                    songActionsViewModel.addToPlaylist(playlistTargetItem, playlist.id, playlist.name)
-                    addToPlaylistItem = null
-                },
-                onCreateNew = {
-                    // Real, reported bug (UAT audit finding): this used
-                    // to just close the sheet and discard the action —
-                    // tapping "New playlist" from an artist page's Add-
-                    // to-playlist sheet silently did nothing. Now wired
-                    // to the same GlassTextInputDialog + createPlaylistAndAdd
-                    // flow PlayableItemsList.kt's own AddToPlaylistContent
-                    // usage already uses correctly.
-                    showCreatePlaylistDialog = true
-                },
-            )
-        }
-    }
-
-    if (showCreatePlaylistDialog) {
-        com.whiplash.music.ui.theme.GlassTextInputDialog(
-            title = "New playlist",
-            confirmLabel = "Create",
-            onConfirm = { name ->
-                val item = playlistTargetItem
-                if (item != null) songActionsViewModel.createPlaylistAndAdd(name, item)
-                showCreatePlaylistDialog = false
-                addToPlaylistItem = null
-            },
-            onDismiss = { showCreatePlaylistDialog = false },
-        )
-    }
+    runCatching { context.startActivity(android.content.Intent.createChooser(send, "Share $title")) }
+        .onFailure { ToastController.show("Couldn't open share") }
 }

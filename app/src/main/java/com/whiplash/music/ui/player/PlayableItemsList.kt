@@ -81,6 +81,9 @@ fun PlayableItemsList(
     // actions sheet for any item (Search's top result card uses it for
     // its own long-press and ⋮ menu). Used instead of [header] when set.
     headerWithActions: (@Composable (openActions: (PlayableItem) -> Unit) -> Unit)? = null,
+    // Drawn after the last song, scrolling with the list (an artist page's
+    // Albums shelf, for example).
+    footer: (@Composable () -> Unit)? = null,
     // Optional real infinite-scroll hook (section: search pagination) —
     // both default to null/false so every existing caller (Local
     // Library, Home, Favorites) behaves exactly as before with zero
@@ -295,6 +298,9 @@ fun PlayableItemsList(
                     }
                 },
             )
+        }
+        if (footer != null) {
+            item(key = "__footer__") { footer() }
         }
         if (isLoadingMore) {
             item(key = "__load_more_footer__") {

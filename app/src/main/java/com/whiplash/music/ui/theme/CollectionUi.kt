@@ -344,3 +344,25 @@ internal fun tintForName(name: String): Color {
     )
     return palette[(name.hashCode() and 0x7fffffff) % palette.size]
 }
+
+/** 46dp round tonal button used beside the Play / Shuffle pills on collection pages. */
+@Composable
+fun RoundActionButton(
+    contentDescription: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    PlainIconButton(contentDescription = contentDescription, onClick = onClick, size = 46.dp, enabled = enabled) {
+        RoundActionSurface { content() }
+    }
+}
+
+/** The tonal circle behind [RoundActionButton]; also wraps ready-made icon buttons so they match. */
+@Composable
+fun RoundActionSurface(content: @Composable () -> Unit) {
+    Box(
+        Modifier.size(46.dp).clip(androidx.compose.foundation.shape.CircleShape).background(lerp(WhiplashColors.background, Color.White, 0.10f)),
+        contentAlignment = Alignment.Center,
+    ) { content() }
+}

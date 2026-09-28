@@ -36,6 +36,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -65,28 +73,19 @@ fun AlbumDetailScreen(
     val state by viewModel.state.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
+        // Back on the left, Share on the right once the page has loaded.
         Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceSm),
+            modifier = Modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceXs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             PlainIconButton(contentDescription = "Back", onClick = onBack) {
                 Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = WhiplashColors.textPrimary)
             }
-            // Share moved here (top bar, right-aligned) rather than
-            // alongside Play/Shuffle/Download — the download button's
-            // widest state ("Cancel download") needs that whole row's
-            // width free to grow into without looking cramped, and the
-            // top bar already has an established "Back on the left,
-            // secondary actions on the right" pattern (matching
-            // PlaylistDetailScreen's own header row) that a standalone
-            // Share icon fits naturally into. Only shown once the real
-            // detail has actually loaded (needs detail.url) — Loading/
-            // Error states show just Back, same as before.
             if (state is AlbumDetailUiState.Loaded) {
                 val loadedDetail = (state as AlbumDetailUiState.Loaded).detail
                 androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
                 PlainIconButton(
-                    contentDescription = "Share playlist",
+                    contentDescription = "Share",
                     onClick = { shareYoutubePlaylist(context, loadedDetail) },
                 ) {
                     Icon(Icons.Filled.Share, contentDescription = null, tint = WhiplashColors.textPrimary)
@@ -173,60 +172,116 @@ private fun AlbumDetailContent(
     )
 }
 
+/** YouTube titles albums "Album – Name"; the page shows the kind as its own label instead. */
+private val ALBUM_PREFIX = Regex("^Album\\s*[–-]\\s*", RegexOption.IGNORE_CASE)
+
+private fun isAlbum(detail: com.whiplash.music.domain.model.YoutubePlaylistDetail): Boolean =
+    ALBUM_PREFIX.containsMatchIn(detail.title) || "list=OLAK5uy" in detail.url
+
+/**
+ * Album / playlist header: the cover large and centred (sharpest available,
+ * see [AlbumCover]) over a wash of the cover's own colours, then the kind,
+ * title, "artist · songs · length", and Play / Shuffle with round Save to
+ * Playlists and Download buttons beside them.
+ */
 @androidx.compose.material3.ExperimentalMaterial3Api
 @Composable
 private fun AlbumDetailHeader(
     detail: com.whiplash.music.domain.model.YoutubePlaylistDetail,
     onPlayQueue: (List<PlayableItem>, Int) -> Unit,
 ) {
-    val context = LocalContext.current
+    val album = isAlbum(detail)
+    val title = detail.title.replace(ALBUM_PREFIX, "").ifBlank { detail.title }
+    val candidates = (detail.artworkCandidates + listOfNotNull(detail.artworkUrl, detail.tracks.firstOrNull()?.artworkUri)).distinct()
+    val palette by com.whiplash.music.ui.player.rememberArtworkPalette(candidates.lastOrNull(), enabled = true)
+    val wash by androidx.compose.animation.animateColorAsState(
+        palette?.mesh?.firstOrNull()?.let { androidx.compose.ui.graphics.Color(it) }
+            ?: com.whiplash.music.ui.theme.tintForName(title).copy(alpha = 0.35f),
+        tween(GlassTokens.animSlow),
+        label = "albumWash",
+    )
+    val shape = RoundedCornerShape(20.dp)
 
-    Column {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = GlassTokens.spaceMd)
+            .clip(RoundedCornerShape(28.dp))
+            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(wash, WhiplashColors.background)))
+            .padding(horizontal = 18.dp, vertical = 22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = GlassTokens.spaceMd),
+                .fillMaxWidth(0.72f)
+                .aspectRatio(1f)
+                .shadow(24.dp, shape)
+                .clip(shape)
+                .background(WhiplashColors.surfaceElevated),
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(WhiplashRadius.extraLarge))
-                    .background(WhiplashColors.surfaceElevated),
-            ) {
-                AlbumCover(
-                    candidates = (detail.artworkCandidates + listOfNotNull(detail.artworkUrl, detail.tracks.firstOrNull()?.artworkUri)).distinct(),
-                )
-            }
+            AlbumCover(candidates = candidates)
         }
-
+        androidx.compose.foundation.layout.Spacer(Modifier.height(18.dp))
         Text(
-            text = detail.title,
-            style = MaterialTheme.typography.headlineSmall,
+            text = if (album) "ALBUM" else "PLAYLIST",
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = MaterialTheme.typography.labelSmall.letterSpacing * 1.5f,
+            ),
+            color = WhiplashColors.textSecondary,
+        )
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
             color = WhiplashColors.textPrimary,
+            textAlign = TextAlign.Center,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 2.dp).semantics { heading() },
         )
-        detail.uploaderName?.let {
+        val summary = listOfNotNull(
+            detail.uploaderName?.takeIf { it.isNotBlank() },
+            detail.tracks.takeIf { it.isNotEmpty() }?.let { com.whiplash.music.ui.theme.collectionSummary(it) },
+        ).joinToString(" · ")
+        if (summary.isNotBlank()) {
             Text(
-                text = it,
+                text = summary,
                 style = MaterialTheme.typography.bodyMedium,
                 color = WhiplashColors.textSecondary,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 4.dp),
             )
         }
-
-        androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
-
         if (detail.tracks.isNotEmpty()) {
+            androidx.compose.foundation.layout.Spacer(Modifier.height(18.dp))
             Row(
-                horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                GlassButton(text = "Play", onClick = { onPlayQueue(detail.tracks, 0) })
-                GlassButton(text = "Shuffle", onClick = { onPlayQueue(detail.tracks.shuffled(), 0) })
-                com.whiplash.music.ui.common.BatchDownloadButton(batchName = detail.title, tracks = detail.tracks)
+                com.whiplash.music.ui.theme.CollectionPillButton(
+                    "Play", Icons.Filled.PlayArrow, { onPlayQueue(detail.tracks, 0) }, primary = true, modifier = Modifier.weight(1f),
+                )
+                // Round buttons beside the wide Play pill, so every label fits
+                // even at large font sizes.
+                com.whiplash.music.ui.theme.RoundActionButton(
+                    contentDescription = "Shuffle $title",
+                    onClick = { onPlayQueue(detail.tracks.shuffled(), 0) },
+                ) {
+                    Icon(Icons.Filled.Shuffle, contentDescription = null, tint = WhiplashColors.textPrimary, modifier = Modifier.size(22.dp))
+                }
+                com.whiplash.music.ui.search.SaveCollectionIconButton(
+                    url = detail.url,
+                    title = title,
+                    isAlbum = album,
+                    tracks = detail.tracks,
+                )
+                com.whiplash.music.ui.theme.RoundActionSurface {
+                    com.whiplash.music.ui.common.BatchDownloadIconButton(batchName = title, tracks = detail.tracks)
+                }
             }
-            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceMd))
         }
     }
 }
