@@ -21,6 +21,13 @@ interface FavoriteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun add(favorite: FavoriteEntity)
 
+    /** Adds many at once; a song that's already a favorite keeps its original date. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun addAll(favorites: List<FavoriteEntity>)
+
+    @Query("DELETE FROM favorites")
+    suspend fun clearAll()
+
     @Query("DELETE FROM favorites WHERE trackId = :trackId AND source = :source")
     suspend fun remove(trackId: String, source: MediaSource)
 }

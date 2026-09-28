@@ -57,6 +57,8 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -518,6 +520,8 @@ internal fun CollectionMenuSheet(
 
     val download = com.whiplash.music.ui.common.rememberBatchDownloadController(collection.title, tracks.orEmpty())
     var confirmRemoveDownloads by remember { mutableStateOf(false) }
+    val allFavorited = com.whiplash.music.ui.common.rememberAllFavorited(tracks)
+    var favoriteDialog by remember { mutableStateOf<Boolean?>(null) } // true = add, false = remove
 
     fun withTracks(close: Boolean = true, action: suspend (List<PlayableItem.YoutubeTrack>) -> Unit) {
         if (close) onDismiss()
@@ -569,6 +573,12 @@ internal fun CollectionMenuSheet(
                     list.forEach { app.playbackController.addToQueue(it) }
                     ToastController.show("Added ${list.size} songs to queue")
                 }
+            }
+
+            if (allFavorited == true) {
+                SheetAction(Icons.Filled.Favorite, "Remove all from Favorites", tint = WhiplashColors.accent) { favoriteDialog = false }
+            } else {
+                SheetAction(Icons.Filled.FavoriteBorder, "Add all to Favorites", enabled = tracks != null) { favoriteDialog = true }
             }
 
             if (savedEntry != null) {
@@ -627,6 +637,17 @@ internal fun CollectionMenuSheet(
                 shareLink(context, collection.title, url)
             }
         }
+    }
+
+    val favTracks = tracks
+    if (favoriteDialog != null && favTracks != null) {
+        com.whiplash.music.ui.common.FavoriteAllDialogs(
+            name = collection.title,
+            tracks = favTracks,
+            confirmAdd = favoriteDialog == true,
+            confirmRemove = favoriteDialog == false,
+            onDismiss = { favoriteDialog = null; onDismiss() },
+        )
     }
 
     if (confirmRemoveSaved && savedEntry != null) {

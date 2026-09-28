@@ -286,6 +286,9 @@ private fun AlbumDetailHeader(
                     tracks = detail.tracks,
                 )
                 com.whiplash.music.ui.theme.RoundActionSurface {
+                    com.whiplash.music.ui.common.FavoriteAllIconButton(name = title, tracks = detail.tracks)
+                }
+                com.whiplash.music.ui.theme.RoundActionSurface {
                     com.whiplash.music.ui.common.BatchDownloadIconButton(batchName = title, tracks = detail.tracks)
                 }
             }

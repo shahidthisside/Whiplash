@@ -213,6 +213,37 @@ class LibraryRepository(
         }
     }
 
+    /** "SOURCE:id" of every favorite, for showing whether a whole album or playlist is already liked. */
+    fun observeFavoriteKeys(): Flow<Set<String>> =
+        favoriteDao.observeAll().map { list -> list.mapTo(HashSet()) { favoriteKey(it.trackId, it.source.toDomain()) } }
+
+    /**
+     * Adds every song in [items] to Favorites (an album or playlist in one
+     * tap). Songs already there are left as they are. The new ones are dated
+     * so Favorites lists them in the collection's own order. Returns how
+     * many were newly added.
+     */
+    suspend fun addAllToFavorites(items: List<PlayableItem>): Int {
+        val existing = favoriteDao.observeAll().first().mapTo(HashSet()) { favoriteKey(it.trackId, it.source.toDomain()) }
+        val toAdd = items.distinctBy { favoriteKey(it.id, it.source) }.filter { favoriteKey(it.id, it.source) !in existing }
+        if (toAdd.isEmpty()) return 0
+        val youtube = toAdd.filterIsInstance<PlayableItem.YoutubeTrack>()
+        if (youtube.isNotEmpty()) youtube.forEach { cacheSong(it) }
+        val now = System.currentTimeMillis()
+        favoriteDao.addAll(
+            toAdd.mapIndexed { i, item -> FavoriteEntity(item.id, item.source.toEntity(), now + (toAdd.size - 1 - i)) },
+        )
+        return toAdd.size
+    }
+
+    /** Empties Favorites (the "Remove all" on the Liked songs page). */
+    suspend fun clearFavorites() = favoriteDao.clearAll()
+
+    /** Removes every song in [items] from Favorites. */
+    suspend fun removeAllFromFavorites(items: List<PlayableItem>) {
+        items.distinctBy { favoriteKey(it.id, it.source) }.forEach { favoriteDao.remove(it.id, it.source.toEntity()) }
+    }
+
     /** Tracks pinned to the Home screen's Speed dial grid (section 31), most-recently-pinned first. */
     fun observePinned(): Flow<List<PlayableItem>> =
         pinnedDao.observeAll().map { it.map { p -> p.trackId to p.source.toDomain() } }.flatMapResolve()
@@ -472,3 +503,6 @@ class LibraryRepository(
         const val SQLITE_MAX_VARIABLES = 900
     }
 }
+
+/** Identity of a favorite across sources ("YOUTUBE:abc", "LOCAL:42"). */
+fun favoriteKey(id: String, source: com.whiplash.music.domain.model.MediaSource): String = "${source.name}:$id"

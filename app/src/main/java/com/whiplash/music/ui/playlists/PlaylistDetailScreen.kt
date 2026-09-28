@@ -104,6 +104,7 @@ private fun ModernPlaylistDetail(
             playlistContext = com.whiplash.music.ui.player.PlaylistContext(playlist.id, playlist.name),
             heroActions = {
                 if (tracks.isNotEmpty()) {
+                    com.whiplash.music.ui.common.FavoriteAllIconButton(name = playlist.name, tracks = tracks)
                     com.whiplash.music.ui.common.BatchDownloadIconButton(batchName = playlist.name, tracks = tracks)
                 }
             },

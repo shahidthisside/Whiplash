@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
@@ -93,6 +95,8 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
     var playlistPendingDeleteConfirm by remember { mutableStateOf<Playlist?>(null) }
     // Custom cover: the options sheet, then the song picker or the gallery.
     var coverTarget by remember { mutableStateOf<Playlist?>(null) }
+    // "Add all to Favorites" from a playlist's menu (asks first).
+    var favoritesTarget by remember { mutableStateOf<Playlist?>(null) }
     var coverSongsTarget by remember { mutableStateOf<Playlist?>(null) }
     var galleryTarget by remember { mutableStateOf<Playlist?>(null) }
     val galleryLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -239,6 +243,8 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
         // currently long-pressed, not for every row in the list.
         val tracksForSheet by app.libraryRepository.observePlaylistTracks(toDelete.id).collectAsState(initial = null)
         val hasTracks = tracksForSheet?.isNotEmpty() ?: true // null = still loading; assume non-empty so the row doesn't flash in/out
+        val menuTracks by remember(toDelete.id) { app.libraryRepository.observePlaylistTracks(toDelete.id) }.collectAsState(initial = null)
+        val menuAllFavorited = com.whiplash.music.ui.common.rememberAllFavorited(menuTracks) == true
         GlassSheet(onDismissRequest = { playlistPendingDelete = null }) {
             Column {
                 Text(
@@ -347,6 +353,30 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                         .padding(vertical = GlassTokens.spaceSm)
                         .clickable(
                             onClick = {
+                                favoritesTarget = toDelete
+                                playlistPendingDelete = null
+                            },
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (menuAllFavorited) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                        contentDescription = null,
+                        tint = if (menuAllFavorited) WhiplashColors.accent else WhiplashColors.textPrimary,
+                    )
+                    Text(
+                        text = if (menuAllFavorited) "Remove all from Favorites" else "Add all to Favorites",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = WhiplashColors.textPrimary,
+                        modifier = Modifier.padding(start = GlassTokens.spaceMd),
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = GlassTokens.spaceSm)
+                        .clickable(
+                            onClick = {
                                 playlistPendingDeleteConfirm = toDelete
                                 playlistPendingDelete = null
                             },
@@ -362,6 +392,33 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                     )
                 }
             }
+        }
+    }
+
+    val favFor = favoritesTarget
+    if (favFor != null) {
+        val favTracks by remember(favFor.id) { app.libraryRepository.observePlaylistTracks(favFor.id) }.collectAsState(initial = null)
+        val ready = favTracks
+        // Decided once when the dialog opens, so it doesn't flip mid-dialog.
+        val removing = remember(favFor.id) { mutableStateOf<Boolean?>(null) }
+        val allFav = com.whiplash.music.ui.common.rememberAllFavorited(ready)
+        if (removing.value == null && allFav != null) removing.value = allFav
+        when {
+            ready == null -> Unit // loading (a few ms)
+            ready.isEmpty() -> {
+                androidx.compose.runtime.LaunchedEffect(favFor.id) {
+                    com.whiplash.music.ui.common.ToastController.show("This playlist is empty")
+                    favoritesTarget = null
+                }
+            }
+            removing.value == null -> Unit
+            else -> com.whiplash.music.ui.common.FavoriteAllDialogs(
+                name = favFor.name,
+                tracks = ready,
+                confirmAdd = removing.value == false,
+                confirmRemove = removing.value == true,
+                onDismiss = { favoritesTarget = null },
+            )
         }
     }
 

@@ -248,6 +248,11 @@ private fun LocalCollectionPage(
             },
             onPlayQueue = onPlayQueue,
             sortKey = "local_${if (isAlbum) "album" else "artist"}_$id",
+            heroActions = {
+                if (isAlbum && list.isNotEmpty()) {
+                    com.whiplash.music.ui.common.FavoriteAllIconButton(name = title, tracks = list)
+                }
+            },
             defaultSortLabel = if (isAlbum) "Track order" else "Library order",
             emptyContent = {
                 com.whiplash.music.ui.theme.CollectionEmptyState(

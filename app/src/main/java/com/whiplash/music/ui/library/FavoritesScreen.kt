@@ -19,6 +19,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.DeleteOutline
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -60,6 +64,25 @@ private fun ModernFavorites(
     onPlayQueue: (List<PlayableItem>, Int) -> Unit,
 ) {
     val tint = LIKED_TINT
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? com.whiplash.music.WhiplashApplication
+    var confirmClear by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    if (confirmClear && app != null) {
+        val count = favorites.size
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Remove all from Favorites?",
+            message = "${if (count == 1) "1 song" else "$count songs"} will be removed from Favorites.",
+            confirmLabel = "Remove all",
+            onConfirm = {
+                confirmClear = false
+                com.whiplash.music.ui.common.UiActionScope.scope.launch {
+                    runCatching { app.libraryRepository.clearFavorites() }
+                        .onSuccess { com.whiplash.music.ui.common.ToastController.show("Favorites cleared") }
+                        .onFailure { com.whiplash.music.ui.common.ToastController.show("Couldn't clear Favorites") }
+                }
+            },
+            onDismiss = { confirmClear = false },
+        )
+    }
     com.whiplash.music.ui.common.TrackCollectionPage(
         items = favorites,
         eyebrow = "Collection",
@@ -73,6 +96,13 @@ private fun ModernFavorites(
         heroActions = {
             if (favorites.isNotEmpty()) {
                 com.whiplash.music.ui.common.BatchDownloadIconButton(batchName = "Liked songs", tracks = favorites)
+                com.whiplash.music.ui.theme.PlainIconButton(contentDescription = "Remove all from Favorites", onClick = { confirmClear = true }) {
+                    androidx.compose.material3.Icon(
+                        androidx.compose.material.icons.Icons.Filled.DeleteOutline,
+                        contentDescription = null,
+                        tint = com.whiplash.music.ui.theme.WhiplashColors.textSecondary,
+                    )
+                }
             }
         },
         emptyContent = {
