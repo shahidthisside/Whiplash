@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.filled.GridView
@@ -114,7 +115,14 @@ fun HomeScreen(
     val viewModel: HomeViewModel = viewModel(
         factory = HomeViewModelFactory(
             app.libraryRepository, app.youtubeSearchRepository, app.settingsRepository, app.cloudSyncManager.onlineChanges(),
-            QuickPicksRadio(app.database.playEventDao()) { id -> app.newPipePlaybackProvider.getRadioPage(id, null).items },
+            QuickPicksRadio(app.database.playEventDao()) { id ->
+                // YT Music's "You might also like" for the seed, then its radio.
+                kotlinx.coroutines.coroutineScope {
+                    val related = async { runCatching { app.musicSources.related(id) }.getOrDefault(emptyList()) }
+                    val radio = async { runCatching { app.musicSources.radioPage(id, null).items }.getOrDefault(emptyList()) }
+                    (related.await().take(12) + radio.await()).distinctBy { it.id }
+                }
+            },
         ),
     )
     val songActionsViewModel: SongActionsViewModel = viewModel(
