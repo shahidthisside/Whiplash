@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -45,6 +47,8 @@ class HomeViewModel(
     private val libraryRepository: LibraryRepository,
     private val youtubeSearchRepository: YoutubeSearchRepository,
     private val settingsRepository: com.whiplash.music.data.repository.SettingsRepository,
+    // Emits online/offline; when it turns online with Quick Picks still empty, they reload.
+    private val onlineChanges: kotlinx.coroutines.flow.Flow<Boolean>? = null,
 ) : ViewModel() {
 
     // Layout settings held here (not collected fresh in the screen) so their
@@ -273,6 +277,31 @@ class HomeViewModel(
 
     init {
         loadQuickPicks()
+        // Opened offline (e.g. finishing onboarding without a connection):
+        // load as soon as the phone is back online, with no pull needed.
+        onlineChanges?.let { changes ->
+            viewModelScope.launch {
+                changes.drop(1).collect { online ->
+                    if (online && _quickPicks.value.isEmpty() && !_isLoadingQuickPicks.value) {
+                        loadQuickPicks()
+                        if (shelvesEnabled && _shelves.value.isEmpty() && !_isLoadingShelves.value) {
+                            shelvesJob = viewModelScope.launch { fetchShelves(reset = true) }
+                        }
+                    }
+                }
+            }
+        }
+        // New picks from Settings › Your music taste refresh Quick Picks right away.
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(
+                settingsRepository.tasteLanguages,
+                settingsRepository.tasteGenres,
+                settingsRepository.tasteArtists,
+            ) { l, g, a -> Triple(l, g, a) }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { loadQuickPicks() }
+        }
     }
 
     /**
@@ -355,6 +384,11 @@ class HomeViewModel(
         }
     }
 
+    // False until the first Quick Picks load finishes (or fails), so Home
+    // shows the skeleton from the first frame instead of an empty gap.
+    private val _quickPicksSettled = MutableStateFlow(false)
+    val quickPicksSettled: StateFlow<Boolean> = _quickPicksSettled
+
     private suspend fun fetchQuickPicks() {
         val queries = personalizedQuickPicksQueries()
 
@@ -387,9 +421,13 @@ class HomeViewModel(
             // blip should leave the previous/cached results visible
             // rather than clearing them, same as the old catch-all
             // behavior.
-            if (blended.isNotEmpty()) _quickPicks.value = fillPages(blended)
+            if (blended.isNotEmpty()) {
+                _quickPicks.value = fillPages(blended)
+                com.whiplash.music.ui.onboarding.OnboardingController.homeReady.value = true
+            }
         } finally {
             _isLoadingQuickPicks.value = false
+            _quickPicksSettled.value = true
         }
     }
 
@@ -484,7 +522,36 @@ class HomeViewModel(
             .sortedWith(compareByDescending { it.value })
             .take(MAX_BLEND_ARTISTS)
             .map { it.key }
-        return if (topArtists.isEmpty()) listOf(QUICK_PICKS_QUERY) else topArtists.map { "$it songs" }
+        // Onboarding picks fill whatever listening history doesn't cover yet, so
+        // Home is personal from the first launch and gradually becomes all
+        // history. Nothing picked and nothing played: the generic default.
+        val fromHistory = topArtists.map { "$it songs" }
+        val fromTaste = tasteQueries()
+        if (fromHistory.isEmpty() && fromTaste.isEmpty()) return listOf(QUICK_PICKS_QUERY)
+        return (fromHistory + fromTaste).distinct().take(MAX_BLEND_ARTISTS)
+    }
+
+    /**
+     * Searches built from the onboarding picks, mixed so each kind is
+     * represented: artists ("Arijit Singh songs"), genres in the picked
+     * languages ("hindi bollywood hits"), and languages alone ("latest tamil songs").
+     * Artists are shuffled so a refresh brings a different mix.
+     */
+    private suspend fun tasteQueries(): List<String> {
+        val languages = settingsRepository.tasteLanguages.first()
+        val genres = settingsRepository.tasteGenres.first()
+        val artists = settingsRepository.tasteArtists.first()
+        val artistQ = artists.shuffled().map { "$it songs" }
+        val genreQ = genres.mapIndexedNotNull { i, name ->
+            val q = com.whiplash.music.ui.onboarding.OnboardingCatalog.genre(name)?.query ?: return@mapIndexedNotNull null
+            val lang = languages.getOrNull(i % languages.size.coerceAtLeast(1))
+            if (lang != null && lang != "English") "${lang.lowercase()} $q" else q
+        }
+        val languageQ = languages.map { "latest ${it.lowercase()} songs" }
+        val lists = listOf(artistQ, genreQ, languageQ)
+        val out = mutableListOf<String>()
+        for (i in 0 until (lists.maxOfOrNull { it.size } ?: 0)) for (l in lists) l.getOrNull(i)?.let { out += it }
+        return out
     }
 
     /**

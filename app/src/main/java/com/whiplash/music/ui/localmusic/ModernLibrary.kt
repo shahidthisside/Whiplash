@@ -460,7 +460,12 @@ internal fun LibrarySectionPage(
                     primary = true,
                 )
             }
-            section != LibrarySection.DOWNLOADS && isScanning && localEmpty -> LoadingState()
+            // Scanning the phone for music: shaped like what's coming (song rows, or a cover grid).
+            section != LibrarySection.DOWNLOADS && isScanning && localEmpty -> when (section) {
+                LibrarySection.SONGS -> com.whiplash.music.ui.theme.CollectionPageSkeleton(rows = 7)
+                LibrarySection.ARTISTS -> com.whiplash.music.ui.theme.CoverGridSkeleton(round = true)
+                else -> com.whiplash.music.ui.theme.CoverGridSkeleton()
+            }
             section != LibrarySection.DOWNLOADS && localEmpty -> EmptyLibraryState(onRescan = viewModel::rescan)
             section == LibrarySection.DOWNLOADS -> {
                 val rows: List<PlayableItem> = inFlight.values.toList() + downloads

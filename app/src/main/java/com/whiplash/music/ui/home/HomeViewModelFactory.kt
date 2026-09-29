@@ -9,9 +9,10 @@ class HomeViewModelFactory(
     private val libraryRepository: LibraryRepository,
     private val youtubeSearchRepository: com.whiplash.music.data.repository.YoutubeSearchRepository,
     private val settingsRepository: com.whiplash.music.data.repository.SettingsRepository,
+    private val onlineChanges: kotlinx.coroutines.flow.Flow<Boolean>? = null,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
         @Suppress("UNCHECKED_CAST")
-        return HomeViewModel(libraryRepository, youtubeSearchRepository, settingsRepository) as T
+        return HomeViewModel(libraryRepository, youtubeSearchRepository, settingsRepository, onlineChanges) as T
     }
 }

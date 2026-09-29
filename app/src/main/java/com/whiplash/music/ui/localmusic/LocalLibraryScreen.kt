@@ -231,7 +231,10 @@ private fun LocalCollectionPage(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = com.whiplash.music.ui.theme.WhiplashColors.textPrimary)
             }
         }
-        if (songs == null) return@Column
+        if (songs == null) {
+            com.whiplash.music.ui.theme.CollectionPageSkeleton(rows = 6)
+            return@Column
+        }
         com.whiplash.music.ui.common.TrackCollectionPage(
             items = list,
             eyebrow = if (isAlbum) "Album" else "Artist",

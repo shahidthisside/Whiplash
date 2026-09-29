@@ -253,7 +253,9 @@ fun SearchScreen(
                             onLoadMore = { viewModel.loadMore(SearchResultTab.SONGS) },
                             isLoadingMore = state.isLoadingMoreSongs,
                         )
-                        SearchResultTab.ALBUMS -> if (state.albums.isEmpty() && state.albumsError != null) {
+                        SearchResultTab.ALBUMS -> if (state.albums.isEmpty() && state.loadingAlbums) {
+                            com.whiplash.music.ui.theme.CoverGridSkeleton(modifier = Modifier.padding(horizontal = GlassTokens.spaceMd))
+                        } else if (state.albums.isEmpty() && state.albumsError != null) {
                             ErrorState(state.albumsError!!, onRetry = viewModel::retry)
                         } else {
                             ModernCollectionGrid(
@@ -264,7 +266,9 @@ fun SearchScreen(
                                 isLoadingMore = state.isLoadingMoreAlbums,
                             )
                         }
-                        SearchResultTab.PLAYLISTS -> if (state.playlists.isEmpty() && state.playlistsError != null) {
+                        SearchResultTab.PLAYLISTS -> if (state.playlists.isEmpty() && state.loadingPlaylists) {
+                            com.whiplash.music.ui.theme.CoverGridSkeleton(modifier = Modifier.padding(horizontal = GlassTokens.spaceMd))
+                        } else if (state.playlists.isEmpty() && state.playlistsError != null) {
                             ErrorState(state.playlistsError!!, onRetry = viewModel::retry)
                         } else {
                             ModernCollectionGrid(
@@ -275,7 +279,9 @@ fun SearchScreen(
                                 isLoadingMore = state.isLoadingMorePlaylists,
                             )
                         }
-                        SearchResultTab.ARTISTS -> if (state.artists.isEmpty() && state.artistsError != null) {
+                        SearchResultTab.ARTISTS -> if (state.artists.isEmpty() && state.loadingArtists) {
+                            com.whiplash.music.ui.theme.CoverGridSkeleton(round = true, modifier = Modifier.padding(horizontal = GlassTokens.spaceMd))
+                        } else if (state.artists.isEmpty() && state.artistsError != null) {
                             ErrorState(state.artistsError!!, onRetry = viewModel::retry)
                         } else {
                             ModernArtistGrid(

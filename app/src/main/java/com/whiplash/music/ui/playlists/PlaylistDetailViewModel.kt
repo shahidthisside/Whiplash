@@ -13,6 +13,9 @@ class PlaylistDetailViewModel(
     playlistId: Long,
 ) : ViewModel() {
 
+    /** Null until the first read, so the page can show a skeleton instead of flashing "No songs yet". */
+    val tracksOrNull: StateFlow<List<PlayableItem>?> = libraryRepository.observePlaylistTracks(playlistId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
     val tracks: StateFlow<List<PlayableItem>> = libraryRepository.observePlaylistTracks(playlistId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 

@@ -69,6 +69,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.SdStorage
@@ -155,6 +156,9 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val replayEnabled by viewModel.replayEnabled.collectAsState()
     val quickPicksGridCount by viewModel.quickPicksGridCount.collectAsState()
     val speedDialPaging by viewModel.speedDialPaging.collectAsState()
+    val tasteArtists by app.settingsRepository.tasteArtists.collectAsState(initial = emptyList())
+    val tasteGenres by app.settingsRepository.tasteGenres.collectAsState(initial = emptyList())
+    val tasteLanguages by app.settingsRepository.tasteLanguages.collectAsState(initial = emptyList())
     val speedDialPeek by viewModel.speedDialPeek.collectAsState()
     val speedDialPageCount by viewModel.speedDialPageCount.collectAsState()
     val speedDialGridCount by viewModel.speedDialGridCount.collectAsState()
@@ -1033,6 +1037,22 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     subtitle = "Show new releases, charts and moods & genres on the Search screen.",
                                     checked = exploreEnabled,
                                     onCheckedChange = viewModel::setExploreEnabled,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.MUSIC_TASTE)) {
+                            SettingItem(divider = rows.next()) {
+                                val picks = tasteArtists + tasteGenres + tasteLanguages
+                                SettingActionRow(
+                                    title = "Your music taste",
+                                    icon = Icons.Filled.AutoAwesome,
+                                    subtitle = when {
+                                        picks.isEmpty() -> "Pick languages, genres and artists to personalise Home."
+                                        picks.size <= 2 -> picks.joinToString(", ")
+                                        else -> "${picks.take(2).joinToString(", ")} and ${picks.size - 2} more"
+                                    },
+                                    onClick = { com.whiplash.music.ui.onboarding.OnboardingController.openTaste() },
                                 )
                             }
                         }

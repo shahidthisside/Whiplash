@@ -56,8 +56,9 @@ fun PlaylistDetailScreen(
         key = "playlist_detail_${playlist.id}",
         factory = PlaylistDetailViewModelFactory(app.libraryRepository, playlist.id),
     )
-    val tracks by viewModel.tracks.collectAsState()
-    ModernPlaylistDetail(playlist, tracks, onBack, onPlayQueue)
+    val loadedTracks by viewModel.tracksOrNull.collectAsState()
+    val tracks = loadedTracks.orEmpty()
+    ModernPlaylistDetail(playlist, tracks, onBack, onPlayQueue, loading = loadedTracks == null)
 }
 
 
@@ -73,6 +74,7 @@ private fun ModernPlaylistDetail(
     tracks: List<PlayableItem>,
     onBack: () -> Unit,
     onPlayQueue: (List<PlayableItem>, Int) -> Unit,
+    loading: Boolean = false,
 ) {
     val tint = com.whiplash.music.ui.theme.tintForName(playlist.name)
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = GlassTokens.spaceMd)) {
@@ -83,6 +85,10 @@ private fun ModernPlaylistDetail(
             PlainIconButton(contentDescription = "Back", onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = WhiplashColors.textPrimary)
             }
+        }
+        if (loading) {
+            com.whiplash.music.ui.theme.CollectionPageSkeleton(rows = 6)
+            return@Column
         }
         com.whiplash.music.ui.common.TrackCollectionPage(
             items = tracks,

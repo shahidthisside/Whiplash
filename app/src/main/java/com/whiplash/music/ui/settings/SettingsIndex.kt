@@ -46,6 +46,7 @@ enum class SettingEntry(val section: SettingsSection, val title: String, val key
     LYRIC_LINE(SettingsSection.LYRICS, "Lyric line in player", "current lyric strip"),
     LYRICS_BLUR(SettingsSection.LYRICS, "Blur other lyric lines", "focus"),
     LYRICS_SOURCE(SettingsSection.LYRICS, "Lyrics source", "lrclib lyrics.ovh provider"),
+    MUSIC_TASTE(SettingsSection.APPEARANCE, "Your music taste", "personalise personalize onboarding languages genres artists favourite home recommendations"),
     SPEED_DIAL_PAGES(SettingsSection.APPEARANCE, "Speed dial pages", "swipe horizontal scroll pages home grid more songs"),
     SPEED_DIAL_GRID(SettingsSection.APPEARANCE, "Speed dial grid size", "songs per page rows home grid increase decrease"),
     SPEED_DIAL_PAGE_COUNT(SettingsSection.APPEARANCE, "Speed dial page count", "how many pages more fewer songs increase decrease"),

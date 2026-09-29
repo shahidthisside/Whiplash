@@ -136,8 +136,8 @@ fun ArtistDetailScreen(
             label = "artistDetailState",
         ) { s ->
             when (s) {
-                is ArtistDetailUiState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = WhiplashColors.accent)
+                is ArtistDetailUiState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                    com.whiplash.music.ui.theme.CollectionPageSkeleton(round = true)
                 }
                 is ArtistDetailUiState.Error -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {

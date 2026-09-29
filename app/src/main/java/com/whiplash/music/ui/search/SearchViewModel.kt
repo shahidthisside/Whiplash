@@ -27,6 +27,10 @@ data class SearchUiState(
     val artists: List<YoutubeArtistResult> = emptyList(),
     val suggestions: List<String> = emptyList(),
     val isSearching: Boolean = false,
+    /** Albums / playlists / artists still on their first load for this query (skeleton, not "none found"). */
+    val loadingAlbums: Boolean = false,
+    val loadingPlaylists: Boolean = false,
+    val loadingArtists: Boolean = false,
     val hasSearched: Boolean = false,
     val errorMessage: String? = null,
     /**
@@ -287,6 +291,9 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
             it.copy(
                 query = query,
                 isSearching = true,
+                loadingAlbums = true,
+                loadingPlaylists = true,
+                loadingArtists = true,
                 suggestions = emptyList(),
                 hasMoreSongs = true,
                 hasMoreAlbums = true,
@@ -354,14 +361,14 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
             // error shows a real, retryable error state for that tab instead
             // of silently masquerading as "no results".
             runCatching { repository.searchAlbums(query) }
-                .onSuccess { albums -> _state.update { it.copy(albums = albums, albumsError = null) } }
-                .onFailure { failure -> _state.update { it.copy(albumsError = failure.toUserFacingMessage("Couldn't load albums")) } }
+                .onSuccess { albums -> _state.update { it.copy(albums = albums, albumsError = null, loadingAlbums = false) } }
+                .onFailure { failure -> _state.update { it.copy(albumsError = failure.toUserFacingMessage("Couldn't load albums"), loadingAlbums = false) } }
             runCatching { repository.searchPlaylists(query) }
-                .onSuccess { playlists -> _state.update { it.copy(playlists = playlists, playlistsError = null) } }
-                .onFailure { failure -> _state.update { it.copy(playlistsError = failure.toUserFacingMessage("Couldn't load playlists")) } }
+                .onSuccess { playlists -> _state.update { it.copy(playlists = playlists, playlistsError = null, loadingPlaylists = false) } }
+                .onFailure { failure -> _state.update { it.copy(playlistsError = failure.toUserFacingMessage("Couldn't load playlists"), loadingPlaylists = false) } }
             runCatching { repository.searchArtists(query) }
-                .onSuccess { artists -> _state.update { it.copy(artists = artists, artistsError = null) } }
-                .onFailure { failure -> _state.update { it.copy(artistsError = failure.toUserFacingMessage("Couldn't load artists")) } }
+                .onSuccess { artists -> _state.update { it.copy(artists = artists, artistsError = null, loadingArtists = false) } }
+                .onFailure { failure -> _state.update { it.copy(artistsError = failure.toUserFacingMessage("Couldn't load artists"), loadingArtists = false) } }
         }
     }
 

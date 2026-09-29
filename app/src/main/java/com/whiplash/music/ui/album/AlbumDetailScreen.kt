@@ -121,8 +121,8 @@ fun AlbumDetailScreen(
             label = "albumDetailState",
         ) { s ->
             when (s) {
-                is AlbumDetailUiState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = WhiplashColors.accent)
+                is AlbumDetailUiState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                    com.whiplash.music.ui.theme.CollectionPageSkeleton()
                 }
                 is AlbumDetailUiState.Error -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {

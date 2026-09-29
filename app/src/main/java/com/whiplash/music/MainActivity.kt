@@ -117,7 +117,7 @@ class MainActivity : ComponentActivity() {
                 androidx.compose.runtime.CompositionLocalProvider(
                     com.whiplash.music.ui.common.LocalAppReduceMotion provides reduceAnimations,
                 ) {
-                    WhiplashApp()
+                    OnboardingGate()
                 }
             }
         }
@@ -210,6 +210,59 @@ private fun MiniPlayerHost(
         onNext = playerViewModel::seekToNext,
         modifier = modifier,
     )
+}
+
+/**
+ * First-run onboarding in front of the app: a fresh install sees
+ * [com.whiplash.music.ui.onboarding.OnboardingFlow] first, then the app
+ * fades and settles in. Settings › Your music taste reopens the taste steps
+ * over the running app (the app stays composed underneath, so playback and
+ * scroll positions are untouched).
+ */
+@androidx.compose.material3.ExperimentalMaterial3Api
+@androidx.compose.foundation.ExperimentalFoundationApi
+@androidx.compose.foundation.layout.ExperimentalLayoutApi
+@Composable
+private fun OnboardingGate() {
+    val app = LocalContext.current.applicationContext as WhiplashApplication
+    // null = still deciding (a few ms of plain background, no flash of Home).
+    var showOnboarding by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    // Home is composed under onboarding from the "Personalising" step on, so
+    // it loads Quick Picks and shelves for the new picks while the animation
+    // plays; onboarding then fades away to reveal a ready Home.
+    var homeUnderneath by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (showOnboarding == null) showOnboarding = com.whiplash.music.ui.onboarding.shouldShowOnboarding(app)
+    }
+    Box(Modifier.fillMaxSize().background(WhiplashColors.background)) {
+        if (showOnboarding == false || homeUnderneath) {
+            WhiplashApp()
+        }
+        AnimatedVisibility(
+            visible = showOnboarding == true,
+            enter = fadeIn(tween(300)),
+            exit = fadeOut(tween(700, easing = androidx.compose.animation.core.FastOutSlowInEasing)) +
+                androidx.compose.animation.scaleOut(tween(700, easing = androidx.compose.animation.core.FastOutSlowInEasing), targetScale = 1.04f),
+        ) {
+            com.whiplash.music.ui.onboarding.OnboardingFlow(
+                onFinished = { showOnboarding = false },
+                onPrepareHome = { homeUnderneath = true },
+            )
+        }
+        if (showOnboarding == false) {
+            val request = com.whiplash.music.ui.onboarding.OnboardingController.request
+            AnimatedVisibility(
+                visible = request != null,
+                enter = fadeIn(tween(350)) + slideInVertically(tween(450, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it / 6 },
+                exit = fadeOut(tween(300)) + androidx.compose.animation.slideOutVertically(tween(350)) { it / 6 },
+            ) {
+                com.whiplash.music.ui.onboarding.OnboardingFlow(
+                    startAt = request ?: com.whiplash.music.ui.onboarding.OnboardingStep.LANGUAGES,
+                    onFinished = { com.whiplash.music.ui.onboarding.OnboardingController.close() },
+                )
+            }
+        }
+    }
 }
 
 @androidx.compose.material3.ExperimentalMaterial3Api

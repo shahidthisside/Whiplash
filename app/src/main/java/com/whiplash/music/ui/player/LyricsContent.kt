@@ -206,9 +206,9 @@ fun LyricsContent(
 private fun LoadingState() {
     Box(
         modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp),
-        contentAlignment = Alignment.Center,
+        contentAlignment = Alignment.TopCenter,
     ) {
-        CircularProgressIndicator(color = WhiplashColors.accent)
+        com.whiplash.music.ui.theme.LyricsSkeleton()
     }
 }
 

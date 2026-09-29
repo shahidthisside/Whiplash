@@ -5,6 +5,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import com.whiplash.music.ui.common.selectedHighlight
 import androidx.compose.foundation.layout.Arrangement
@@ -111,7 +112,7 @@ fun HomeScreen(
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: HomeViewModel = viewModel(
-        factory = HomeViewModelFactory(app.libraryRepository, app.youtubeSearchRepository, app.settingsRepository),
+        factory = HomeViewModelFactory(app.libraryRepository, app.youtubeSearchRepository, app.settingsRepository, app.cloudSyncManager.onlineChanges()),
     )
     val songActionsViewModel: SongActionsViewModel = viewModel(
         factory = SongActionsViewModelFactory(app.libraryRepository, app.downloadManager),
@@ -124,6 +125,8 @@ fun HomeScreen(
     val isSpeedDialLoaded by viewModel.isSpeedDialLoaded.collectAsState()
     val quickPicks by viewModel.quickPicks.collectAsState()
     val isLoadingQuickPicks by viewModel.isLoadingQuickPicks.collectAsState()
+    val quickPicksSettled by viewModel.quickPicksSettled.collectAsState()
+    val online by remember { app.cloudSyncManager.onlineChanges() }.collectAsState(initial = true)
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val pullState = rememberPullToRefreshState()
     val haptic = LocalHapticFeedback.current
@@ -231,7 +234,7 @@ fun HomeScreen(
     // has emitted anything yet, replacing what should be a loading
     // skeleton with a flash of "Play something to see it here." that
     // then immediately gets replaced by real content once data arrives.
-    if (isSpeedDialLoaded && speedDial.isEmpty() && quickPicks.isEmpty() && !isLoadingQuickPicks) {
+    if (isSpeedDialLoaded && speedDial.isEmpty() && quickPicks.isEmpty() && !isLoadingQuickPicks && quickPicksSettled && online) {
         // Pullable too, and deliberately so: an empty Home is the single
         // most likely place someone reaches for a pull-to-refresh, and a
         // screen that says "nothing here" while ignoring the gesture reads
@@ -329,7 +332,11 @@ fun HomeScreen(
                 }
             }
 
-            if (quickPicks.isNotEmpty() || isLoadingQuickPicks) {
+            // Shown from the very first frame (skeleton) until the first load
+            // settles, instead of the whole section popping in when it arrives.
+            // Offline with nothing yet: keep the skeleton up (it loads by itself on reconnect).
+            val qpPending = quickPicks.isEmpty() && (isLoadingQuickPicks || !quickPicksSettled || !online)
+            if (quickPicks.isNotEmpty() || qpPending) {
                 item {
                     SectionHeader(
                         title = "Quick Picks",
@@ -365,6 +372,35 @@ fun HomeScreen(
                     }
                 }
                 val qpSelected: (PlayableItem) -> Boolean = { qpSelection.isSelected(it) }
+                if (qpPending && !online) {
+                    item(key = "qp-offline") {
+                        Row(
+                            Modifier.fillMaxWidth().padding(bottom = GlassTokens.spaceXs),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            androidx.compose.material3.Icon(
+                                Icons.Filled.CloudOff,
+                                contentDescription = null,
+                                tint = WhiplashColors.textTertiary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            androidx.compose.foundation.layout.Spacer(Modifier.padding(start = 6.dp))
+                            Text(
+                                "You're offline. Quick Picks will load when you reconnect.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = WhiplashColors.textSecondary,
+                            )
+                        }
+                    }
+                }
+                if (qpPending) {
+                    item(key = "qp-skeleton") {
+                        if (quickPicksGridView) QuickPicksSkeletonGrid(rows = ((quickPicksGridCount.takeIf { it > 0 } ?: 9) + 2) / 3)
+                        else Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs)) {
+                            repeat(6) { com.whiplash.music.ui.theme.ShimmerSkeletonRow() }
+                        }
+                    }
+                }
                 if (quickPicksGridView && quickPicks.isNotEmpty()) {
                     val perPage = quickPicksGridCount
                     if (perPage == 0) {
@@ -933,6 +969,24 @@ private fun SpeedDialPager(
  * and Speed dial's Room flow emitting its first real snapshot, rather
  * than leaving the section blank or missing entirely during that window.
  */
+/** Quick Picks grid placeholder: [rows] rows of three tiles with two text lines, like QuickPickTile. */
+@Composable
+private fun QuickPicksSkeletonGrid(rows: Int) {
+    Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+        repeat(rows.coerceIn(1, 4)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+                repeat(3) {
+                    Column(Modifier.weight(1f)) {
+                        com.whiplash.music.ui.theme.ShimmerBox(Modifier.fillMaxWidth().aspectRatio(1f), RoundedCornerShape(WhiplashRadius.medium))
+                        com.whiplash.music.ui.theme.ShimmerBox(Modifier.padding(top = GlassTokens.spaceXs).fillMaxWidth(0.8f).height(12.dp))
+                        com.whiplash.music.ui.theme.ShimmerBox(Modifier.padding(top = 4.dp).fillMaxWidth(0.5f).height(10.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SpeedDialSkeletonGrid() {
     Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {

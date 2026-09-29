@@ -394,6 +394,9 @@ class BackupManager(
         put("lyricsBlurUnfocused", settingsRepository.lyricsBlurUnfocused.first())
         put("speedDialListView", settingsRepository.speedDialListView.first())
         put("speedDialPaging", settingsRepository.speedDialPaging.first())
+        put("tasteLanguages", org.json.JSONArray(settingsRepository.tasteLanguages.first()))
+        put("tasteGenres", org.json.JSONArray(settingsRepository.tasteGenres.first()))
+        put("tasteArtists", org.json.JSONArray(settingsRepository.tasteArtists.first()))
         put("speedDialPeek", settingsRepository.speedDialPeek.first())
         put("speedDialPageCount", settingsRepository.speedDialPageCount.first())
         put("speedDialGridCount", settingsRepository.speedDialGridCount.first())
@@ -480,6 +483,12 @@ class BackupManager(
         if (s.has("speedDialPageCount")) runCatching { settingsRepository.setSpeedDialPageCount(s.getInt("speedDialPageCount")) }
         if (s.has("speedDialPeek")) runCatching { settingsRepository.setSpeedDialPeek(s.getBoolean("speedDialPeek")) }
         if (s.has("quickPicksPeek")) runCatching { settingsRepository.setQuickPicksPeek(s.getBoolean("quickPicksPeek")) }
+        if (s.has("tasteArtists") || s.has("tasteGenres") || s.has("tasteLanguages")) {
+            runCatching {
+                fun list(key: String): List<String> = s.optJSONArray(key)?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList()
+                settingsRepository.setTaste(list("tasteLanguages"), list("tasteGenres"), list("tasteArtists"))
+            }
+        }
         if (s.has("speedDialPaging")) {
             runCatching { settingsRepository.setSpeedDialPaging(s.getBoolean("speedDialPaging")) }
         }

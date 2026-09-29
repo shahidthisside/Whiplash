@@ -171,7 +171,8 @@ class CloudSyncManager(
             caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }.getOrDefault(false)
 
-    private fun onlineChanges(): Flow<Boolean> = callbackFlow {
+    /** Online/offline as it changes (current value first). Shared by Home's reconnect retry. */
+    fun onlineChanges(): Flow<Boolean> = callbackFlow {
         val callback = object : android.net.ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: android.net.Network) { trySend(isOnline()) }
             override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) { trySend(isOnline()) }

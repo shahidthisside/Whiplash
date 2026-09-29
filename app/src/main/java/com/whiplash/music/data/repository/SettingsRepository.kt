@@ -315,6 +315,35 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[SHOW_ACCOUNT_EMAIL_KEY] = show }
     }
 
+    // ---- First-run onboarding + music taste -------------------------------
+
+    /** Null until decided: fresh installs see onboarding, existing users are marked done. */
+    val onboardingDone: Flow<Boolean?> = dataStore.data.map { prefs -> prefs[ONBOARDING_DONE_KEY] }
+
+    suspend fun setOnboardingDone(done: Boolean) {
+        dataStore.edit { prefs -> prefs[ONBOARDING_DONE_KEY] = done }
+    }
+
+    /** Taste picked during onboarding (or Settings › Music taste); empty when skipped. */
+    val tasteLanguages: Flow<List<String>> = dataStore.data.map { prefs -> decodeTaste(prefs[TASTE_LANGUAGES_KEY]) }
+    val tasteGenres: Flow<List<String>> = dataStore.data.map { prefs -> decodeTaste(prefs[TASTE_GENRES_KEY]) }
+    val tasteArtists: Flow<List<String>> = dataStore.data.map { prefs -> decodeTaste(prefs[TASTE_ARTISTS_KEY]) }
+
+    suspend fun setTaste(languages: List<String>, genres: List<String>, artists: List<String>) {
+        dataStore.edit { prefs ->
+            prefs[TASTE_LANGUAGES_KEY] = encodeTaste(languages)
+            prefs[TASTE_GENRES_KEY] = encodeTaste(genres)
+            prefs[TASTE_ARTISTS_KEY] = encodeTaste(artists)
+        }
+    }
+
+    // Stored as one string in pick order (a string set would lose the order).
+    private fun encodeTaste(values: List<String>): String =
+        values.map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(TASTE_SEPARATOR)
+
+    private fun decodeTaste(raw: String?): List<String> =
+        raw?.split(TASTE_SEPARATOR)?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+
     /** Account & sync: show the "Synced just now"-style status on the Settings profile card (this device only). */
     val showSyncStatus: Flow<Boolean> = dataStore.data.map { prefs -> prefs[SHOW_SYNC_STATUS_KEY] ?: true }
 
@@ -557,6 +586,11 @@ class SettingsRepository(context: Context) {
         val CLOUD_SYNC_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("cloud_sync_enabled")
         val SHOW_ACCOUNT_EMAIL_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("show_account_email")
         val SHOW_SYNC_STATUS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("show_sync_status")
+        val ONBOARDING_DONE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("onboarding_done")
+        val TASTE_LANGUAGES_KEY: Preferences.Key<String> = stringPreferencesKey("taste_languages")
+        val TASTE_GENRES_KEY: Preferences.Key<String> = stringPreferencesKey("taste_genres")
+        val TASTE_ARTISTS_KEY: Preferences.Key<String> = stringPreferencesKey("taste_artists")
+        private const val TASTE_SEPARATOR = "\u001F"
         val SHOW_ACCOUNT_PHOTO_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("show_account_photo")
         val REPLAY_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("replay_enabled")
         val HOME_SHELVES_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("home_shelves_enabled")

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -173,6 +174,78 @@ fun ShimmerSkeletonRow(modifier: Modifier = Modifier) {
             ShimmerBox(modifier = Modifier.fillMaxWidth(0.6f).height(16.dp))
             androidx.compose.foundation.layout.Spacer(Modifier.padding(top = GlassTokens.spaceXs))
             ShimmerBox(modifier = Modifier.fillMaxWidth(0.35f).height(12.dp))
+        }
+    }
+}
+
+/**
+ * Skeleton for an album / artist / playlist page: a big cover (round for an
+ * artist), title and subtitle bars, two button pills, then [rows] song rows.
+ */
+@Composable
+fun CollectionPageSkeleton(round: Boolean = false, rows: Int = 8, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = GlassTokens.spaceMd),
+        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+    ) {
+        ShimmerBox(
+            Modifier.size(if (round) 180.dp else 220.dp),
+            if (round) androidx.compose.foundation.shape.CircleShape else RoundedCornerShape(WhiplashRadius.large),
+        )
+        androidx.compose.foundation.layout.Spacer(Modifier.height(GlassTokens.spaceMd))
+        ShimmerBox(Modifier.fillMaxWidth(0.55f).height(24.dp))
+        androidx.compose.foundation.layout.Spacer(Modifier.height(GlassTokens.spaceSm))
+        ShimmerBox(Modifier.fillMaxWidth(0.35f).height(14.dp))
+        androidx.compose.foundation.layout.Spacer(Modifier.height(GlassTokens.spaceMd))
+        androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(GlassTokens.spaceSm)) {
+            ShimmerBox(Modifier.size(width = 120.dp, height = 44.dp), RoundedCornerShape(WhiplashRadius.pill))
+            ShimmerBox(Modifier.size(width = 120.dp, height = 44.dp), RoundedCornerShape(WhiplashRadius.pill))
+        }
+        androidx.compose.foundation.layout.Spacer(Modifier.height(GlassTokens.spaceMd))
+        repeat(rows) { ShimmerSkeletonRow() }
+    }
+}
+
+/** Skeleton for lyrics: centred bars of varying width, like lines of text. */
+@Composable
+fun LyricsSkeleton(modifier: Modifier = Modifier) {
+    val widths = listOf(0.72f, 0.55f, 0.8f, 0.62f, 0.7f, 0.45f, 0.76f, 0.58f)
+    androidx.compose.foundation.layout.Column(
+        modifier = modifier.fillMaxWidth().padding(vertical = GlassTokens.spaceLg),
+        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(18.dp),
+    ) {
+        widths.forEach { w -> ShimmerBox(Modifier.fillMaxWidth(w).height(22.dp), RoundedCornerShape(6.dp)) }
+    }
+}
+
+/** Skeleton for a grid of covers with a title and subtitle line (albums, playlists, artists). */
+@Composable
+fun CoverGridSkeleton(round: Boolean = false, count: Int = 6, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.Column(
+        modifier = modifier.fillMaxWidth().padding(top = GlassTokens.spaceXs),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(18.dp),
+    ) {
+        repeat((count + 1) / 2) {
+            androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp)) {
+                repeat(2) {
+                    androidx.compose.foundation.layout.Column(
+                        Modifier.weight(1f),
+                        horizontalAlignment = if (round) androidx.compose.ui.Alignment.CenterHorizontally else androidx.compose.ui.Alignment.Start,
+                    ) {
+                        ShimmerBox(
+                            Modifier.fillMaxWidth().aspectRatio(1f),
+                            if (round) androidx.compose.foundation.shape.CircleShape else RoundedCornerShape(WhiplashRadius.medium),
+                        )
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+                        ShimmerBox(Modifier.fillMaxWidth(0.7f).height(14.dp))
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
+                        ShimmerBox(Modifier.fillMaxWidth(0.45f).height(11.dp))
+                    }
+                }
+            }
         }
     }
 }
