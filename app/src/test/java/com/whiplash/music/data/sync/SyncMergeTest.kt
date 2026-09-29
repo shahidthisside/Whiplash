@@ -121,4 +121,25 @@ class SyncMergeTest {
         assertFalse(SyncProfile("a", byteArrayOf(1, 2), 1) == SyncProfile("a", byteArrayOf(1, 3), 1))
         assertFalse(SyncProfile("a", null, 1) == SyncProfile("a", byteArrayOf(1), 1))
     }
+
+    @Test
+    fun `a switched-off category is left alone on both sides`() {
+        val local = SyncSnapshot(favorites = mapOf("a" to 1L), history = mapOf("x@1" to 1L))
+        val remote = SyncSnapshot(favorites = mapOf("b" to 2L), history = mapOf("y@2" to 2L))
+        val merged = SyncMerge.merge(null, local, remote)
+        val plan = SyncMerge.plan(merged, local, remote, setOf(SyncCategory.HISTORY))
+        assertEquals(setOf("a", "b"), plan.toApply.favorites.keys)
+        assertEquals(local.history, plan.toApply.history)
+        assertEquals(remote.history, plan.toUpload.history)
+        assertTrue(plan.newBase.history.isEmpty())
+    }
+
+    @Test
+    fun `turning a category back on combines instead of deleting`() {
+        // Base saved while History was off keeps it empty, so both sides' plays survive.
+        val base = SyncSnapshot(history = emptyMap())
+        val local = SyncSnapshot(history = mapOf("x@1" to 1L))
+        val remote = SyncSnapshot(history = mapOf("y@2" to 2L))
+        assertEquals(setOf("x@1", "y@2"), SyncMerge.merge(base, local, remote).history.keys)
+    }
 }

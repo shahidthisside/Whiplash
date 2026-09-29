@@ -315,6 +315,13 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[SHOW_ACCOUNT_EMAIL_KEY] = show }
     }
 
+    /** Account & sync: show the profile photo in Settings; off shows your initial instead (this device only). */
+    val showAccountPhoto: Flow<Boolean> = dataStore.data.map { prefs -> prefs[SHOW_ACCOUNT_PHOTO_KEY] ?: true }
+
+    suspend fun setShowAccountPhoto(show: Boolean) {
+        dataStore.edit { prefs -> prefs[SHOW_ACCOUNT_PHOTO_KEY] = show }
+    }
+
     /** Emits on every settings write — cloud sync uses it to notice changes. */
     val rawChanges: Flow<Preferences> = dataStore.data
 
@@ -498,6 +505,7 @@ class SettingsRepository(context: Context) {
         val EXPLORE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("explore_enabled")
         val CLOUD_SYNC_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("cloud_sync_enabled")
         val SHOW_ACCOUNT_EMAIL_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("show_account_email")
+        val SHOW_ACCOUNT_PHOTO_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("show_account_photo")
         val REPLAY_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("replay_enabled")
         val HOME_SHELVES_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("home_shelves_enabled")
         val PLAYLISTS_LIST_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("playlists_list_view")

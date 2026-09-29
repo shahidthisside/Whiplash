@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 /**
@@ -77,6 +78,10 @@ class CloudSyncManager(
         val favorites: Int = 0,
         /** Changes are waiting and the phone is offline; they sync once it reconnects. */
         val waitingForNetwork: Boolean = false,
+        /** "Choose what syncs" is on; otherwise everything syncs. */
+        val selective: Boolean = false,
+        /** Categories switched off in "Choose what syncs" (only used while [selective]). */
+        val excluded: Set<SyncCategory> = emptySet(),
     )
 
     sealed interface SignInStep {
@@ -115,7 +120,45 @@ class CloudSyncManager(
             playlists = prefs.getInt(KEY_PLAYLISTS, 0),
             favorites = prefs.getInt(KEY_FAVORITES, 0),
             waitingForNetwork = prefs.getBoolean(KEY_PENDING, false) && !isOnline(),
+            selective = prefs.getBoolean(KEY_SELECTIVE, false),
+            excluded = readExcluded(),
         )
+    }
+
+    /** What sync actually leaves out: nothing unless "Choose what syncs" is on. */
+    private fun effectiveExcluded(): Set<SyncCategory> =
+        if (prefs.getBoolean(KEY_SELECTIVE, false)) readExcluded() else emptySet()
+
+    /** Off: everything syncs. On: only the chosen categories do (your last choice is kept). */
+    fun setSelective(enabled: Boolean) {
+        val before = effectiveExcluded()
+        prefs.edit().putBoolean(KEY_SELECTIVE, enabled).apply()
+        _state.update { it.copy(selective = enabled) }
+        if (effectiveExcluded() != before) syncSoon()
+    }
+
+    /** The "All" chip: every category on, or every category off. */
+    fun setAllCategories(enabled: Boolean) {
+        val next = if (enabled) emptySet() else SyncCategory.entries.toSet()
+        prefs.edit().putStringSet(KEY_EXCLUDED, next.map { it.name }.toSet()).apply()
+        _state.update { it.copy(excluded = next) }
+        if (enabled) syncSoon()
+    }
+
+    private fun syncSoon() {
+        if (prefs.getString(KEY_EMAIL, null) == null) return
+        scope.launch { if (isOnline()) sync() else setPending(true) }
+    }
+
+    private fun readExcluded(): Set<SyncCategory> =
+        prefs.getStringSet(KEY_EXCLUDED, emptySet()).orEmpty().mapNotNull { runCatching { SyncCategory.valueOf(it) }.getOrNull() }.toSet()
+
+    /** Turns one category's syncing on or off; the rest of the library keeps syncing. */
+    fun setCategoryEnabled(category: SyncCategory, enabled: Boolean) {
+        val next = if (enabled) readExcluded() - category else readExcluded() + category
+        prefs.edit().putStringSet(KEY_EXCLUDED, next.map { it.name }.toSet()).apply()
+        _state.update { it.copy(excluded = next) }
+        if (enabled) syncSoon()
     }
 
     // ---- Connectivity -----------------------------------------------------
@@ -204,7 +247,9 @@ class CloudSyncManager(
         mutex.withLock {
             prefs.edit().remove(KEY_EMAIL).remove(KEY_NAME).remove(KEY_PHOTO).remove(KEY_NEEDS_SIGN_IN).apply()
             forgetSyncState()
-            prefs.edit().remove(KEY_PENDING).apply()
+            // Selective-sync choices belong to this account too; clear them so the
+            // switch and what actually syncs can't disagree after signing in again.
+            prefs.edit().remove(KEY_PENDING).remove(KEY_SELECTIVE).remove(KEY_EXCLUDED).apply()
             // The custom profile belongs to this account; it comes back from Drive on sign-in.
             profileStore.applyFromSync(null)
             _state.update { State(available = it.available, autoSync = it.autoSync) }
@@ -229,6 +274,50 @@ class CloudSyncManager(
         return result
     }
 
+    /** Set once "Reset app" starts; blocks every sync until the process is wiped. */
+    @Volatile
+    private var resetting = false
+
+    /**
+     * Account steps of "Reset app", run just before the phone is wiped.
+     *
+     * The wipe itself removes the signed-in account, the sync base and all
+     * sync state, so the next launch is signed out and can never push an
+     * empty library over Drive. Signing in again later is a first sync, which
+     * combines both sides and so restores the Drive copy instead of deleting it.
+     *
+     * Before the wipe, syncs are blocked (including one already queued), and
+     * with [alsoDrive] the Drive copy is deleted while holding the sync lock
+     * so nothing can re-upload it. If that delete fails, reset is cancelled
+     * and nothing is erased. Every wait is capped so reset can't hang.
+     */
+    suspend fun prepareAppReset(alsoDrive: Boolean): SyncResult {
+        val email = prefs.getString(KEY_EMAIL, null) ?: return SyncResult.Synced
+        resetting = true
+        if (alsoDrive) {
+            val deleted = withTimeoutOrNull(RESET_DRIVE_TIMEOUT_MS) {
+                mutex.withLock {
+                    try {
+                        withToken { token -> drive.deleteAll(token) }
+                        SyncResult.Synced
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "reset: Drive delete failed", e)
+                        SyncResult.Failed(describeSyncError(e))
+                    }
+                }
+            } ?: SyncResult.Failed("Timed out")
+            if (deleted is SyncResult.Failed) {
+                resetting = false
+                return deleted
+            }
+        }
+        // Best effort: withdraw Google access so the next sign-in asks again.
+        withTimeoutOrNull(RESET_REVOKE_TIMEOUT_MS) { auth.revoke(email) }
+        return SyncResult.Synced
+    }
+
     fun setAutoSync(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_AUTO_SYNC, enabled).apply()
         _state.update { it.copy(autoSync = enabled) }
@@ -243,7 +332,10 @@ class CloudSyncManager(
             setPending(true)
             return SyncResult.Failed("You're offline. Changes will sync when you reconnect")
         }
+        if (resetting) return SyncResult.Failed("Resetting")
         return mutex.withLock {
+            // A sync queued behind "Reset app" must not run after the Drive copy is gone.
+            if (resetting) return@withLock SyncResult.Failed("Resetting")
             _state.update { it.copy(syncing = true) }
             try {
                 withToken { token -> syncOnce(token, email) }
@@ -285,16 +377,20 @@ class CloudSyncManager(
                     base = null
                     SyncSnapshot()
                 }
-                base != null && remoteFile.id == knownId && remoteFile.version == knownVersion -> base
+                // Unchanged since our last sync, so the base is an exact copy of
+                // it; not when categories are off, since the base leaves them empty.
+                base != null && remoteFile.id == knownId && remoteFile.version == knownVersion && effectiveExcluded().isEmpty() -> base
                 else -> SyncCodec.decode(drive.download(token, remoteFile.id))
             }
 
             val local = localStore.read()
-            val merged = SyncMerge.merge(base, local.snapshot, remote)
+            val plan = SyncMerge.plan(SyncMerge.merge(base, local.snapshot, remote), local.snapshot, remote, effectiveExcluded())
+            val toApply = plan.toApply
+            val merged = plan.toUpload
 
-            if (!merged.sameContentAs(local.snapshot) || merged.songs.keys.any { it !in local.snapshot.songs }) {
+            if (!toApply.sameContentAs(local.snapshot) || toApply.songs.keys.any { it !in local.snapshot.songs }) {
                 ignoreChangesUntil = System.currentTimeMillis() + IGNORE_OWN_CHANGES_MS
-                localStore.apply(local, merged)
+                localStore.apply(local, toApply)
                 ignoreChangesUntil = System.currentTimeMillis() + IGNORE_OWN_CHANGES_MS
             }
 
@@ -311,7 +407,7 @@ class CloudSyncManager(
                 remoteFile
             }
 
-            writeBase(email, merged)
+            writeBase(email, plan.newBase)
             prefs.edit()
                 .putString(KEY_FILE_ID, saved.id)
                 .putLong(KEY_VERSION, saved.version)
@@ -433,6 +529,8 @@ class CloudSyncManager(
 
     companion object {
         private const val TAG = "CloudSync"
+        private const val RESET_DRIVE_TIMEOUT_MS = 20_000L
+        private const val RESET_REVOKE_TIMEOUT_MS = 3_000L
         private const val PREFS = "whiplash_cloud_sync"
         private const val KEY_EMAIL = "email"
         private const val KEY_NAME = "name"
@@ -446,6 +544,8 @@ class CloudSyncManager(
         private const val KEY_PLAYLISTS = "count_playlists"
         private const val KEY_FAVORITES = "count_favorites"
         private const val KEY_PENDING = "pending_changes"
+        private const val KEY_EXCLUDED = "excluded_categories"
+        private const val KEY_SELECTIVE = "selective_sync"
         private const val RECONNECT_DELAY_MS = 2_000L
 
         private const val MAX_ATTEMPTS = 3

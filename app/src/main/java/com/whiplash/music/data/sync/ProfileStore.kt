@@ -34,11 +34,29 @@ class ProfileStore(context: Context) {
         save(name?.trim()?.take(MAX_NAME)?.takeIf { it.isNotEmpty() }, current?.photoJpeg)
     }
 
-    /** Reads [uri], crops it to a small square JPEG and saves it. False if it isn't a readable image. */
-    suspend fun setPhoto(context: Context, uri: Uri): Boolean = withContext(Dispatchers.IO) {
-        val jpeg = runCatching { squareJpeg(context, uri) }.getOrNull() ?: return@withContext false
-        save(_profile.value?.name, jpeg)
-        true
+    /** Loads [uri] (at most ~1024 px, rotation applied) for the Adjust photo screen; null if unreadable. */
+    suspend fun decodeForCrop(context: Context, uri: Uri): Bitmap? = withContext(Dispatchers.IO) {
+        runCatching { decode(context, uri) }.getOrNull()
+    }
+
+    /**
+     * Saves the square [size]×[size] area of [bitmap] starting at ([left], [top]) —
+     * what the user framed in the circle — as the profile photo.
+     */
+    suspend fun setCroppedPhoto(bitmap: Bitmap, left: Int, top: Int, size: Int): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val side = size.coerceIn(1, minOf(bitmap.width, bitmap.height))
+            val x = left.coerceIn(0, bitmap.width - side)
+            val y = top.coerceIn(0, bitmap.height - side)
+            val square = Bitmap.createBitmap(bitmap, x, y, side, side)
+            val scaled = Bitmap.createScaledBitmap(square, PHOTO_SIZE, PHOTO_SIZE, true)
+            val jpeg = ByteArrayOutputStream().use { out ->
+                scaled.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                out.toByteArray()
+            }
+            save(_profile.value?.name, jpeg)
+            true
+        }.getOrDefault(false)
     }
 
     fun removePhoto() = save(_profile.value?.name, null)
@@ -81,8 +99,8 @@ class ProfileStore(context: Context) {
         return SyncProfile(prefs.getString(KEY_NAME, null), photo, updated)
     }
 
-    private fun squareJpeg(context: Context, uri: Uri): ByteArray? {
-        val bitmap: Bitmap = if (Build.VERSION.SDK_INT >= 28) {
+    private fun decode(context: Context, uri: Uri): Bitmap? {
+        return if (Build.VERSION.SDK_INT >= 28) {
             val source = android.graphics.ImageDecoder.createSource(context.contentResolver, uri)
             android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
                 val longest = maxOf(info.size.width, info.size.height)
@@ -99,15 +117,7 @@ class ProfileStore(context: Context) {
             while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= DECODE_MAX) sample *= 2
             context.contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
-            } ?: return null
-        }
-        val side = minOf(bitmap.width, bitmap.height)
-        if (side <= 0) return null
-        val square = Bitmap.createBitmap(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side)
-        val scaled = Bitmap.createScaledBitmap(square, PHOTO_SIZE, PHOTO_SIZE, true)
-        return ByteArrayOutputStream().use { out ->
-            scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
-            out.toByteArray()
+            }
         }
     }
 
@@ -117,8 +127,8 @@ class ProfileStore(context: Context) {
         private const val KEY_UPDATED = "updated"
         const val MAX_NAME = 40
 
-        /** 256 px keeps the photo around 20 KB, small enough to ride inside the sync file. */
-        private const val PHOTO_SIZE = 256
+        /** 320 px stays sharp on the 84 dp profile circle and around 25 KB inside the sync file. */
+        private const val PHOTO_SIZE = 320
         private const val DECODE_MAX = 1024
     }
 }

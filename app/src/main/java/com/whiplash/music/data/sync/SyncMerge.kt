@@ -61,6 +61,30 @@ object SyncMerge {
     }
 
     /**
+     * What to write for a sync where some [excluded] categories are switched
+     * off: this phone keeps its own data for them ([Plan.toApply]), the cloud
+     * keeps its copy ([Plan.toUpload]), and the saved base leaves them empty
+     * so turning a category back on combines both sides instead of treating
+     * the difference as deletions.
+     */
+    data class Plan(val toApply: SyncSnapshot, val toUpload: SyncSnapshot, val newBase: SyncSnapshot)
+
+    fun plan(merged: SyncSnapshot, local: SyncSnapshot, remote: SyncSnapshot, excluded: Set<SyncCategory>): Plan {
+        if (excluded.isEmpty()) return Plan(merged, merged, merged)
+        var apply = merged
+        var upload = merged
+        var base = merged
+        excluded.forEach { c ->
+            apply = c.copy(from = local, into = apply)
+            upload = c.copy(from = remote, into = upload)
+            base = c.copy(from = SyncSnapshot(), into = base)
+        }
+        val known = remote.songs + local.songs
+        fun SyncSnapshot.withSongs() = copy(songs = referencedIds().mapNotNull { id -> known[id]?.let { id to it } }.toMap())
+        return Plan(apply.withSongs(), upload.withSongs(), base.copy(songs = upload.withSongs().songs))
+    }
+
+    /**
      * Per-key three-way merge. [bothChanged] gets (local, remote, base) when
      * each side changed the same key differently and neither deleted it.
      */

@@ -59,11 +59,14 @@ enum class SettingEntry(val section: SettingsSection, val title: String, val key
     REDUCE_ANIMATIONS(SettingsSection.APPEARANCE, "Reduce animations", "motion accessibility transitions"),
     ACCOUNT_SYNC(SettingsSection.ACCOUNT, "Account & sync", "google sign in login profile cloud drive devices phone restore"),
     AUTO_SYNC(SettingsSection.ACCOUNT, "Auto-sync", "background automatic cloud offline online"),
+    SYNC_CATEGORIES(SettingsSection.ACCOUNT, "Choose what syncs", "categories playlists favourites history speed dial settings select"),
     SHOW_EMAIL(SettingsSection.ACCOUNT, "Show email", "hide email address privacy profile"),
+    SHOW_PHOTO(SettingsSection.ACCOUNT, "Show profile photo", "hide picture avatar privacy"),
     PROFILE(SettingsSection.ACCOUNT, "Profile name and photo", "edit change picture avatar display name"),
     CACHE_SONGS(SettingsSection.STORAGE, "Cache Songs", "offline storage space"),
     DOWNLOADED_DATA(SettingsSection.STORAGE, "Downloaded songs", "offline downloads delete clear remove space storage size"),
     CACHED_DATA(SettingsSection.STORAGE, "Cached data", "clear cache storage size space"),
+    RESET_APP(SettingsSection.STORAGE, "Reset app", "erase wipe factory reset clear all data start fresh new install"),
     BACKUP(SettingsSection.BACKUP, "Local backup", "restore export import file"),
 }
 

@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.CloudSync
@@ -67,6 +68,7 @@ import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SdStorage
 import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.PowerSettingsNew
@@ -168,6 +170,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val cloudSync = app.cloudSyncManager
     val cloudSyncEnabled by app.settingsRepository.cloudSyncEnabled.collectAsState(initial = null)
     val showAccountEmail by app.settingsRepository.showAccountEmail.collectAsState(initial = true)
+    val showAccountPhoto by app.settingsRepository.showAccountPhoto.collectAsState(initial = true)
     val cloudScope = androidx.compose.runtime.rememberCoroutineScope()
     val rawCloudState by cloudSync.state.collectAsState()
     val customProfile by cloudSync.profileStore.profile.collectAsState()
@@ -176,21 +179,42 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
         account = rawCloudState.account?.let { a ->
             a.copy(
                 name = customProfile?.name ?: a.name,
-                photoUrl = cloudSync.profileStore.photoFile()?.takeIf { customProfile?.photoJpeg != null }?.path ?: a.photoUrl,
+                // Hidden photo: the avatar falls back to your initial.
+                photoUrl = if (!showAccountPhoto) null else cloudSync.profileStore.photoFile()?.takeIf { customProfile?.photoJpeg != null }?.path ?: a.photoUrl,
             )
         },
     )
     val photoVersion = customProfile?.updatedAtEpochMs ?: 0L
     var showEditNameDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    // The picked picture, waiting in the Adjust photo screen.
+    var cropBitmap by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<android.graphics.Bitmap?>(null) }
     val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
         if (uri != null) {
             cloudScope.launch {
-                val ok = cloudSync.profileStore.setPhoto(context, uri)
-                com.whiplash.music.ui.common.ToastController.show(if (ok) "Profile photo updated" else "Couldn't use that picture")
+                val bitmap = cloudSync.profileStore.decodeForCrop(context, uri)
+                if (bitmap == null) {
+                    com.whiplash.music.ui.common.ToastController.show("Couldn't use that picture")
+                } else {
+                    cropBitmap = bitmap
+                }
             }
         }
+    }
+
+    cropBitmap?.let { bitmap ->
+        PhotoCropDialog(
+            bitmap = bitmap,
+            onSave = { left, top, size ->
+                cropBitmap = null
+                cloudScope.launch {
+                    val ok = cloudSync.profileStore.setCroppedPhoto(bitmap, left, top, size)
+                    com.whiplash.music.ui.common.ToastController.show(if (ok) "Profile photo updated" else "Couldn't save that photo")
+                }
+            },
+            onDismiss = { cropBitmap = null },
+        )
     }
     val pickPhoto: () -> Unit = {
         runCatching {
@@ -214,6 +238,8 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     var showCloudOffConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var showSignOutConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var showDeleteCloudConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showResetConfirm by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var resetting by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val signInLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
@@ -283,6 +309,28 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                 }
             },
             onDismiss = { showSignOutConfirm = false },
+        )
+    }
+
+    if (showResetConfirm) {
+        val resetContext = androidx.compose.ui.platform.LocalContext.current
+        ResetAppDialog(
+            signedIn = cloudState.account != null,
+            onConfirm = { alsoDrive ->
+                showResetConfirm = false
+                resetting = true
+                cloudScope.launch {
+                    // Account first: if the Drive delete fails, nothing is erased.
+                    when (val r = cloudSync.prepareAppReset(alsoDrive)) {
+                        com.whiplash.music.data.sync.CloudSyncManager.SyncResult.Synced -> wipeAppData(resetContext)
+                        is com.whiplash.music.data.sync.CloudSyncManager.SyncResult.Failed -> {
+                            resetting = false
+                            com.whiplash.music.ui.common.ToastController.show("Couldn't reach Drive. Nothing was erased.")
+                        }
+                    }
+                }
+            },
+            onDismiss = { showResetConfirm = false },
         )
     }
 
@@ -1082,6 +1130,17 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     )
                                 }
                             }
+                            if (enabled && signedIn && shown(SettingEntry.SHOW_PHOTO)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingToggleRow(
+                                        title = "Show profile photo",
+                                        icon = Icons.Filled.AccountCircle,
+                                        subtitle = "Off shows your initial instead of your photo in Settings.",
+                                        checked = showAccountPhoto,
+                                        onCheckedChange = { show -> cloudScope.launch { app.settingsRepository.setShowAccountPhoto(show) } },
+                                    )
+                                }
+                            }
                             if (enabled && signedIn && shown(SettingEntry.PROFILE)) {
                                 SettingItem(divider = rows.next()) {
                                     SettingActionRow(
@@ -1113,12 +1172,53 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     }
                                 }
                             }
+                            if (enabled && signedIn && shown(SettingEntry.SYNC_CATEGORIES)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingToggleRow(
+                                        title = "Choose what syncs",
+                                        icon = Icons.Filled.Checklist,
+                                        subtitle = if (cloudState.selective) {
+                                            if (cloudState.excluded.size == com.whiplash.music.data.sync.SyncCategory.entries.size) {
+                                                "Nothing is selected, so only your profile syncs."
+                                            } else {
+                                                "Only the parts selected below sync. The rest stays on this phone and in your Drive."
+                                            }
+                                        } else {
+                                            "Off: everything syncs. On: pick which parts sync."
+                                        },
+                                        checked = cloudState.selective,
+                                        onCheckedChange = cloudSync::setSelective,
+                                    )
+                                    if (cloudState.selective) {
+                                        androidx.compose.foundation.layout.FlowRow(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+                                            verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm),
+                                        ) {
+                                            val allOn = cloudState.excluded.isEmpty()
+                                            BackupCategoryChip(
+                                                text = "All",
+                                                selected = allOn,
+                                                onClick = { cloudSync.setAllCategories(!allOn) },
+                                            )
+                                            com.whiplash.music.data.sync.SyncCategory.entries.forEach { category ->
+                                                val on = category !in cloudState.excluded
+                                                BackupCategoryChip(
+                                                    text = category.label,
+                                                    selected = on,
+                                                    onClick = { cloudSync.setCategoryEnabled(category, !on) },
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             if (enabled && shown(SettingEntry.ACCOUNT_SYNC)) {
                                 SettingItem(divider = rows.next()) {
                                     SettingRow(
                                         title = "What syncs",
                                         icon = Icons.Filled.Info,
-                                        subtitle = "Playlists, favourites, history, Speed dial, Monthly Replay, lyric timing and settings. Downloaded songs and gallery covers stay on each device.",
+                                        subtitle = "Playlists, favourites, history, Speed dial, Monthly Replay, lyric timing, settings and your profile. Downloaded songs and gallery covers stay on each device.",
                                     )
                                 }
                             }
@@ -1209,6 +1309,18 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                         enabled = cacheSizeBytes > 0L,
                                     )
                                 }
+                            }
+                        }
+
+                        if (shown(SettingEntry.RESET_APP)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingActionRow(
+                                    title = "Reset app",
+                                    icon = Icons.Filled.RestartAlt,
+                                    subtitle = if (resetting) "Resetting…" else "Erase everything and start fresh",
+                                    titleColor = WhiplashColors.error,
+                                    onClick = { if (!resetting) showResetConfirm = true },
+                                )
                             }
                         }
                     }
@@ -1738,7 +1850,13 @@ private val SETTING_ICON_SIZE = 18.dp
 
 /** A tappable settings row with no toggle/selector — just a title/subtitle that launches [onClick] (section 57: accessible 48dp+ touch target via the Row's own padding). */
 @Composable
-private fun SettingActionRow(title: String, subtitle: String, onClick: () -> Unit, icon: ImageVector? = null) {
+private fun SettingActionRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    icon: ImageVector? = null,
+    titleColor: androidx.compose.ui.graphics.Color = WhiplashColors.textPrimary,
+) {
     val haptic = LocalHapticFeedback.current
     Row(
         modifier = Modifier
@@ -1753,7 +1871,7 @@ private fun SettingActionRow(title: String, subtitle: String, onClick: () -> Uni
     ) {
         SettingLeadingIcon(icon)
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, style = MaterialTheme.typography.titleSmall, color = WhiplashColors.textPrimary)
+            Text(text = title, style = MaterialTheme.typography.titleSmall, color = titleColor)
             Spacer(Modifier.height(2.dp))
             Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = WhiplashColors.textSecondary)
         }
@@ -2372,4 +2490,17 @@ private fun showSignInResult(step: com.whiplash.music.data.sync.CloudSyncManager
         is com.whiplash.music.data.sync.CloudSyncManager.SignInStep.NeedsUi -> "Couldn't sign in"
     }
     com.whiplash.music.ui.common.ToastController.show(message)
+}
+
+
+/**
+ * Erases all of Whiplash's data exactly like Settings › Apps › Clear storage:
+ * database, settings, downloads, caches and sync state. Android closes the
+ * app afterwards; the next launch is a fresh install.
+ */
+private fun wipeAppData(context: android.content.Context) {
+    val am = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+    if (!am.clearApplicationUserData()) {
+        com.whiplash.music.ui.common.ToastController.show("Couldn't reset the app")
+    }
 }
