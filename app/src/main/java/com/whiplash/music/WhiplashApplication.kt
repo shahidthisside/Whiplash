@@ -100,6 +100,18 @@ class WhiplashApplication : Application() {
         ProviderHealthTracker(database.providerHealthDao())
     }
 
+    private val innerTube by lazy { com.whiplash.music.innertube.InnerTubeClient(okHttpClient) }
+
+    /** Radio and "related" songs: YouTube Music's own API, NewPipe as the fallback. */
+    val musicSources: com.whiplash.music.recommend.MusicSources by lazy {
+        com.whiplash.music.recommend.MusicSources(
+            innerRadio = { id, cursor -> innerTube.radio(id, cursor) },
+            innerRelated = { id -> innerTube.related(id) },
+            fallbackRadio = { id, cursor -> newPipePlaybackProvider.getRadioPage(id, cursor) },
+            fallbackRelated = { id -> newPipePlaybackProvider.getRelatedTracks(id) },
+        )
+    }
+
     val newPipePlaybackProvider: NewPipePlaybackProvider by lazy {
         NewPipePlaybackProvider(providerHealthTracker)
     }
@@ -155,7 +167,7 @@ class WhiplashApplication : Application() {
     }
 
     val playbackController: PlaybackController by lazy {
-        PlaybackController(this, playbackManager, settingsRepository, libraryRepository, newPipePlaybackProvider, audioCacheManager, database.playEventDao())
+        PlaybackController(this, playbackManager, settingsRepository, libraryRepository, newPipePlaybackProvider, audioCacheManager, database.playEventDao(), musicSources)
     }
 
     val downloadManager: com.whiplash.music.data.download.DownloadManager by lazy {

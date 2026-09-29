@@ -63,6 +63,9 @@ class PlaybackController(
     private val newPipePlaybackProvider: NewPipePlaybackProvider,
     private val audioCacheManager: com.whiplash.music.playback.cache.AudioCacheManager,
     private val playEventDao: com.whiplash.music.data.local.dao.PlayEventDao? = null,
+    private val musicSources: com.whiplash.music.recommend.MusicSources = com.whiplash.music.recommend.MusicSources(
+        null, null, { id, cursor -> newPipePlaybackProvider.getRadioPage(id, cursor) }, { id -> newPipePlaybackProvider.getRelatedTracks(id) },
+    ),
 ) {
 
     // ── Recommendations ─────────────────────────────────────────────────
@@ -80,8 +83,8 @@ class PlaybackController(
 
     /** Seed-anchored radio; see [com.whiplash.music.recommend.RadioEngine]. */
     private val radioEngine = com.whiplash.music.recommend.RadioEngine(
-        fetchRadio = { id, cursor -> newPipePlaybackProvider.getRadioPage(id, cursor) },
-        fetchRelated = { id -> newPipePlaybackProvider.getRelatedTracks(id) },
+        fetchRadio = { id, cursor -> musicSources.radioPage(id, cursor) },
+        fetchRelated = { id -> musicSources.related(id) },
         isMusic = { id -> newPipePlaybackProvider.getPlayerInfo(id).category?.equals("Music", ignoreCase = true) ?: true },
         feedback = com.whiplash.music.recommend.PlayEventFeedback(playEventDao),
     )
