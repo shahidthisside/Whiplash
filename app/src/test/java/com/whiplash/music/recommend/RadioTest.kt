@@ -29,11 +29,25 @@ class LanguageDetectorTest {
     }
 
     @Test fun romanisedMarkersAreWeak() {
-        val pa = LanguageDetector.detect("Tenu Kinna Pyar Karda", "Unknown")
+        val pa = LanguageDetector.detect("Tenu Kinna Pyar Karda Menu", "Unknown")
         assertEquals("pa", pa?.code)
         assertFalse(pa!!.confident)
         assertEquals("hi", LanguageDetector.detect("Tujhe Kitna Chahne Lage Hum", "x")?.code)
-        assertEquals("en", LanguageDetector.detect("Love Me Like You Do", "Ellie Goulding")?.code)
+        assertEquals("en", LanguageDetector.detect("Love Me Like You Do", "Nobody Known")?.code)
+    }
+
+
+    @Test fun artistBeatsMisleadingTitleWords() {
+        // Hindi film songs with English or Punjabi-word titles.
+        assertEquals("hi", LanguageDetector.detect("Excuses Tonight Baby", "Arijit Singh")?.code)
+        assertEquals("hi", LanguageDetector.detect("Tenu Leke Main Jawanga", "Sonu Nigam")?.code)
+        // Punjabi songs with Hindi-looking titles.
+        assertEquals("pa", LanguageDetector.detect("Tere Bina Kya Hai Zindagi", "Karan Aujla")?.code)
+        // Credited artist in a label upload.
+        assertEquals("pa", LanguageDetector.detect("Dawood | PBX 1 | Sidhu Moose Wala", "T-Series")?.code)
+        // Bilingual artists give no artist evidence.
+        assertNull(LanguageDetector.detect("Naina", "Diljit Dosanjh"))
+        assertEquals(LanguageGuess.ARTIST, LanguageDetector.detect("Excuses", "AP Dhillon")?.strength)
     }
 
     @Test fun noEvidenceIsNull() {
