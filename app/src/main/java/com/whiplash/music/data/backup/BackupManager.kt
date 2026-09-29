@@ -393,6 +393,11 @@ class BackupManager(
         put("lyricsSource", settingsRepository.lyricsSource.first().name)
         put("lyricsBlurUnfocused", settingsRepository.lyricsBlurUnfocused.first())
         put("speedDialListView", settingsRepository.speedDialListView.first())
+        put("speedDialPaging", settingsRepository.speedDialPaging.first())
+        put("speedDialPeek", settingsRepository.speedDialPeek.first())
+        put("speedDialPageCount", settingsRepository.speedDialPageCount.first())
+        put("speedDialGridCount", settingsRepository.speedDialGridCount.first())
+        put("quickPicksPeek", settingsRepository.quickPicksPeek.first())
         put("quickPicksGridView", settingsRepository.quickPicksGridView.first())
         put("quickPicksGridCount", settingsRepository.quickPicksGridCount.first())
         put("playlistsListView", settingsRepository.playlistsListView.first())
@@ -470,6 +475,13 @@ class BackupManager(
         }
         if (s.has("quickPicksGridView")) {
             runCatching { settingsRepository.setQuickPicksGridView(s.getBoolean("quickPicksGridView")) }
+        }
+        if (s.has("speedDialGridCount")) runCatching { settingsRepository.setSpeedDialGridCount(s.getInt("speedDialGridCount")) }
+        if (s.has("speedDialPageCount")) runCatching { settingsRepository.setSpeedDialPageCount(s.getInt("speedDialPageCount")) }
+        if (s.has("speedDialPeek")) runCatching { settingsRepository.setSpeedDialPeek(s.getBoolean("speedDialPeek")) }
+        if (s.has("quickPicksPeek")) runCatching { settingsRepository.setQuickPicksPeek(s.getBoolean("quickPicksPeek")) }
+        if (s.has("speedDialPaging")) {
+            runCatching { settingsRepository.setSpeedDialPaging(s.getBoolean("speedDialPaging")) }
         }
         if (s.has("speedDialListView")) {
             runCatching { settingsRepository.setSpeedDialListView(s.getBoolean("speedDialListView")) }

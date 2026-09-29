@@ -315,6 +315,13 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[SHOW_ACCOUNT_EMAIL_KEY] = show }
     }
 
+    /** Account & sync: show the "Synced just now"-style status on the Settings profile card (this device only). */
+    val showSyncStatus: Flow<Boolean> = dataStore.data.map { prefs -> prefs[SHOW_SYNC_STATUS_KEY] ?: true }
+
+    suspend fun setShowSyncStatus(show: Boolean) {
+        dataStore.edit { prefs -> prefs[SHOW_SYNC_STATUS_KEY] = show }
+    }
+
     /** Account & sync: show the profile photo in Settings; off shows your initial instead (this device only). */
     val showAccountPhoto: Flow<Boolean> = dataStore.data.map { prefs -> prefs[SHOW_ACCOUNT_PHOTO_KEY] ?: true }
 
@@ -370,6 +377,50 @@ class SettingsRepository(context: Context) {
 
     suspend fun setSpeedDialListView(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[SPEED_DIAL_LIST_KEY] = enabled }
+    }
+
+    /**
+     * Speed dial grid swipes sideways through up to [SPEED_DIAL_MAX_PAGES]
+     * pages of nine; off keeps the single 3x3 grid. Default on.
+     */
+    val speedDialPaging: Flow<Boolean> = dataStore.data.map { prefs -> prefs[SPEED_DIAL_PAGING_KEY] ?: true }
+
+    suspend fun setSpeedDialPaging(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[SPEED_DIAL_PAGING_KEY] = enabled }
+    }
+
+    /** Speed dial songs per page (grid size): one of [SPEED_DIAL_GRID_COUNTS]. Default 9 (3x3). */
+    val speedDialGridCount: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[SPEED_DIAL_GRID_COUNT_KEY]?.takeIf { it in SPEED_DIAL_GRID_COUNTS } ?: SPEED_DIAL_PAGE_SIZE
+    }
+
+    suspend fun setSpeedDialGridCount(count: Int) {
+        if (count !in SPEED_DIAL_GRID_COUNTS) return
+        dataStore.edit { prefs -> prefs[SPEED_DIAL_GRID_COUNT_KEY] = count }
+    }
+
+    /** How many Speed dial pages (of nine) when paging is on: one of [SPEED_DIAL_PAGE_COUNTS]. Default 3. */
+    val speedDialPageCount: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[SPEED_DIAL_PAGE_COUNT_KEY]?.takeIf { it in SPEED_DIAL_PAGE_COUNTS } ?: SPEED_DIAL_MAX_PAGES
+    }
+
+    suspend fun setSpeedDialPageCount(count: Int) {
+        if (count !in SPEED_DIAL_PAGE_COUNTS) return
+        dataStore.edit { prefs -> prefs[SPEED_DIAL_PAGE_COUNT_KEY] = count }
+    }
+
+    /** Speed dial pages: show a sliver of the next page at the edge. Default on. */
+    val speedDialPeek: Flow<Boolean> = dataStore.data.map { prefs -> prefs[SPEED_DIAL_PEEK_KEY] ?: true }
+
+    suspend fun setSpeedDialPeek(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[SPEED_DIAL_PEEK_KEY] = enabled }
+    }
+
+    /** Quick Picks pages: show a sliver of the next page at the edge. Default on. */
+    val quickPicksPeek: Flow<Boolean> = dataStore.data.map { prefs -> prefs[QUICK_PICKS_PEEK_KEY] ?: true }
+
+    suspend fun setQuickPicksPeek(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[QUICK_PICKS_PEEK_KEY] = enabled }
     }
 
     /** Soft blur on lyric lines away from the one being sung (API 31+; ignored on older Android). */
@@ -505,6 +556,7 @@ class SettingsRepository(context: Context) {
         val EXPLORE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("explore_enabled")
         val CLOUD_SYNC_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("cloud_sync_enabled")
         val SHOW_ACCOUNT_EMAIL_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("show_account_email")
+        val SHOW_SYNC_STATUS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("show_sync_status")
         val SHOW_ACCOUNT_PHOTO_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("show_account_photo")
         val REPLAY_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("replay_enabled")
         val HOME_SHELVES_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("home_shelves_enabled")
@@ -512,6 +564,11 @@ class SettingsRepository(context: Context) {
         val QUICK_PICKS_GRID_COUNT_KEY: Preferences.Key<Int> = androidx.datastore.preferences.core.intPreferencesKey("quick_picks_grid_count")
         val QUICK_PICKS_GRID_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("quick_picks_grid_view")
         val SPEED_DIAL_LIST_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("speed_dial_list_view")
+        val SPEED_DIAL_PAGING_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("speed_dial_paging")
+        val SPEED_DIAL_PEEK_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("speed_dial_peek")
+        val SPEED_DIAL_GRID_COUNT_KEY: Preferences.Key<Int> = androidx.datastore.preferences.core.intPreferencesKey("speed_dial_grid_count")
+        val SPEED_DIAL_PAGE_COUNT_KEY: Preferences.Key<Int> = androidx.datastore.preferences.core.intPreferencesKey("speed_dial_page_count")
+        val QUICK_PICKS_PEEK_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("quick_picks_peek")
         val LYRICS_BLUR_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("lyrics_blur_unfocused")
         val LYRICS_SOURCE_KEY: Preferences.Key<String> = stringPreferencesKey("lyrics_source")
         val PLAYER_HERO_ARTWORK_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_hero_artwork")
@@ -531,3 +588,14 @@ private fun androidx.compose.ui.graphics.Color.toArgbInt(): Int =
         (alpha * 255f + 0.5f).toInt(), (red * 255f + 0.5f).toInt(),
         (green * 255f + 0.5f).toInt(), (blue * 255f + 0.5f).toInt(),
     )
+
+/** Default number of Speed dial pages when paging is on (nine songs each). */
+const val SPEED_DIAL_MAX_PAGES = 3
+
+/** Page counts offered in Settings (2 to 5). */
+val SPEED_DIAL_PAGE_COUNTS = listOf(2, 3, 4, 5)
+/** Default Speed dial songs per page. */
+const val SPEED_DIAL_PAGE_SIZE = 9
+
+/** Speed dial grid sizes offered in Settings (one to four rows of three). */
+val SPEED_DIAL_GRID_COUNTS = listOf(3, 6, 9, 12)

@@ -185,6 +185,9 @@ fun HomeScreen(
     // Grid is the default, so assume it until the saved choice loads (no list-then-grid flash on first launch).
     val quickPicksGridView = viewModel.quickPicksGridView.collectAsState().value ?: true
     val quickPicksGridCount = viewModel.quickPicksGridCount.collectAsState().value ?: 9
+    val speedDialPeek by viewModel.speedDialPeek.collectAsState()
+    val speedDialPerPage by viewModel.speedDialGridCount.collectAsState()
+    val quickPicksPeek by viewModel.quickPicksPeek.collectAsState()
     val layoutScope = androidx.compose.runtime.rememberCoroutineScope()
     // 4.1: shelves feed (can be turned off in Settings → Home shelves).
     val shelvesEnabled = viewModel.homeShelvesEnabled.collectAsState().value
@@ -300,7 +303,8 @@ fun HomeScreen(
                     actionsSheetItem = track
                 }
                 if (speedDialListView) {
-                    items(speedDial, key = { it.speedDialIdentity().let { (id, source) -> "sdl:$source:$id" } }) { track ->
+                    // The list stays one screen's worth; paging is a grid thing.
+                    items(speedDial.take(speedDialPerPage), key = { it.speedDialIdentity().let { (id, source) -> "sdl:$source:$id" } }) { track ->
                         GlassListItem(
                             title = track.title,
                             subtitle = track.artist,
@@ -312,11 +316,15 @@ fun HomeScreen(
                     }
                 } else {
                     item {
-                        SpeedDialGrid(
-                            items = speedDial,
-                            onPlayTrack = onPlayTrack,
-                            onLongPressTrack = onLongPressSpeedDial,
-                        )
+                        if (speedDial.size > speedDialPerPage) {
+                            SpeedDialPager(speedDial, onPlayTrack, onLongPressSpeedDial, peek = speedDialPeek, perPage = speedDialPerPage)
+                        } else {
+                            SpeedDialGrid(
+                                items = speedDial,
+                                onPlayTrack = onPlayTrack,
+                                onLongPressTrack = onLongPressSpeedDial,
+                            )
+                        }
                     }
                 }
             }
@@ -369,7 +377,7 @@ fun HomeScreen(
                         // Pages of [perPage] songs; swipe sideways for the rest,
                         // with the next page peeking in at the edge.
                         item(key = "qpgrid-pager") {
-                            QuickPicksPager(quickPicks, perPage, qpClick, onLongPressQuickPick, qpSelected)
+                            QuickPicksPager(quickPicks, perPage, qpClick, onLongPressQuickPick, qpSelected, peek = quickPicksPeek)
                         }
                     }
                 }
@@ -765,8 +773,10 @@ private fun SpeedDialGrid(
     items: List<PlayableItem>,
     onPlayTrack: (PlayableItem) -> Unit,
     onLongPressTrack: (PlayableItem) -> Unit,
+    // Pages of a pager all keep the full height, so it doesn't jump mid-swipe.
+    minRows: Int = 0,
 ) {
-    val rows = (items.size + 2) / 3
+    val rows = maxOf((items.size + 2) / 3, minRows)
     val spacing = GlassTokens.spaceSm
 
     // Real, reported bug: row height used to be a hardcoded 132.dp guess.
@@ -809,7 +819,107 @@ private fun SpeedDialGrid(
                     track = track,
                     onClick = { onPlayTrack(track) },
                     onLongClick = { onLongPressTrack(track) },
-                    modifier = Modifier.animateItem(),
+                    // Slow, eased glide when a played song moves to the front.
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = androidx.compose.animation.core.tween(SPEED_DIAL_GLIDE_MS),
+                        placementSpec = androidx.compose.animation.core.tween(
+                            SPEED_DIAL_GLIDE_MS,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        fadeOutSpec = androidx.compose.animation.core.tween(SPEED_DIAL_GLIDE_MS / 2),
+                    ),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Speed dial as up to three swipeable pages of nine (Settings › Speed dial
+ * pages): full-width pages of exactly nine, with dots showing the position.
+ * Every page keeps three rows.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SpeedDialPager(
+    items: List<PlayableItem>,
+    onPlayTrack: (PlayableItem) -> Unit,
+    onLongPressTrack: (PlayableItem) -> Unit,
+    // Settings › Speed dial: peek next page.
+    peek: Boolean = true,
+    // Settings › Speed dial grid size.
+    perPage: Int = com.whiplash.music.data.repository.SPEED_DIAL_PAGE_SIZE,
+) {
+    // What's drawn. It trails [items] when a song from a later page is played:
+    // the pager first slides back to page 1 still showing the old order, and
+    // only then takes the new order, so page 1's own grid animates the song
+    // into first place (tiles are separate grids per page, so a tile can't
+    // glide across pages by itself).
+    var shown by remember { mutableStateOf(items) }
+    val pages = shown.chunked(perPage)
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState { pages.size }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // One slow, eased glide back to page 1, shared by the tap and the reorder
+    // (two separate scrolls used to cut each other off, which looked like a jump).
+    var slideBack by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    fun glideToFirstPage() {
+        if (pagerState.currentPage == 0 && !pagerState.isScrollInProgress) return
+        if (slideBack?.isActive == true) return
+        slideBack = scope.launch {
+            pagerState.animateScrollToPage(
+                0,
+                animationSpec = androidx.compose.animation.core.tween(
+                    SPEED_DIAL_GLIDE_MS,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                ),
+            )
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(items) {
+        val firstChanged = items.firstOrNull()?.speedDialIdentity() != shown.firstOrNull()?.speedDialIdentity()
+        if (firstChanged && (pagerState.currentPage != 0 || slideBack?.isActive == true)) {
+            glideToFirstPage()
+            slideBack?.join() // reorder only once page 1 has fully settled
+            kotlinx.coroutines.delay(80)
+        }
+        shown = items
+    }
+    // Playing from a later page starts the glide right away; the play is
+    // recorded a moment later, which is what reorders the list.
+    val playFromPage: (PlayableItem) -> Unit = { track ->
+        onPlayTrack(track)
+        glideToFirstPage()
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
+        // With peek, a sliver of the next page shows at the edge; without it,
+        // exactly nine songs fill the width and the dots show there's more.
+        androidx.compose.foundation.pager.HorizontalPager(
+            state = pagerState,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(end = if (peek) PAGER_PEEK else 0.dp),
+            pageSpacing = GlassTokens.spaceMd,
+            // Keyed by position, not by the first song: when a played song moves
+            // to the front, page 1 stays the same grid and its tiles glide into
+            // place (animateItem) instead of the whole page being rebuilt.
+            key = { page -> page },
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+        ) { page ->
+            SpeedDialGrid(pages[page], playFromPage, onLongPressTrack, minRows = (perPage + 2) / 3)
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "Speed dial page ${pagerState.currentPage + 1} of ${pages.size}" },
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            repeat(pages.size) { i ->
+                val active = i == pagerState.currentPage
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 3.dp)
+                        .size(width = if (active) 16.dp else 6.dp, height = 6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(if (active) WhiplashColors.textPrimary else WhiplashColors.textSecondary.copy(alpha = 0.4f)),
                 )
             }
         }
@@ -1117,7 +1227,7 @@ private fun QuickPicksTileRow(
 
 /**
  * YouTube-Music-style Quick Picks grid: [perPage] songs per page (rows of
- * three), swiped sideways. Every page is padded to the same number of rows so
+ * three), swiped sideways, one full page at a time. Every page is padded to the same number of rows so
  * the pager's height never changes mid-swipe, and a dot row shows where you are.
  */
 @Composable
@@ -1127,15 +1237,21 @@ private fun QuickPicksPager(
     onPlayTrack: (PlayableItem) -> Unit,
     onLongPress: (PlayableItem) -> Unit,
     isSelected: (PlayableItem) -> Boolean = { false },
+    // Settings › Quick Picks: peek next page.
+    peek: Boolean = true,
 ) {
-    val pages = tracks.chunked(perPage)
+    // A short last page (e.g. after removing songs) is dropped when there are
+    // other pages, so every page is a full grid. A single page is kept as is.
+    val pages = tracks.chunked(perPage).let { p ->
+        if (p.size > 1 && p.last().size < perPage) p.dropLast(1) else p
+    }
     val rowsPerPage = (perPage + 2) / 3
     val pagerState = androidx.compose.foundation.pager.rememberPagerState { pages.size }
     Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
         androidx.compose.foundation.pager.HorizontalPager(
             state = pagerState,
-            // Leave a sliver of the next page visible so it reads as swipeable.
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(end = if (pages.size > 1) 28.dp else 0.dp),
+            // Peek: a sliver of the next page at the edge (only when there is one).
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(end = if (peek && pages.size > 1) PAGER_PEEK else 0.dp),
             pageSpacing = GlassTokens.spaceMd,
             key = { pages[it].first().id },
             modifier = Modifier.fillMaxWidth(),
@@ -1174,3 +1290,9 @@ private fun QuickPicksPager(
         }
     }
 }
+
+/** How much of the next page shows at a pager's edge when "peek next page" is on. */
+private val PAGER_PEEK = 28.dp
+
+/** Speed dial's glide back to page 1 after playing from a later page (slow on purpose). */
+private const val SPEED_DIAL_GLIDE_MS = 700

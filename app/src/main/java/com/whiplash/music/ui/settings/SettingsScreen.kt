@@ -69,6 +69,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.SdStorage
 import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.PowerSettingsNew
@@ -152,6 +154,11 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val exploreEnabled by viewModel.exploreEnabled.collectAsState()
     val replayEnabled by viewModel.replayEnabled.collectAsState()
     val quickPicksGridCount by viewModel.quickPicksGridCount.collectAsState()
+    val speedDialPaging by viewModel.speedDialPaging.collectAsState()
+    val speedDialPeek by viewModel.speedDialPeek.collectAsState()
+    val speedDialPageCount by viewModel.speedDialPageCount.collectAsState()
+    val speedDialGridCount by viewModel.speedDialGridCount.collectAsState()
+    val quickPicksPeek by viewModel.quickPicksPeek.collectAsState()
     val lyricsProviderHealth by viewModel.lyricsProviderHealth.collectAsState()
     val playerHeroArtwork by viewModel.playerHeroArtwork.collectAsState()
     val perNetworkQualityEnabled by viewModel.perNetworkQualityEnabled.collectAsState()
@@ -170,6 +177,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val cloudSync = app.cloudSyncManager
     val cloudSyncEnabled by app.settingsRepository.cloudSyncEnabled.collectAsState(initial = null)
     val showAccountEmail by app.settingsRepository.showAccountEmail.collectAsState(initial = true)
+    val showSyncStatus by app.settingsRepository.showSyncStatus.collectAsState(initial = true)
     val showAccountPhoto by app.settingsRepository.showAccountPhoto.collectAsState(initial = true)
     val cloudScope = androidx.compose.runtime.rememberCoroutineScope()
     val rawCloudState by cloudSync.state.collectAsState()
@@ -1029,6 +1037,73 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                             }
                         }
 
+                        if (shown(SettingEntry.SPEED_DIAL_PAGES)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Speed dial pages",
+                                    icon = Icons.Filled.ViewCarousel,
+                                    subtitle = if (speedDialPaging) {
+                                        "Swipe sideways through up to $speedDialPageCount pages of $speedDialGridCount songs."
+                                    } else {
+                                        "One page of $speedDialGridCount songs."
+                                    },
+                                    checked = speedDialPaging,
+                                    onCheckedChange = viewModel::setSpeedDialPaging,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.SPEED_DIAL_GRID)) {
+                            SettingItem(divider = rows.next()) {
+                                Column {
+                                    SettingRow(
+                                        title = "Speed dial grid size",
+                                        icon = Icons.Filled.GridView,
+                                        subtitle = "Grid view shows $speedDialGridCount songs per page.",
+                                    )
+                                    Spacer(Modifier.height(GlassTokens.spaceMd))
+                                    CountSelector(
+                                        options = com.whiplash.music.data.repository.SPEED_DIAL_GRID_COUNTS,
+                                        selected = speedDialGridCount,
+                                        describe = { "$it Speed dial songs per page" },
+                                        onSelect = viewModel::setSpeedDialGridCount,
+                                    )
+                                }
+                            }
+                        }
+
+                        if (speedDialPaging && shown(SettingEntry.SPEED_DIAL_PAGE_COUNT)) {
+                            SettingItem(divider = rows.next()) {
+                                Column {
+                                    SettingRow(
+                                        title = "Speed dial page count",
+                                        icon = Icons.Filled.GridView,
+                                        subtitle = "Up to ${speedDialPageCount * speedDialGridCount} songs across $speedDialPageCount pages.",
+                                    )
+                                    Spacer(Modifier.height(GlassTokens.spaceMd))
+                                    CountSelector(
+                                        options = com.whiplash.music.data.repository.SPEED_DIAL_PAGE_COUNTS,
+                                        selected = speedDialPageCount,
+                                        describe = { "$it Speed dial pages" },
+                                        onSelect = viewModel::setSpeedDialPageCount,
+                                    )
+                                }
+                            }
+                        }
+
+                        // Only meaningful while Speed dial has pages.
+                        if (speedDialPaging && shown(SettingEntry.SPEED_DIAL_PEEK)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Speed dial: peek next page",
+                                    icon = Icons.Filled.ViewCarousel,
+                                    subtitle = "Show the edge of the next page so it's clear you can swipe.",
+                                    checked = speedDialPeek,
+                                    onCheckedChange = viewModel::setSpeedDialPeek,
+                                )
+                            }
+                        }
+
                         if (shown(SettingEntry.QUICK_PICKS_GRID)) {
                             SettingItem(divider = rows.next()) {
                                 Column {
@@ -1044,6 +1119,19 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     Spacer(Modifier.height(GlassTokens.spaceMd))
                                     QuickPicksGridCountSelector(quickPicksGridCount, viewModel::setQuickPicksGridCount)
                                 }
+                            }
+                        }
+
+                        // "All" is one tall grid with no pages, so there's nothing to peek at.
+                        if (quickPicksGridCount != 0 && shown(SettingEntry.QUICK_PICKS_PEEK)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Quick Picks: peek next page",
+                                    icon = Icons.Filled.ViewCarousel,
+                                    subtitle = "Show the edge of the next page so it's clear you can swipe.",
+                                    checked = quickPicksPeek,
+                                    onCheckedChange = viewModel::setQuickPicksPeek,
+                                )
                             }
                         }
 
@@ -1097,50 +1185,6 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                         }
                         SettingsCardColumn(SettingsSection.ACCOUNT) {
                             val rows = SettingsRowCounter()
-                            if (shown(SettingEntry.ACCOUNT_SYNC)) {
-                                SettingItem(divider = rows.next()) {
-                                    SettingToggleRow(
-                                        title = "Account & sync",
-                                        icon = Icons.Filled.CloudSync,
-                                        subtitle = "Sign in with Google to sync your library between devices. Off hides it and stops all syncing.",
-                                        checked = enabled,
-                                        onCheckedChange = setCloudSyncEnabled,
-                                    )
-                                }
-                            }
-                            if (enabled && signedIn && shown(SettingEntry.AUTO_SYNC)) {
-                                SettingItem(divider = rows.next()) {
-                                    SettingToggleRow(
-                                        title = "Auto-sync",
-                                        icon = Icons.Filled.Sync,
-                                        subtitle = "Sync changes in the background while Whiplash is open.",
-                                        checked = cloudState.autoSync,
-                                        onCheckedChange = cloudSync::setAutoSync,
-                                    )
-                                }
-                            }
-                            if (enabled && signedIn && shown(SettingEntry.SHOW_EMAIL)) {
-                                SettingItem(divider = rows.next()) {
-                                    SettingToggleRow(
-                                        title = "Show email",
-                                        icon = Icons.Filled.AlternateEmail,
-                                        subtitle = "Show your email address on your profile in Settings.",
-                                        checked = showAccountEmail,
-                                        onCheckedChange = { show -> cloudScope.launch { app.settingsRepository.setShowAccountEmail(show) } },
-                                    )
-                                }
-                            }
-                            if (enabled && signedIn && shown(SettingEntry.SHOW_PHOTO)) {
-                                SettingItem(divider = rows.next()) {
-                                    SettingToggleRow(
-                                        title = "Show profile photo",
-                                        icon = Icons.Filled.AccountCircle,
-                                        subtitle = "Off shows your initial instead of your photo in Settings.",
-                                        checked = showAccountPhoto,
-                                        onCheckedChange = { show -> cloudScope.launch { app.settingsRepository.setShowAccountPhoto(show) } },
-                                    )
-                                }
-                            }
                             if (enabled && signedIn && shown(SettingEntry.PROFILE)) {
                                 SettingItem(divider = rows.next()) {
                                     SettingActionRow(
@@ -1170,6 +1214,61 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                             },
                                         )
                                     }
+                                }
+                            }
+                            if (shown(SettingEntry.ACCOUNT_SYNC)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingToggleRow(
+                                        title = "Account & sync",
+                                        icon = Icons.Filled.CloudSync,
+                                        subtitle = "Sign in with Google to sync your library between devices. Off hides it and stops all syncing.",
+                                        checked = enabled,
+                                        onCheckedChange = setCloudSyncEnabled,
+                                    )
+                                }
+                            }
+                            if (enabled && signedIn && shown(SettingEntry.AUTO_SYNC)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingToggleRow(
+                                        title = "Auto-sync",
+                                        icon = Icons.Filled.Sync,
+                                        subtitle = "Sync changes in the background while Whiplash is open.",
+                                        checked = cloudState.autoSync,
+                                        onCheckedChange = cloudSync::setAutoSync,
+                                    )
+                                }
+                            }
+                            if (enabled && signedIn && shown(SettingEntry.SHOW_SYNC_STATUS)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingToggleRow(
+                                        title = "Show sync status",
+                                        icon = Icons.Filled.CloudDone,
+                                        subtitle = "Show when you last synced on your profile in Settings. Problems always show.",
+                                        checked = showSyncStatus,
+                                        onCheckedChange = { show -> cloudScope.launch { app.settingsRepository.setShowSyncStatus(show) } },
+                                    )
+                                }
+                            }
+                            if (enabled && signedIn && shown(SettingEntry.SHOW_EMAIL)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingToggleRow(
+                                        title = "Show email",
+                                        icon = Icons.Filled.AlternateEmail,
+                                        subtitle = "Show your email address on your profile in Settings.",
+                                        checked = showAccountEmail,
+                                        onCheckedChange = { show -> cloudScope.launch { app.settingsRepository.setShowAccountEmail(show) } },
+                                    )
+                                }
+                            }
+                            if (enabled && signedIn && shown(SettingEntry.SHOW_PHOTO)) {
+                                SettingItem(divider = rows.next()) {
+                                    SettingToggleRow(
+                                        title = "Show profile photo",
+                                        icon = Icons.Filled.AccountCircle,
+                                        subtitle = "Off shows your initial instead of your photo in Settings.",
+                                        checked = showAccountPhoto,
+                                        onCheckedChange = { show -> cloudScope.launch { app.settingsRepository.setShowAccountPhoto(show) } },
+                                    )
                                 }
                             }
                             if (enabled && signedIn && shown(SettingEntry.SYNC_CATEGORIES)) {
@@ -1495,6 +1594,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     onSignIn = startSignIn,
                                     photoVersion = photoVersion,
                                     showEmail = showAccountEmail,
+                                    showStatus = showSyncStatus,
                                 )
                             }
                         } else {
@@ -1969,7 +2069,24 @@ private fun AudioQualitySelector(selected: AudioQuality, onSelect: (AudioQuality
 }
 
 @Composable
-private fun QuickPicksGridCountSelector(selected: Int, onSelect: (Int) -> Unit) {
+private fun QuickPicksGridCountSelector(selected: Int, onSelect: (Int) -> Unit) =
+    CountSelector(
+        options = com.whiplash.music.data.repository.QUICK_PICKS_GRID_COUNTS,
+        selected = selected,
+        describe = { count -> if (count == 0) "Show all Quick Picks" else "$count Quick Picks per page" },
+        label = { count -> if (count == 0) "All" else count.toString() },
+        onSelect = onSelect,
+    )
+
+/** Pill-shaped segmented picker for a small set of numbers (grid size, page count). */
+@Composable
+private fun CountSelector(
+    options: List<Int>,
+    selected: Int,
+    describe: (Int) -> String,
+    onSelect: (Int) -> Unit,
+    label: (Int) -> String = { it.toString() },
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1977,7 +2094,7 @@ private fun QuickPicksGridCountSelector(selected: Int, onSelect: (Int) -> Unit) 
             .background(WhiplashColors.surfaceGlass)
             .padding(3.dp),
     ) {
-        com.whiplash.music.data.repository.QUICK_PICKS_GRID_COUNTS.forEach { count ->
+        options.forEach { count ->
             val isSelected = count == selected
             val bg by androidx.compose.animation.animateColorAsState(
                 targetValue = if (isSelected) WhiplashColors.accent else Color.Transparent,
@@ -1987,7 +2104,7 @@ private fun QuickPicksGridCountSelector(selected: Int, onSelect: (Int) -> Unit) 
                 targetValue = if (isSelected) WhiplashColors.onAccent else WhiplashColors.textSecondary,
                 label = "qpCountFg",
             )
-            val label = if (count == 0) "All" else count.toString()
+            val text = label(count)
             Row(
                 modifier = Modifier
                     .weight(1f)
@@ -1995,13 +2112,13 @@ private fun QuickPicksGridCountSelector(selected: Int, onSelect: (Int) -> Unit) 
                     .background(bg)
                     .semantics {
                         this.selected = isSelected
-                        contentDescription = if (count == 0) "Show all Quick Picks" else "$count Quick Picks per page"
+                        contentDescription = describe(count)
                     }
                     .clickable(role = androidx.compose.ui.semantics.Role.Button) { onSelect(count) }
                     .padding(vertical = GlassTokens.spaceSm),
                 horizontalArrangement = Arrangement.Center,
             ) {
-                Text(text = label, style = MaterialTheme.typography.labelMedium, color = fg, maxLines = 1)
+                Text(text = text, style = MaterialTheme.typography.labelMedium, color = fg, maxLines = 1)
             }
         }
     }

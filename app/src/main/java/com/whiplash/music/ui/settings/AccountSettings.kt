@@ -65,6 +65,7 @@ internal fun AccountHeaderCard(
     onSignIn: () -> Unit,
     photoVersion: Long = 0,
     showEmail: Boolean = true,
+    showStatus: Boolean = true,
 ) {
     val shape = RoundedCornerShape(WhiplashRadius.large)
     val account = state.account
@@ -97,8 +98,11 @@ internal fun AccountHeaderCard(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Spacer(Modifier.height(6.dp))
-                    SyncStatusLine(state)
+                    // Problems (sign in again, sync failed) always show, even when the status is hidden.
+                    if (showStatus || state.error != null || state.needsSignIn) {
+                        Spacer(Modifier.height(6.dp))
+                        SyncStatusLine(state)
+                    }
                 }
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,

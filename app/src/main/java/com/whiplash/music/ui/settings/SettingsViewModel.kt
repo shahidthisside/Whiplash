@@ -104,6 +104,35 @@ class SettingsViewModel(
     val quickPicksGridCount: StateFlow<Int> = repository.quickPicksGridCount
         .stateIn(viewModelScope, SharingStarted.Eagerly, 9)
 
+    val speedDialPaging: StateFlow<Boolean> = repository.speedDialPaging
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    fun setSpeedDialPaging(enabled: Boolean) {
+        viewModelScope.launch { repository.setSpeedDialPaging(enabled) }
+    }
+
+    val speedDialGridCount: StateFlow<Int> = repository.speedDialGridCount
+        .stateIn(viewModelScope, SharingStarted.Eagerly, com.whiplash.music.data.repository.SPEED_DIAL_PAGE_SIZE)
+    fun setSpeedDialGridCount(count: Int) {
+        viewModelScope.launch { repository.setSpeedDialGridCount(count) }
+    }
+
+    val speedDialPageCount: StateFlow<Int> = repository.speedDialPageCount
+        .stateIn(viewModelScope, SharingStarted.Eagerly, com.whiplash.music.data.repository.SPEED_DIAL_MAX_PAGES)
+    fun setSpeedDialPageCount(count: Int) {
+        viewModelScope.launch { repository.setSpeedDialPageCount(count) }
+    }
+
+    val speedDialPeek: StateFlow<Boolean> = repository.speedDialPeek.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    fun setSpeedDialPeek(enabled: Boolean) {
+        viewModelScope.launch { repository.setSpeedDialPeek(enabled) }
+    }
+
+    val quickPicksPeek: StateFlow<Boolean> = repository.quickPicksPeek.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    fun setQuickPicksPeek(enabled: Boolean) {
+        viewModelScope.launch { repository.setQuickPicksPeek(enabled) }
+    }
+
     fun setQuickPicksGridCount(count: Int) {
         viewModelScope.launch { repository.setQuickPicksGridCount(count) }
     }

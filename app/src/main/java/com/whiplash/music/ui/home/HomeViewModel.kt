@@ -59,6 +59,12 @@ class HomeViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val quickPicksGridCount: StateFlow<Int?> = settingsRepository.quickPicksGridCount
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val speedDialGridCount: StateFlow<Int> = settingsRepository.speedDialGridCount
+        .stateIn(viewModelScope, SharingStarted.Eagerly, com.whiplash.music.data.repository.SPEED_DIAL_PAGE_SIZE)
+    val speedDialPeek: StateFlow<Boolean> = settingsRepository.speedDialPeek
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val quickPicksPeek: StateFlow<Boolean> = settingsRepository.quickPicksPeek
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val homeShelvesEnabled: StateFlow<Boolean?> = settingsRepository.homeShelvesEnabled
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
@@ -115,8 +121,13 @@ class HomeViewModel(
         .flatMapLatest {
             kotlinx.coroutines.flow.combine(
                 libraryRepository.observePinned(),
-                libraryRepository.observeRecentlyPlayed(limit = 25),
-            ) { pinned, recent ->
+                libraryRepository.observeRecentlyPlayed(limit = SPEED_DIAL_FETCH),
+                kotlinx.coroutines.flow.combine(
+                    settingsRepository.speedDialPaging,
+                    settingsRepository.speedDialPageCount,
+                    settingsRepository.speedDialGridCount,
+                ) { on, pages, perPage -> perPage * (if (on) pages else 1) },
+            ) { pinned, recent, max ->
                 // Real, reported bug: this used to dedup by the raw
                 // (item.source, item.id) pair — the exact same YOUTUBE/DOWNLOAD
                 // identity gap HistoryDao.observeRecentlyPlayed's own doc
@@ -130,7 +141,7 @@ class HomeViewModel(
                 // already-pinned tracks from the "recent" fallback, and the
                 // dedup itself — agree on what counts as the same track.
                 val pinnedIds = pinned.map { it.speedDialIdentity() }.toSet()
-                (pinned + recent.filter { it.speedDialIdentity() !in pinnedIds }).take(9)
+                (pinned + recent.filter { it.speedDialIdentity() !in pinnedIds }).take(max)
             }
         }
         .onEach { _isSpeedDialLoaded.value = true }
@@ -376,7 +387,7 @@ class HomeViewModel(
             // blip should leave the previous/cached results visible
             // rather than clearing them, same as the old catch-all
             // behavior.
-            if (blended.isNotEmpty()) _quickPicks.value = blended
+            if (blended.isNotEmpty()) _quickPicks.value = fillPages(blended)
         } finally {
             _isLoadingQuickPicks.value = false
         }
@@ -390,6 +401,20 @@ class HomeViewModel(
      * by track id along the way (the same video can legitimately surface
      * in more than one artist's search, e.g. a feature/collab track).
      */
+    /**
+     * Tops [list] up with popular songs so the grid's pages are all full for
+     * every page size offered (3, 6, 9, 12 all divide [QUICK_PICKS_FILL_STEP]).
+     * Best effort: if the extra search fails, the list is returned as is.
+     */
+    private suspend fun fillPages(list: List<PlayableItem.YoutubeTrack>): List<PlayableItem.YoutubeTrack> {
+        val target = ((list.size + QUICK_PICKS_FILL_STEP - 1) / QUICK_PICKS_FILL_STEP) * QUICK_PICKS_FILL_STEP
+        if (list.size == target) return list
+        val seen = list.mapTo(HashSet()) { it.id }
+        val extra = runCatching { youtubeSearchRepository.search(QUICK_PICKS_QUERY) }.getOrDefault(emptyList())
+            .filter { seen.add(it.id) }
+        return list + extra.take(target - list.size)
+    }
+
     private fun blend(resultSets: List<List<PlayableItem.YoutubeTrack>>): List<PlayableItem.YoutubeTrack> {
         val seenIds = HashSet<String>()
         val blended = mutableListOf<PlayableItem.YoutubeTrack>()
@@ -486,8 +511,14 @@ class HomeViewModel(
 
     private companion object {
         const val QUICK_PICKS_QUERY = "popular music 2026"
+
+        /** Least common multiple of the grid's page sizes (3, 6, 9, 12). */
+        private const val QUICK_PICKS_FILL_STEP = 36
         const val MAX_BLEND_ARTISTS = 5
         const val MAX_SHELF_ARTISTS = 6
         const val MAX_SHELF_ITEMS = 12
     }
 }
+
+/** Recent plays read for Speed dial: enough to fill every page after pinned songs. */
+private const val SPEED_DIAL_FETCH = 60
