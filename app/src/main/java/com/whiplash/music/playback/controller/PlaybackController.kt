@@ -68,6 +68,14 @@ class PlaybackController(
     // ── Recommendations ─────────────────────────────────────────────────
     /** Ids of queue entries autoplay added (vs. ones the listener chose). */
     private val autoplayIds = HashSet<String>()
+
+    /**
+     * The radio ranks dozens of candidates with text analysis; that must
+     * never run on the main thread (it froze the app: "isn't responding").
+     * One thread, so the engine's session state is never touched concurrently.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val radioDispatcher = Dispatchers.Default.limitedParallelism(1)
     private var extendingQueue = false
 
     /** Seed-anchored radio; see [com.whiplash.music.recommend.RadioEngine]. */
@@ -1018,10 +1026,12 @@ class PlaybackController(
                 val chosen = queue.take(indexOfItem + 1).filterIsInstance<PlayableItem.YoutubeTrack>().filter { it.id !in autoplayIds }
                 val seed = chosen.lastOrNull() ?: radioEngine.current?.seed ?: justStarted
                 val fresh = radioEngine.current?.seed?.id != seed.id
-                val session = radioEngine.sessionFor(seed)
-                if (fresh) chosen.takeLast(RADIO_PROFILE_CHOSEN).forEach { if (it.id != seed.id) radioEngine.onChosen(session, it) }
-
-                val toAdd = radioEngine.nextBatch(session, queue.toList(), MAX_AUTOPLAY_ADDITIONS)
+                val snapshot = queue.toList()
+                val (session, toAdd) = withContext(radioDispatcher) {
+                    val session = radioEngine.sessionFor(seed)
+                    if (fresh) chosen.takeLast(RADIO_PROFILE_CHOSEN).forEach { if (it.id != seed.id) radioEngine.onChosen(session, it) }
+                    session to radioEngine.nextBatch(session, snapshot, MAX_AUTOPLAY_ADDITIONS)
+                }
                 android.util.Log.i(
                     "WhiplashRadio",
                     "seed=${seed.title} lang=${session.profile.dominant()} +${toAdd.size}: " +
@@ -1088,7 +1098,9 @@ class PlaybackController(
         scope.launch {
             withContext(Dispatchers.IO) { runCatching { playEventDao?.insert(event) } }
             if (fromAutoplay && item is PlayableItem.YoutubeTrack && session != null) {
-                if (completed) radioEngine.onKept(session, item) else if (skipped) radioEngine.onSkipped(session, item)
+                withContext(radioDispatcher) {
+                    if (completed) radioEngine.onKept(session, item) else if (skipped) radioEngine.onSkipped(session, item)
+                }
             }
         }
     }
