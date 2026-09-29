@@ -1,5 +1,7 @@
 package com.whiplash.music.ui.home
 
+import com.whiplash.music.recommend.withoutNearDuplicates
+import kotlinx.coroutines.flow.flowOn
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.whiplash.music.data.repository.LibraryRepository
@@ -49,6 +51,8 @@ class HomeViewModel(
     private val settingsRepository: com.whiplash.music.data.repository.SettingsRepository,
     // Emits online/offline; when it turns online with Quick Picks still empty, they reload.
     private val onlineChanges: kotlinx.coroutines.flow.Flow<Boolean>? = null,
+    /** Song radios of what the listener finishes: Quick Picks' first source. */
+    private val radioSource: QuickPicksRadio? = null,
 ) : ViewModel() {
 
     // Layout settings held here (not collected fresh in the screen) so their
@@ -145,9 +149,14 @@ class HomeViewModel(
                 // already-pinned tracks from the "recent" fallback, and the
                 // dedup itself — agree on what counts as the same track.
                 val pinnedIds = pinned.map { it.speedDialIdentity() }.toSet()
-                (pinned + recent.filter { it.speedDialIdentity() !in pinnedIds }).take(max)
+                // Pins are the listener's own choice and always stay; recent
+                // plays skip another upload of a song already on the dial
+                // (lyric video one day, official audio the next).
+                val dupes = com.whiplash.music.recommend.NearDuplicateFilter().apply { pinned.forEach { add(it) } }
+                (pinned + recent.filter { it.speedDialIdentity() !in pinnedIds && dupes.accept(it) }).take(max)
             }
         }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .onEach { _isSpeedDialLoaded.value = true }
         // Eagerly (a cheap local query), so Speed dial is already filled in when
         // Home returns after more than a few seconds away — otherwise it came back
@@ -253,7 +262,9 @@ class HomeViewModel(
                 com.whiplash.music.domain.model.ShelfKind.PLAYLISTS ->
                     youtubeSearchRepository.searchPlaylists(spec.query).map { ShelfItem.Collection(it) }
                 com.whiplash.music.domain.model.ShelfKind.SONGS ->
-                    youtubeSearchRepository.search(spec.query).map { ShelfItem.Track(it) }
+                    youtubeSearchRepository.search(spec.query).let { found ->
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { found.withoutNearDuplicates() }
+                    }.map { ShelfItem.Track(it) }
             }
         }.getOrDefault(emptyList())
             .distinctBy { it.key }
@@ -396,7 +407,8 @@ class HomeViewModel(
         // has a fresh cache entry) while a real network refresh runs,
         // same "cache -> display immediately -> background refresh"
         // pattern YoutubeSearchRepository already documents.
-        val cachedBlend = blend(queries.map { youtubeSearchRepository.cachedResults(it) ?: emptyList() })
+        val cachedSets = queries.map { youtubeSearchRepository.cachedResults(it) ?: emptyList() }
+        val cachedBlend = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { blend(cachedSets) }
         if (cachedBlend.isNotEmpty()) _quickPicks.value = cachedBlend
 
         _isLoadingQuickPicks.value = true
@@ -411,10 +423,17 @@ class HomeViewModel(
             // cancels the in-flight searches with it rather than leaking
             // them.
             val blended = coroutineScope {
+                val radios = async {
+                    val recent = withTimeoutOrNull(5_000L) { libraryRepository.observeRecentlyPlayed(limit = 25).first() }.orEmpty()
+                    runCatching { radioSource?.load(recent) }.getOrNull().orEmpty()
+                }
                 val resultSets = queries.map { query ->
                     async { runCatching { youtubeSearchRepository.search(query) }.getOrDefault(emptyList()) }
                 }.awaitAll()
-                blend(resultSets)
+                // Radios of songs you finish lead; artist/taste searches fill in
+                // and keep it fresh.
+                val sets = radios.await() + resultSets
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { blend(sets) }
             }
             // Only replace what's showing if the blend actually
             // produced something — an all-queries-failed network
@@ -448,8 +467,9 @@ class HomeViewModel(
         val target = ((list.size + QUICK_PICKS_FILL_STEP - 1) / QUICK_PICKS_FILL_STEP) * QUICK_PICKS_FILL_STEP
         if (list.size == target) return list
         val seen = list.mapTo(HashSet()) { it.id }
+        val dupes = com.whiplash.music.recommend.NearDuplicateFilter().apply { list.forEach { add(it) } }
         val extra = runCatching { youtubeSearchRepository.search(QUICK_PICKS_QUERY) }.getOrDefault(emptyList())
-            .filter { seen.add(it.id) }
+            .filter { seen.add(it.id) && dupes.accept(it) }
         return list + extra.take(target - list.size)
     }
 
@@ -463,7 +483,12 @@ class HomeViewModel(
                 if (seenIds.add(track.id)) blended += track
             }
         }
+        // The same song found by two searches (or as video + lyric + slowed
+        // uploads) shows once, as its best upload, where it first appeared.
+        // Long-form jukeboxes/compilations don't belong in Quick Picks.
         return blended
+            .filter { com.whiplash.music.playback.controller.classifySongLength(it.title) != com.whiplash.music.playback.controller.SongLengthClass.LONG_FORM }
+            .withoutNearDuplicates()
     }
 
     /**

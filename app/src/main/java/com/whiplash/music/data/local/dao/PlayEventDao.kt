@@ -8,6 +8,9 @@ import com.whiplash.music.data.local.entity.PlayEventEntity
 /** Per-artist feedback totals over a window. */
 data class ArtistFeedback(val artistKey: String, val plays: Int, val skips: Int, val completes: Int)
 
+/** A song the listener keeps finishing. */
+data class TopTrack(val trackId: String, val title: String, val artist: String, val completes: Int, val lastAt: Long)
+
 /** How often an artist's songs were detected as each language. */
 data class ArtistLanguage(val artistKey: String, val language: String, val n: Int)
 
@@ -45,6 +48,21 @@ interface PlayEventDao {
         """
     )
     suspend fun artistLanguages(artistKeys: List<String>): List<ArtistLanguage>
+
+    /**
+     * Online songs the listener finished most (recent finishes count more
+     * via [sinceMs]), for seeding Quick Picks radios. Never includes songs
+     * they also keep skipping.
+     */
+    @Query(
+        """
+        SELECT trackId, title, artist, SUM(completed) AS completes, MAX(startedAtEpochMs) AS lastAt
+        FROM play_events WHERE startedAtEpochMs >= :sinceMs AND source IN ('YOUTUBE', 'DOWNLOAD')
+        GROUP BY trackId HAVING SUM(completed) >= 1 AND SUM(skipped) <= SUM(completed)
+        ORDER BY completes DESC, lastAt DESC LIMIT :limit
+        """
+    )
+    suspend fun topCompleted(sinceMs: Long, limit: Int): List<TopTrack>
 
     @Query("SELECT * FROM play_events ORDER BY startedAtEpochMs DESC LIMIT :limit")
     suspend fun recent(limit: Int): List<PlayEventEntity>

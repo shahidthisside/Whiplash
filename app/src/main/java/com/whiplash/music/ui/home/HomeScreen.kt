@@ -112,7 +112,10 @@ fun HomeScreen(
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
     val viewModel: HomeViewModel = viewModel(
-        factory = HomeViewModelFactory(app.libraryRepository, app.youtubeSearchRepository, app.settingsRepository, app.cloudSyncManager.onlineChanges()),
+        factory = HomeViewModelFactory(
+            app.libraryRepository, app.youtubeSearchRepository, app.settingsRepository, app.cloudSyncManager.onlineChanges(),
+            QuickPicksRadio(app.database.playEventDao()) { id -> app.newPipePlaybackProvider.getRadioPage(id, null).items },
+        ),
     )
     val songActionsViewModel: SongActionsViewModel = viewModel(
         factory = SongActionsViewModelFactory(app.libraryRepository, app.downloadManager),
