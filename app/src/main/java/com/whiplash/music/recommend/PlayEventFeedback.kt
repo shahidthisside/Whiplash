@@ -27,6 +27,11 @@ class PlayEventFeedback(private val dao: PlayEventDao?) : RadioFeedback {
             .mapValues { (_, rows) -> rows.maxBy { it.n }.language }
     }
 
+    override suspend fun artistAffinity(): Map<String, Double> =
+        dao?.artistFeedback(now() - 180 * DAY).orEmpty()
+            .filter { it.plays >= 2 }
+            .associate { it.artistKey to (it.completes + 1.0) / (it.plays + 2.0) }
+
     private companion object {
         const val HOUR = 3_600_000L
         const val DAY = 24 * HOUR

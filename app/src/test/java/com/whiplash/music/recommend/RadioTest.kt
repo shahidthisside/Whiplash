@@ -36,7 +36,6 @@ class LanguageDetectorTest {
         assertEquals("en", LanguageDetector.detect("Love Me Like You Do", "Nobody Known")?.code)
     }
 
-
     @Test fun artistBeatsMisleadingTitleWords() {
         // Hindi film songs with English or Punjabi-word titles.
         assertEquals("hi", LanguageDetector.detect("Excuses Tonight Baby", "Arijit Singh")?.code)
@@ -83,15 +82,25 @@ class RadioRulesTest {
         assertEquals("B", r.placed.first().artist)
     }
 
-    @Test fun profileDominanceAndMixing() {
+    @Test fun profileOnlyExcludesOnReliableEvidence() {
         val p = LanguageProfile()
         p.add("pa", 3.0)
         assertEquals("pa", p.dominant())
-        assertTrue(p.allows("pa", true))
-        assertFalse(p.allows("hi", true))
-        assertTrue(p.allows(null, false))
-        p.add("hi", 2.0) // the listener also chose Hindi → mixed session
-        assertTrue(p.allows("hi", true))
+        assertTrue(p.allows("pa", LanguageGuess.STRONG))
+        assertTrue(p.allows(null, 0))
+        // Weak or artist-level Hindi evidence never excludes; it only scores lower.
+        assertTrue(p.allows("hi", LanguageGuess.WEAK))
+        assertTrue(p.allows("hi", LanguageGuess.ARTIST))
+        assertTrue(p.penalty("hi", LanguageGuess.WEAK) < p.penalty("hi", LanguageGuess.STRONG))
+        // Another language family with reliable evidence is excluded.
+        assertFalse(p.allows("ko", LanguageGuess.STRONG))
+        // A firmly Punjabi session excludes reliably-Hindi songs too.
+        p.add("pa", 2.0)
+        assertFalse(p.allows("hi", LanguageGuess.STRONG))
+        // The listener chose Hindi as well → mixed session, Hindi welcome.
+        p.add("hi", 2.0)
+        assertTrue(p.allows("hi", LanguageGuess.STRONG))
+        assertEquals(0.0, p.penalty("hi", LanguageGuess.STRONG), 0.0)
     }
 }
 
@@ -130,8 +139,8 @@ class RadioEngineTest {
         val queue = mutableListOf<PlayableItem>(seed)
         repeat(2) { queue += e.nextBatch(s, queue, 10) }
         assertEquals(21, queue.size)
-        // Every fetch is the seed's radio (paged), never a re-seed from an autoplay pick.
-        assertTrue(calls.toString(), calls.all { it.startsWith("seed@") })
+        // The seed's radio is used up (both pages) before anything else is tried.
+        assertEquals(listOf("seed@0", "seed@1"), calls.take(2))
         assertEquals(queue.size, queue.map { it.id }.toSet().size)
     }
 
@@ -167,6 +176,7 @@ class RadioEngineTest {
         val e = engine(mapOf("seed" to listOf(page)))
         val s = e.sessionFor(seed)
         e.onSkipped(s, t("x", "x", "A")); e.onSkipped(s, t("y", "y", "A"))
-        assertEquals(listOf("3"), e.nextBatch(s, listOf(seed), 10).map { it.id })
+        // B first; A only as a fallback so the radio doesn't run dry.
+        assertEquals("3", e.nextBatch(s, listOf(seed), 10).map { it.id }.first())
     }
 }

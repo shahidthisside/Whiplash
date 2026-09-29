@@ -19,11 +19,15 @@ object RadioRules {
      * "Official" and punctuation removed, so "DILJIT DOSANJH", "Diljit
      * Dosanjh - Topic" and "DiljitDosanjhVEVO" all match.
      */
-    fun artistKey(artist: String): String = artist.lowercase()
-        .replace(Regex("\\s*-\\s*topic$"), "")
-        .replace(Regex("vevo$"), "")
-        .replace(Regex("\\b(official|music)\\b"), "")
-        .replace(Regex("[^\\p{L}\\p{N}]+"), "")
+    fun artistKey(artist: String): String = artistKeys.getOrPut(artist) { computeArtistKey(artist) }
+
+    private val artistKeys = Memo<String, String>()
+
+    private fun computeArtistKey(artist: String): String = artist.lowercase()
+        .replace(RX_RR0, "")
+        .replace(RX_RR1, "")
+        .replace(RX_RR2, "")
+        .replace(RX_RR3, "")
 
     private val RETRO = Regex(
         "(?i)\\b(19[5-9]\\d|[5-9]0'?s|old is gold|evergreen|purane|purana|retro|golden era|classic hits|oldies)\\b",
@@ -99,18 +103,51 @@ class LanguageProfile {
         return top.key.takeIf { top.value / total >= share }
     }
 
+    private fun share(code: String): Double {
+        val total = weights.values.sum()
+        return if (total <= 0) 0.0 else (weights[code] ?: 0.0) / total
+    }
+
     /**
-     * Whether a candidate in [code] may join the radio: unknown always
-     * may; otherwise it must be the dominant language, or one the listener
-     * has already accepted in this session (so a mixed Punjabi + Hindi
-     * session stays mixed). Weak guesses only block when the session is
-     * clearly one language.
+     * Whether a candidate may join the radio at all. Only reliable evidence
+     * ([LanguageGuess.STRONG]) ever excludes a song, since titles lie:
+     * Hindi songs have English or Punjabi-word titles and vice versa.
+     * Unknown always may; so may anything the dominant language is, or that
+     * the listener already accepted this session. A reliably different
+     * language is excluded when it's another family (Korean in a Punjabi
+     * session), and a sister language (Hindi in a Punjabi session) only
+     * when the session is firmly one language; otherwise it just scores
+     * lower (see [penalty]).
      */
-    fun allows(code: String?, confident: Boolean): Boolean {
+    fun allows(code: String?, strength: Int): Boolean {
         if (code == null) return true
         val dom = dominant() ?: return true
-        if (code == dom) return true
-        if (!confident) return (weights[code] ?: 0.0) > 0.0
-        return (weights[code] ?: 0.0) >= 1.0
+        if (code == dom || (weights[code] ?: 0.0) >= 1.0) return true
+        if (strength < LanguageGuess.STRONG) return true
+        if (LanguageDetector.family(code) != LanguageDetector.family(dom)) return false
+        val firm = weights.values.sum() >= 3.0 && share(dom) >= 0.85
+        return !firm
+    }
+
+    /** 0 (fits) … 1 (clearly another language) for scoring; weak evidence counts little. */
+    fun penalty(code: String?, strength: Int): Double {
+        if (code == null) return 0.0
+        val dom = dominant() ?: return 0.0
+        if (code == dom) return 0.0
+        val acceptedShare = share(code)
+        if (acceptedShare >= 0.25) return 0.0
+        val sameFamily = LanguageDetector.family(code) == LanguageDetector.family(dom)
+        val base = when (strength) {
+            LanguageGuess.STRONG -> 1.0
+            LanguageGuess.ARTIST -> 0.75
+            else -> 0.3
+        }
+        return base * (if (sameFamily) 0.7 else 1.0) * (1.0 - acceptedShare * 4)
     }
 }
+
+// Compiled once: building a Regex per call made the radio freeze the UI.
+private val RX_RR0 = Regex("\\s*-\\s*topic$")
+private val RX_RR1 = Regex("vevo$")
+private val RX_RR2 = Regex("\\b(official|music)\\b")
+private val RX_RR3 = Regex("[^\\p{L}\\p{M}\\p{N}]+")
