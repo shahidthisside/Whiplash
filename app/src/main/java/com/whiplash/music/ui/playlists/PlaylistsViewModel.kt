@@ -71,6 +71,33 @@ class PlaylistsViewModel(
         }
     }
 
+    /** Multi-select: deletes every playlist in [playlists], one toast. */
+    fun deletePlaylists(playlists: List<Playlist>) {
+        viewModelScope.launch {
+            playlists.forEach { libraryRepository.deletePlaylist(it.id) }
+            ToastController.show(if (playlists.size == 1) "Playlist \"${playlists[0].name}\" deleted" else "${playlists.size} playlists deleted")
+        }
+    }
+
+    /** Multi-select: pins or unpins [playlists], stopping at the pin limit. */
+    fun setPinnedAll(playlists: List<Playlist>, pinned: Boolean) {
+        viewModelScope.launch {
+            var changed = 0
+            var hitLimit = false
+            for (p in playlists) {
+                if (p.pinned == pinned) continue
+                if (libraryRepository.setPlaylistPinned(p.id, pinned)) changed++ else { hitLimit = true; break }
+            }
+            ToastController.show(
+                when {
+                    hitLimit -> "You can pin up to ${com.whiplash.music.domain.model.MAX_PINNED_PLAYLISTS} playlists"
+                    pinned -> if (changed == 1) "Pinned 1 playlist" else "Pinned $changed playlists"
+                    else -> if (changed == 1) "Unpinned 1 playlist" else "Unpinned $changed playlists"
+                },
+            )
+        }
+    }
+
     fun renamePlaylist(id: Long, name: String, description: String?) {
         viewModelScope.launch {
             libraryRepository.renamePlaylist(id, name, description)

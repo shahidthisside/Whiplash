@@ -139,4 +139,58 @@ class SongActionsViewModel(
             ToastController.show("Download removed")
         }
     }
+
+    // ---- Bulk actions for multi-select (one toast per batch) -------------
+
+    fun addAllToFavorites(items: List<PlayableItem>) {
+        viewModelScope.launch {
+            val added = libraryRepository.addAllToFavorites(items)
+            ToastController.show(if (added == 0) "Already in favorites" else "${songs(added)} added to favorites")
+        }
+    }
+
+    fun removeAllFromFavorites(items: List<PlayableItem>) {
+        viewModelScope.launch {
+            items.forEach { libraryRepository.toggleFavorite(it, isCurrentlyFavorite = true) }
+            ToastController.show("${songs(items.size)} removed from favorites")
+        }
+    }
+
+    fun addAllToPlaylist(items: List<PlayableItem>, playlistId: Long, playlistName: String) {
+        viewModelScope.launch {
+            val added = items.count { libraryRepository.addToPlaylist(playlistId, it) }
+            ToastController.show(if (added == 0) "Already in $playlistName" else "${songs(added)} added to $playlistName")
+        }
+    }
+
+    fun createPlaylistAndAddAll(name: String, items: List<PlayableItem>) {
+        viewModelScope.launch {
+            val id = libraryRepository.createPlaylist(name)
+            items.forEach { libraryRepository.addToPlaylist(id, it) }
+            ToastController.show("${songs(items.size)} added to $name")
+        }
+    }
+
+    fun removeAllFromPlaylist(playlistId: Long, playlistName: String, items: List<PlayableItem>) {
+        viewModelScope.launch {
+            items.forEach { libraryRepository.removeFromPlaylist(playlistId, it) }
+            ToastController.show("${songs(items.size)} removed from $playlistName")
+        }
+    }
+
+    fun removeAllFromHistory(items: List<PlayableItem>) {
+        viewModelScope.launch {
+            items.forEach { libraryRepository.removeFromHistory(it) }
+            ToastController.show("${songs(items.size)} removed from history")
+        }
+    }
+
+    fun removeDownloads(ids: List<String>) {
+        viewModelScope.launch {
+            ids.forEach { downloadManager?.removeDownload(it) }
+            ToastController.show(if (ids.size == 1) "Download removed" else "${ids.size} downloads removed")
+        }
+    }
+
+    private fun songs(n: Int) = if (n == 1) "1 song" else "$n songs"
 }

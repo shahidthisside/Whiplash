@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.LibraryAddCheck
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CheckCircleOutline
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.filled.Radio
@@ -76,6 +77,8 @@ fun SongActionsContent(
     isDownloaded: Boolean = false,
     onDownload: (() -> Unit)? = null,
     onRemoveDownload: (() -> Unit)? = null,
+    // Starts multi-select with this song (lists only; null elsewhere).
+    onSelect: (() -> Unit)? = null,
 ) {
     val haptic = LocalHapticFeedback.current
     val live = rememberSongLibraryState(item)
@@ -104,6 +107,13 @@ fun SongActionsContent(
             }
         }
 
+        if (onSelect != null) {
+            SongActionRow(
+                icon = { Icon(Icons.Filled.CheckCircleOutline, contentDescription = null, tint = WhiplashColors.textPrimary) },
+                label = "Select",
+                onClick = onSelect,
+            )
+        }
         SongActionRow(
             icon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, contentDescription = null, tint = WhiplashColors.textPrimary) },
             label = "Play next",

@@ -12,6 +12,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.filled.CheckCircleOutline
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -279,9 +280,18 @@ internal fun ModernSongsTab(
             modifier = Modifier.fillMaxSize(),
             onLoadMore = onLoadMore,
             isLoadingMore = isLoadingMore,
+            headerItems = listOf(top),
             headerWithActions = { openActions ->
                 Column {
-                    TopResultCard(top, onPlay = { onPlayTrack(top) }, onMore = { openActions(top) })
+                    val sel = com.whiplash.music.ui.player.LocalListSelection.current
+                    val picking = sel?.selecting == true
+                    TopResultCard(
+                        top,
+                        onPlay = { if (picking) sel!!.toggle(top) else onPlayTrack(top) },
+                        onMore = { if (picking) sel!!.toggle(top) else openActions(top) },
+                        selected = sel?.isSelected?.invoke(top) == true,
+                        selecting = picking,
+                    )
                     if (rest.isNotEmpty()) SectionLabel("Songs")
                 }
             },
@@ -291,7 +301,14 @@ internal fun ModernSongsTab(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TopResultCard(track: PlayableItem.YoutubeTrack, onPlay: () -> Unit, onMore: () -> Unit) {
+private fun TopResultCard(
+    track: PlayableItem.YoutubeTrack,
+    onPlay: () -> Unit,
+    onMore: () -> Unit,
+    selected: Boolean = false,
+    // While selecting, taps anywhere on the card select it and the ⋮ / Play buttons step aside.
+    selecting: Boolean = false,
+) {
     val haptic = LocalHapticFeedback.current
     val art = artworkAtSize(track.artworkUri, LARGE_ART_PX)
     // Colours from the cover itself (same sampler as the player, tiny
@@ -311,7 +328,7 @@ private fun TopResultCard(track: PlayableItem.YoutubeTrack, onPlay: () -> Unit, 
             .clip(RoundedCornerShape(24.dp))
             .background(Brush.linearGradient(listOf(c1, c2)))
             .combinedClickable(
-                onClickLabel = "Play ${track.title}",
+                onClickLabel = if (selecting) "Select ${track.title}" else "Play ${track.title}",
                 onLongClickLabel = "More options",
                 onClick = onPlay,
                 onLongClick = {
@@ -322,7 +339,11 @@ private fun TopResultCard(track: PlayableItem.YoutubeTrack, onPlay: () -> Unit, 
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Cover(art, Modifier.size(112.dp), RoundedCornerShape(16.dp))
+        Box(contentAlignment = Alignment.Center) {
+            Cover(art, Modifier.size(112.dp), RoundedCornerShape(16.dp))
+            if (selected) Box(Modifier.size(112.dp).clip(RoundedCornerShape(16.dp)).background(Color.Black.copy(alpha = 0.4f)))
+            com.whiplash.music.ui.common.SelectionCheck(visible = selected, size = 44.dp)
+        }
         Column(Modifier.padding(start = 14.dp).weight(1f)) {
             Text(
                 text = "TOP RESULT",
@@ -344,7 +365,7 @@ private fun TopResultCard(track: PlayableItem.YoutubeTrack, onPlay: () -> Unit, 
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (!selecting) Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 CollectionPillButton(text = "Play", icon = Icons.Filled.PlayArrow, onClick = onPlay, primary = true)
                 Spacer(Modifier.weight(1f))
                 PlainIconButton(contentDescription = "More options for ${track.title}", onClick = onMore, size = 44.dp) {
@@ -398,6 +419,8 @@ internal fun ModernCollectionGrid(
     var menuFor by remember { mutableStateOf<YoutubePlaylistResult?>(null) }
     val state = rememberLazyGridState()
     LoadMoreWhenNearEnd(state, items.size, isLoadingMore, onLoadMore)
+    val selection = com.whiplash.music.ui.common.rememberItemSelection(items) { it.url }
+    CollectionSelectionChrome(selection)
     LazyVerticalGrid(
         columns = GridCells.Adaptive(150.dp),
         state = state,
@@ -411,16 +434,21 @@ internal fun ModernCollectionGrid(
             // the first letter of the title under it.
             Column(
                 Modifier.combinedClickable(
-                    onClickLabel = "Open ${result.title}",
+                    onClickLabel = if (selection.selecting) "Select ${result.title}" else "Open ${result.title}",
                     onLongClickLabel = "More options",
-                    onClick = { onOpen(result) },
+                    onClick = { if (selection.selecting) selection.toggle(result) else onOpen(result) },
                     onLongClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        menuFor = result
+                        if (selection.selecting) selection.toggle(result) else menuFor = result
                     },
                 ),
             ) {
-                Cover(artworkAtSize(result.artworkUrl, LARGE_ART_PX), Modifier.fillMaxWidth().aspectRatio(1f), tileShape)
+                val picked = selection.isSelected(result)
+                Box(contentAlignment = Alignment.Center) {
+                    Cover(artworkAtSize(result.artworkUrl, LARGE_ART_PX), Modifier.fillMaxWidth().aspectRatio(1f), tileShape)
+                    if (picked) Box(Modifier.matchParentSize().clip(tileShape).background(WhiplashColors.background.copy(alpha = 0.45f)))
+                    com.whiplash.music.ui.common.SelectionCheck(visible = picked, size = 44.dp)
+                }
                 Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.Top) {
                     Column(Modifier.weight(1f)) {
                         Text(
@@ -441,7 +469,7 @@ internal fun ModernCollectionGrid(
                             )
                         }
                     }
-                    PlainIconButton(
+                    if (!selection.selecting) PlainIconButton(
                         contentDescription = "More options for ${result.title}",
                         onClick = { menuFor = result },
                         size = 36.dp,
@@ -455,7 +483,85 @@ internal fun ModernCollectionGrid(
             item(key = "__load_more__", span = { GridItemSpan(maxLineSpan) }) { LoadingFooter() }
         }
     }
-    CollectionMenuSheet(menuFor, onDismiss = { menuFor = null }, onOpen = onOpen)
+    CollectionMenuSheet(menuFor, onDismiss = { menuFor = null }, onOpen = onOpen, onSelect = { selection.start(it) })
+}
+
+/**
+ * Selection actions for albums/playlists in search results. Each one loads
+ * the chosen collections' songs (cached, in order) and then acts on all of
+ * them together.
+ */
+@Composable
+private fun CollectionSelectionChrome(selection: com.whiplash.music.ui.common.ItemSelection<YoutubePlaylistResult>) {
+    val app = LocalContext.current.applicationContext as WhiplashApplication
+    val chosen = selection.selected()
+    val noun = when {
+        chosen.isNotEmpty() && chosen.all { it.isAlbum } -> "album"
+        chosen.isNotEmpty() && chosen.none { it.isAlbum } -> "playlist"
+        else -> "item"
+    }
+    fun withTracks(action: suspend (List<PlayableItem.YoutubeTrack>) -> Unit) {
+        val targets = chosen
+        selection.clear()
+        if (targets.isEmpty()) return
+        ToastController.show(if (targets.size == 1) "Loading ${targets[0].title}…" else "Loading ${targets.size} ${noun}s…")
+        com.whiplash.music.ui.common.UiActionScope.scope.launch {
+            val lists = targets.map { loadCollectionTracks(app, it.url) }
+            val failed = lists.count { it.isNullOrEmpty() }
+            val all = lists.filterNotNull().flatten()
+            if (all.isEmpty()) {
+                ToastController.show("Couldn't load them. Check your connection")
+                return@launch
+            }
+            runCatching { action(all) }.onFailure { ToastController.show("Something went wrong") }
+            if (failed > 0) ToastController.show(if (failed == 1) "1 couldn't be loaded" else "$failed couldn't be loaded")
+        }
+    }
+    com.whiplash.music.ui.common.SelectionChrome(
+        selection = selection,
+        noun = noun,
+        primary = listOf(
+            com.whiplash.music.ui.common.action("Play", Icons.Filled.PlayArrow) { withTracks { app.playbackController.playQueue(it, 0) } },
+            com.whiplash.music.ui.common.action("Play next", Icons.AutoMirrored.Filled.PlaylistPlay) { withTracks { app.playbackController.playAllNext(it) } },
+            com.whiplash.music.ui.common.action("Add to queue", Icons.AutoMirrored.Filled.QueueMusic) { withTracks { app.playbackController.addAllToQueue(it) } },
+        ),
+        more = listOf(
+            com.whiplash.music.ui.common.action("Shuffle play", Icons.Filled.Shuffle) { withTracks { app.playbackController.playQueue(it.shuffled(), 0) } },
+            com.whiplash.music.ui.common.action("Add all to Favorites", Icons.Filled.FavoriteBorder) {
+                withTracks {
+                    val n = app.libraryRepository.addAllToFavorites(it)
+                    ToastController.show(if (n == 0) "Already in favorites" else if (n == 1) "1 song added to favorites" else "$n songs added to favorites")
+                }
+            },
+            com.whiplash.music.ui.common.action("Download", Icons.Filled.Download) {
+                withTracks { app.downloadManager.downloadAll(it.distinctBy { t -> t.id }) }
+            },
+            com.whiplash.music.ui.common.action("Save to Playlists", Icons.AutoMirrored.Filled.PlaylistAdd) {
+                // One playlist per album/playlist, like "Save to Playlists" in its own menu.
+                val targets = chosen
+                selection.clear()
+                com.whiplash.music.ui.common.UiActionScope.scope.launch {
+                    val store = com.whiplash.music.data.repository.SavedCollectionStore.get(app)
+                    var saved = 0
+                    for (c in targets) {
+                        val list = loadCollectionTracks(app, c.url) ?: continue
+                        val name = c.title.ifBlank { "Saved ${if (c.isAlbum) "album" else "playlist"}" }
+                        val id = app.libraryRepository.createPlaylist(name)
+                        list.forEach { app.libraryRepository.addToPlaylist(id, it) }
+                        store.put(c.url, id, name)
+                        saved++
+                    }
+                    ToastController.show(
+                        when (saved) {
+                            0 -> "Couldn't load them. Check your connection"
+                            1 -> "Saved 1 to Playlists"
+                            else -> "Saved $saved to Playlists"
+                        },
+                    )
+                }
+            },
+        ),
+    )
 }
 
 private fun collectionSubtitle(r: YoutubePlaylistResult): String {
@@ -495,6 +601,8 @@ internal fun CollectionMenuSheet(
     collection: YoutubePlaylistResult?,
     onDismiss: () -> Unit,
     onOpen: (YoutubePlaylistResult) -> Unit,
+    // Starts multi-select with this item (search grid only).
+    onSelect: ((YoutubePlaylistResult) -> Unit)? = null,
 ) {
     if (collection == null) return
     val context = LocalContext.current
@@ -552,6 +660,9 @@ internal fun CollectionMenuSheet(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+            if (onSelect != null) {
+                SheetAction(Icons.Filled.CheckCircleOutline, "Select") { onDismiss(); onSelect(collection) }
             }
             SheetAction(Icons.AutoMirrored.Filled.OpenInNew, "Open $kind") { onDismiss(); onOpen(collection) }
             SheetAction(Icons.Filled.PlayArrow, "Play") {

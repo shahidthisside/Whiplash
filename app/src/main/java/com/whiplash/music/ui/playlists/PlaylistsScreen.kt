@@ -3,6 +3,11 @@ package com.whiplash.music.ui.playlists
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import com.whiplash.music.ui.common.selectedHighlight
+import androidx.compose.material.icons.filled.CheckCircleOutline
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.PlayArrow
+import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.draw.clip
@@ -110,6 +115,55 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
     val listView by app.settingsRepository.playlistsListView.collectAsState(initial = false)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
+    // ---- Multi-select (started from a playlist's menu → Select) ----------
+    val selection = com.whiplash.music.ui.common.rememberItemSelection(playlists) { it.id.toString() }
+    var bulkDeleteConfirm by remember { mutableStateOf<List<Playlist>?>(null) }
+    // All songs of the selected playlists, in order (a song in two playlists plays twice, like "Play all" would).
+    suspend fun selectedTracks(): List<com.whiplash.music.domain.model.PlayableItem> =
+        selection.selected().flatMap { app.libraryRepository.observePlaylistTracks(it.id).first() }
+    fun withTracks(block: (List<com.whiplash.music.domain.model.PlayableItem>) -> Unit) {
+        scope.launch {
+            val tracks = selectedTracks()
+            if (tracks.isEmpty()) com.whiplash.music.ui.common.ToastController.show("These playlists are empty")
+            else block(tracks)
+            selection.clear()
+        }
+    }
+    run {
+        val chosen = selection.selected()
+        val allPinned = chosen.isNotEmpty() && chosen.all { it.pinned }
+        com.whiplash.music.ui.common.SelectionChrome(
+            selection = selection,
+            noun = "playlist",
+            primary = listOf(
+                com.whiplash.music.ui.common.action("Play", Icons.Filled.PlayArrow) { withTracks { app.playbackController.playQueue(it, 0) } },
+                com.whiplash.music.ui.common.action("Add to queue", Icons.AutoMirrored.Filled.QueueMusic) { withTracks { app.playbackController.addAllToQueue(it) } },
+                com.whiplash.music.ui.common.action("Download", Icons.Filled.Download) {
+                    withTracks { tracks ->
+                        val todo = tracks.filterIsInstance<com.whiplash.music.domain.model.PlayableItem.YoutubeTrack>().distinctBy { it.id }
+                        if (todo.isEmpty()) com.whiplash.music.ui.common.ToastController.show("Nothing to download")
+                        else app.downloadManager.downloadAll(todo)
+                    }
+                },
+            ),
+            more = listOf(
+                com.whiplash.music.ui.common.action("Shuffle play", Icons.Filled.Shuffle) { withTracks { app.playbackController.playQueue(it.shuffled(), 0) } },
+                com.whiplash.music.ui.common.action("Add all to Favorites", Icons.Filled.FavoriteBorder) {
+                    withTracks { tracks ->
+                        scope.launch {
+                            val n = app.libraryRepository.addAllToFavorites(tracks)
+                            com.whiplash.music.ui.common.ToastController.show(if (n == 0) "Already in favorites" else if (n == 1) "1 song added to favorites" else "$n songs added to favorites")
+                        }
+                    }
+                },
+                com.whiplash.music.ui.common.action(if (allPinned) "Unpin from top" else "Pin to top", if (allPinned) Icons.Outlined.PushPin else Icons.Filled.PushPin) {
+                    viewModel.setPinnedAll(chosen, !allPinned); selection.clear()
+                },
+                com.whiplash.music.ui.common.action("Delete playlists", Icons.Filled.Delete, destructive = true) { bulkDeleteConfirm = chosen },
+            ),
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         ModernPlaylistsActions(
             isImporting = isImporting,
@@ -149,10 +203,11 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                 gridItems(playlists, key = { it.id }) { playlist ->
                     PlaylistGridTile(
                         playlist = playlist,
-                        onClick = { onOpenPlaylist(playlist) },
+                        selected = selection.isSelected(playlist),
+                        onClick = { if (selection.selecting) selection.toggle(playlist) else onOpenPlaylist(playlist) },
                         onLongClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            playlistPendingDelete = playlist
+                            if (selection.selecting) selection.toggle(playlist) else playlistPendingDelete = playlist
                         },
                         modifier = Modifier.animateItem(),
                     )
@@ -168,12 +223,13 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                     GlassListItem(
                         title = playlist.name,
                         subtitle = playlistSubtitle(playlist, tracks?.size),
-                        onClick = { onOpenPlaylist(playlist) },
+                        onClick = { if (selection.selecting) selection.toggle(playlist) else onOpenPlaylist(playlist) },
                         onLongClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            playlistPendingDelete = playlist
+                            if (selection.selecting) selection.toggle(playlist) else playlistPendingDelete = playlist
                         },
                         leading = {
+                          Box(contentAlignment = Alignment.Center) {
                             PlaylistArtwork(
                                 playlist = playlist,
                                 tracks = tracks,
@@ -187,17 +243,23 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                                     )
                                 },
                             )
+                            com.whiplash.music.ui.common.SelectionCheck(visible = selection.isSelected(playlist))
+                          }
                         },
                         trailing = {
-                            PlainIconButton(
-                                contentDescription = "More options for ${playlist.name}",
-                                onClick = { playlistPendingDelete = playlist },
-                                size = 48.dp,
-                            ) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textSecondary)
+                            if (selection.selecting) {
+                                androidx.compose.foundation.layout.Spacer(Modifier.size(48.dp))
+                            } else {
+                                PlainIconButton(
+                                    contentDescription = "More options for ${playlist.name}",
+                                    onClick = { playlistPendingDelete = playlist },
+                                    size = 48.dp,
+                                ) {
+                                    Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textSecondary)
+                                }
                             }
                         },
-                        modifier = Modifier.animateItem(),
+                        modifier = Modifier.animateItem().selectedHighlight(selection.isSelected(playlist)),
                     )
                 }
             }
@@ -261,6 +323,26 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(bottom = GlassTokens.spaceSm),
                 )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = GlassTokens.spaceSm)
+                        .clickable(
+                            onClick = {
+                                selection.start(toDelete)
+                                playlistPendingDelete = null
+                            },
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.CheckCircleOutline, contentDescription = null, tint = WhiplashColors.textPrimary)
+                    Text(
+                        text = "Select",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = WhiplashColors.textPrimary,
+                        modifier = Modifier.padding(start = GlassTokens.spaceMd),
+                    )
+                }
                 if (hasTracks) {
                     Row(
                         modifier = Modifier
@@ -393,6 +475,22 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                 }
             }
         }
+    }
+
+    val bulkDelete = bulkDeleteConfirm
+    if (bulkDelete != null) {
+        val n = bulkDelete.size
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = if (n == 1) "Delete 1 playlist?" else "Delete $n playlists?",
+            message = "The songs stay in your library. This can't be undone.",
+            confirmLabel = "Delete",
+            onConfirm = {
+                viewModel.deletePlaylists(bulkDelete)
+                bulkDeleteConfirm = null
+                selection.clear()
+            },
+            onDismiss = { bulkDeleteConfirm = null },
+        )
     }
 
     val favFor = favoritesTarget
@@ -543,6 +641,7 @@ private fun playlistSubtitle(playlist: Playlist, count: Int?): String? {
 @Composable
 private fun PlaylistGridTile(
     playlist: Playlist,
+    selected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -563,6 +662,20 @@ private fun PlaylistGridTile(
                 cornerRadius = WhiplashRadius.medium,
                 // An empty playlist gets its own colour and initial rather than a grey tile.
                 emptyTile = { m -> NamedPlaylistTile(playlist.name, m) },
+            )
+            if (selected) {
+                // Dim the cover and lay the checkmark in its centre.
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(WhiplashRadius.medium))
+                        .background(WhiplashColors.background.copy(alpha = 0.45f)),
+                )
+            }
+            com.whiplash.music.ui.common.SelectionCheck(
+                visible = selected,
+                modifier = Modifier.align(Alignment.Center),
+                size = 44.dp,
             )
             if (playlist.pinned) {
                 Box(

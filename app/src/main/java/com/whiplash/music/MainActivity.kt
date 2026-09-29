@@ -21,6 +21,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
@@ -30,6 +31,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
+import com.whiplash.music.ui.common.blockTouches
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -423,7 +425,18 @@ private fun WhiplashApp() {
                 }
     // Height of the root box, for placing toasts above the full player's controls.
     var rootHeightPx by remember { mutableStateOf(0f) }
-    val bottomBar: @Composable () -> Unit = {
+    // While a list is selecting songs, its actions take the tab bar's place
+    // and the mini-player steps aside (see SelectionController).
+    val selection = com.whiplash.music.ui.common.SelectionController.session?.takeIf { !isPlayerExpanded }
+    // The last session, kept so the bars can animate out with their content
+    // instead of blanking the moment selection ends (the old stutter).
+    // A plain holder, not state: writing state while composing (the old
+    // version) could occasionally be dropped, leaving songs checked with no
+    // bars. This is read in the same pass that reads [selection].
+    val lastSelectionRef = remember { arrayOfNulls<com.whiplash.music.ui.common.SelectionSession>(1) }
+    if (selection != null) lastSelectionRef[0] = selection
+    val lastSelection = selection ?: lastSelectionRef[0]
+    val tabBar: @Composable () -> Unit = {
                 com.whiplash.music.ui.theme.FadeBottomBar(
                     items = AppTab.entries,
                     selected = selectedTab,
@@ -444,6 +457,45 @@ private fun WhiplashApp() {
                         )
                     },
                 )
+    }
+    // 0 = tab bar, 1 = selection actions. Both stay composed and just
+    // crossfade, so ending selection never rebuilds the tab bar mid-animation.
+    // Read only inside graphicsLayer blocks (draw phase), so the fade never
+    // recomposes the app root frame by frame — that was the exit stutter.
+    val selectionProgressState = androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (selection != null) 1f else 0f,
+        animationSpec = tween(SELECTION_ANIM_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "selectionProgress",
+    )
+    val selectionShown by remember { androidx.compose.runtime.derivedStateOf { selectionProgressState.value > 0f } }
+    // Once the bars have fully faded in, the hidden mini-player leaves the
+    // layout entirely: an invisible one still caught taps meant for the list.
+    val selectionSettled by remember { androidx.compose.runtime.derivedStateOf { selectionProgressState.value >= 1f } }
+    val bottomBar: @Composable () -> Unit = {
+        Box {
+            Box(
+                Modifier
+                    .graphicsLayer {
+                        alpha = 1f - selectionProgressState.value
+                        translationY = size.height * 0.3f * selectionProgressState.value
+                    }
+                    .then(if (selection != null) Modifier.clearAndSetSemantics {} else Modifier),
+            ) { tabBar() }
+            val s = lastSelection
+            if (s != null && selectionShown) {
+                com.whiplash.music.ui.common.SelectionActionBar(
+                    session = s,
+                    moreIcon = Icons.Filled.MoreHoriz,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .blockTouches(selection == null)
+                        .graphicsLayer {
+                            alpha = selectionProgressState.value
+                            translationY = size.height * 0.3f * (1f - selectionProgressState.value)
+                        },
+                )
+            }
+        }
     }
 
     // Themes: Liquid Glass records the page as a backdrop that the floating
@@ -788,14 +840,21 @@ private fun WhiplashApp() {
                     // The page fades out into the bottom bar (drawn under the mini player).
                     if (!glass) {
                         com.whiplash.music.ui.theme.BottomBarFade(modifier = Modifier.align(Alignment.BottomCenter))
-                        MiniPlayerHost(
-                            playerViewModel = playerViewModel,
-                            onExpand = { isPlayerExpanded = true },
-                            modifier = Modifier
+                        Box(
+                            Modifier
                                 .align(Alignment.BottomCenter)
-                                .padding(horizontal = GlassTokens.spaceSm)
-                                .padding(bottom = GlassTokens.spaceXs),
-                        )
+                                .graphicsLayer { alpha = 1f - selectionProgressState.value }
+                                .then(if (selectionShown) Modifier.clearAndSetSemantics {} else Modifier)
+                                .blockTouches(selectionShown),
+                        ) {
+                            if (!selectionSettled) MiniPlayerHost(
+                                playerViewModel = playerViewModel,
+                                onExpand = { isPlayerExpanded = true },
+                                modifier = Modifier
+                                    .padding(horizontal = GlassTokens.spaceSm)
+                                    .padding(bottom = GlassTokens.spaceXs),
+                            )
+                        }
                     }
                 }
                 if (!glass) bottomBar()
@@ -818,15 +877,35 @@ private fun WhiplashApp() {
                             .fillMaxWidth()
                             .then(if (showReplay) Modifier.clearAndSetSemantics {} else Modifier),
                     ) {
-                        MiniPlayerHost(
-                            playerViewModel = playerViewModel,
-                            onExpand = { isPlayerExpanded = true },
-                            modifier = Modifier
-                                .padding(horizontal = 12.dp)
-                                .padding(bottom = 8.dp),
-                        )
+                        Box(
+                            Modifier
+                                .graphicsLayer { alpha = 1f - selectionProgressState.value }
+                                .then(if (selectionShown) Modifier.clearAndSetSemantics {} else Modifier)
+                                .blockTouches(selectionShown),
+                        ) {
+                            if (!selectionSettled) MiniPlayerHost(
+                                playerViewModel = playerViewModel,
+                                onExpand = { isPlayerExpanded = true },
+                                modifier = Modifier
+                                    .padding(horizontal = 12.dp)
+                                    .padding(bottom = 8.dp),
+                            )
+                        }
                         bottomBar()
                     }
+                }
+            }
+
+            // Selection mode: "✕ N selected · All" over the page's own title.
+            lastSelection?.let {
+                if (selectionShown) {
+                    com.whiplash.music.ui.common.SelectionTopBar(
+                        session = it,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .blockTouches(selection == null)
+                            .graphicsLayer { alpha = selectionProgressState.value },
+                    )
                 }
             }
 
@@ -1094,3 +1173,6 @@ private fun DetailOverlay(
 
 private fun detailNavSpec() =
     tween<Float>(DETAIL_NAV_MS, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+
+/** Duration of the selection bars' enter/exit (slow enough to read as a glide, not a blink). */
+private const val SELECTION_ANIM_MS = 320

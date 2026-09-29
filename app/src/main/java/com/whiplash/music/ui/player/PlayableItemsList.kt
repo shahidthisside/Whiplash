@@ -3,6 +3,28 @@ package com.whiplash.music.ui.player
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.SaveAlt
+import androidx.compose.ui.draw.clip
+import com.whiplash.music.ui.theme.glassShadow
+import com.whiplash.music.ui.theme.glassMaterial
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.RemoveCircleOutline
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -81,6 +103,10 @@ fun PlayableItemsList(
     // actions sheet for any item (Search's top result card uses it for
     // its own long-press and ⋮ menu). Used instead of [header] when set.
     headerWithActions: (@Composable (openActions: (PlayableItem) -> Unit) -> Unit)? = null,
+    // Songs drawn inside the header (Search's top result) that take part in
+    // multi-select like the rows below. The header reads [LocalListSelection]
+    // to show their selected state and route taps.
+    headerItems: List<PlayableItem> = emptyList(),
     // Drawn after the last song, scrolling with the list (an artist page's
     // Albums shelf, for example).
     footer: (@Composable () -> Unit)? = null,
@@ -111,6 +137,36 @@ fun PlayableItemsList(
     var copyToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+
+    // ---- Multi-select ----------------------------------------------------
+    // Long-press a song to start selecting; tap then toggles. Keys are
+    // "SOURCE:id", so a song listed twice is selected as one.
+    var selectedKeys by androidx.compose.runtime.saveable.rememberSaveable(
+        stateSaver = androidx.compose.runtime.saveable.listSaver<Set<String>, String>(
+            save = { it.toList() },
+            restore = { it.toSet() },
+        ),
+    ) { mutableStateOf(emptySet()) }
+    val selecting = selectedKeys.isNotEmpty()
+    val selectable = if (headerItems.isEmpty()) items else headerItems + items
+    fun keyOf(item: PlayableItem) = "${item.source}:${item.id}"
+    fun toggle(item: PlayableItem) {
+        val k = keyOf(item)
+        selectedKeys = if (k in selectedKeys) selectedKeys - k else selectedKeys + k
+    }
+    // Songs removed by an action (or a list refresh) drop out of the selection.
+    // Skipped while the list is empty: after rotation or a reload it's briefly
+    // empty before the songs come back, and that must not wipe the selection.
+    LaunchedEffect(selectable) {
+        if (selectedKeys.isNotEmpty() && selectable.isNotEmpty()) {
+            val present = selectable.mapTo(HashSet()) { keyOf(it) }
+            selectedKeys = selectedKeys.filterTo(HashSet()) { it in present }
+        }
+    }
+    androidx.activity.compose.BackHandler(enabled = selecting) { selectedKeys = emptySet() }
+    var bulkPlaylistItems by remember { mutableStateOf<List<PlayableItem>?>(null) }
+    var showBulkCreatePlaylist by remember { mutableStateOf(false) }
+    var pendingBulk by remember { mutableStateOf<PendingBulkAction?>(null) }
 
     // Single shared subscription for the small offline-downloaded
     // checkmark badge (YouTube-Music-style) — hoisted here rather than
@@ -182,8 +238,9 @@ fun PlayableItemsList(
         }
     }
 
+    Box(modifier = modifier) {
     LazyColumn(
-        modifier = modifier,
+        modifier = Modifier.fillMaxSize(),
         state = listState,
         verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceXs),
         contentPadding = contentPadding,
@@ -197,7 +254,15 @@ fun PlayableItemsList(
         // viewport with no way to scroll back up past it, since only the
         // inner list (not the header above it) was ever scrollable.
         if (headerWithActions != null) {
-            item(key = "__header__") { headerWithActions { actionsSheetItem = it } }
+            item(key = "__header__") {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    LocalListSelection provides ListSelectionAccess(
+                        selecting = selecting,
+                        isSelected = { keyOf(it) in selectedKeys },
+                        toggle = { toggle(it) },
+                    ),
+                ) { headerWithActions { actionsSheetItem = it } }
+            }
         } else if (header != null) {
             item(key = "__header__") { header() }
         }
@@ -210,15 +275,45 @@ fun PlayableItemsList(
         // the whole screen down. Prefixing the index makes every key unique
         // (matching QueueContent/LyricsContent's own convention here).
         itemsIndexed(items, key = { index, item -> "$index:${item.source}:${item.id}" }) { index, item ->
+            val isSelected = selecting && keyOf(item) in selectedKeys
             GlassListItem(
                 title = item.title,
                 subtitle = item.artist,
-                onClick = { onPlayQueue(items, index) },
+                modifier = Modifier
+                    .then(if (isSelected) selectedRowModifier() else Modifier)
+                    .semantics { if (selecting) stateDescription = if (isSelected) "Selected" else "Not selected" },
+                onClick = { if (selecting) toggle(item) else onPlayQueue(items, index) },
                 onLongClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    actionsSheetItem = item
+                    // Selecting: long-press toggles like a tap. Otherwise it opens
+                    // the song menu, whose first row is "Select".
+                    if (selecting) toggle(item) else actionsSheetItem = item
                 },
-                leading = { GlassArtworkThumbnail(artworkUri = item.artworkUri) },
+                leading = {
+                    Box(contentAlignment = Alignment.Center) {
+                        GlassArtworkThumbnail(artworkUri = item.artworkUri)
+                        // Selected: the artwork turns into a round checkmark.
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = isSelected,
+                            enter = androidx.compose.animation.scaleIn() + androidx.compose.animation.fadeIn(),
+                            exit = androidx.compose.animation.scaleOut() + androidx.compose.animation.fadeOut(),
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(48.dp)
+                                    .background(WhiplashColors.background.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.small)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(
+                                    Modifier.size(30.dp).background(WhiplashColors.accent, androidx.compose.foundation.shape.CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Icons.Filled.Check, contentDescription = null, tint = WhiplashColors.onAccent, modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        }
+                    }
+                },
                 trailing = {
                     // Offline-download status badge (YouTube-Music-style):
                     // while downloading, an animated determinate progress
@@ -297,12 +392,17 @@ fun PlayableItemsList(
                             else -> androidx.compose.foundation.layout.Spacer(Modifier.size(0.dp))
                         }
                     }
-                    PlainIconButton(
-                        contentDescription = "More options for ${item.title}",
-                        onClick = { actionsSheetItem = item },
-                        size = 48.dp,
-                    ) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textSecondary)
+                    if (selecting) {
+                        // Same width as ⋮ so titles don't jump while selecting.
+                        androidx.compose.foundation.layout.Spacer(Modifier.size(48.dp))
+                    } else {
+                        PlainIconButton(
+                            contentDescription = "More options for ${item.title}",
+                            onClick = { actionsSheetItem = item },
+                            size = 48.dp,
+                        ) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = null, tint = WhiplashColors.textSecondary)
+                        }
                     }
                 },
             )
@@ -326,6 +426,77 @@ fun PlayableItemsList(
         }
     }
 
+    } // Box
+
+    // Publish the selection to the app chrome (top bar + action bar in the tab bar's place).
+    val selectionOwner = remember { Any() }
+    val saveToDevice = com.whiplash.music.ui.common.rememberSaveToDevice()
+    var showMoreSheet by remember { mutableStateOf(false) }
+    val favoriteKeys by app.libraryRepository.observeFavoriteKeys().collectAsState(initial = emptySet())
+    val selected = selectable.filter { keyOf(it) in selectedKeys }.distinctBy { keyOf(it) }
+    val done = { selectedKeys = emptySet(); showMoreSheet = false }
+    val allActions = buildSelectionActions(
+        selected = selected,
+        downloadedIds = downloadedIds,
+        favoriteKeys = favoriteKeys,
+        playlistContext = playlistContext,
+        inHistory = onRemoveFromHistory != null,
+        onPlay = { app.playbackController.playQueue(selected, 0); done() },
+        onShuffle = { app.playbackController.playQueue(selected.shuffled(), 0); done() },
+        onPlayNext = { app.playbackController.playAllNext(selected); done() },
+        onAddToQueue = { app.playbackController.addAllToQueue(selected); done() },
+        onAddToPlaylist = { showMoreSheet = false; bulkPlaylistItems = selected },
+        onFavorite = { songs -> songActionsViewModel.addAllToFavorites(songs); done() },
+        onUnfavorite = { songs -> showMoreSheet = false; pendingBulk = PendingBulkAction.Unfavorite(songs) },
+        onDownload = { tracks -> app.downloadManager.downloadAll(tracks); done() },
+        onRemoveFromPlaylist = { showMoreSheet = false; pendingBulk = PendingBulkAction.RemoveFromPlaylist(selected) },
+        onRemoveFromHistory = { showMoreSheet = false; pendingBulk = PendingBulkAction.RemoveFromHistory(selected) },
+        onRemoveDownloads = { ids -> showMoreSheet = false; pendingBulk = PendingBulkAction.RemoveDownloads(ids) },
+        onSaveToDevice = { ids -> saveToDevice(ids); done() },
+    )
+    // Bottom bar: Play next, Add to playlist, and Like/Unlike (or Add to queue); the rest go in More.
+    val primaryLabels = listOf("Play next", "Add to playlist")
+    val third = allActions.firstOrNull { it.label == "Like" || it.label == "Unlike" }
+        ?: allActions.firstOrNull { it.label == "Add to queue" }
+    // Empty when nothing is selected (buildSelectionActions returns no actions).
+    val primary = allActions.filter { it.label in primaryLabels } + listOfNotNull(third)
+    val more = allActions.filter { it !in primary }
+    if (selecting && selected.isNotEmpty()) {
+        val totalCount = selectable.distinctBy { keyOf(it) }.size
+        androidx.compose.runtime.SideEffect {
+            com.whiplash.music.ui.common.SelectionController.publish(
+                com.whiplash.music.ui.common.SelectionSession(
+                    owner = selectionOwner,
+                    selectedCount = selected.size,
+                    totalCount = totalCount,
+                    primary = primary,
+                    onMore = { showMoreSheet = true },
+                    onClose = { done() },
+                    onSelectAll = { selectedKeys = selectable.mapTo(HashSet()) { keyOf(it) } },
+                    onDeselectAll = { done() },
+                ),
+            )
+        }
+    } else {
+        androidx.compose.runtime.SideEffect { com.whiplash.music.ui.common.SelectionController.clear(selectionOwner) }
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { com.whiplash.music.ui.common.SelectionController.clear(selectionOwner) }
+    }
+    if (showMoreSheet && selecting) {
+        GlassSheet(onDismissRequest = { showMoreSheet = false }) {
+            androidx.compose.foundation.layout.Column {
+                androidx.compose.material3.Text(
+                    text = if (selected.size == 1) "1 song selected" else "${selected.size} songs selected",
+                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                    color = WhiplashColors.textPrimary,
+                    modifier = Modifier.padding(vertical = GlassTokens.spaceSm),
+                )
+                more.forEach { com.whiplash.music.ui.common.SelectionSheetRow(it) }
+            }
+        }
+    }
+
     val sheetItem = actionsSheetItem
     if (sheetItem != null) {
         val isFavorite by app.libraryRepository.observeIsFavorite(sheetItem).collectAsState(initial = false)
@@ -338,6 +509,13 @@ fun PlayableItemsList(
         GlassSheet(onDismissRequest = { actionsSheetItem = null }) {
             SongActionsContent(
                 item = sheetItem,
+                // Only for songs in this list (not e.g. Search's top-result card).
+                onSelect = if (selectable.any { keyOf(it) == keyOf(sheetItem) }) {
+                    {
+                        selectedKeys = setOf(keyOf(sheetItem))
+                        actionsSheetItem = null
+                    }
+                } else null,
                 isFavorite = isFavorite,
                 onPlayNext = {
                     app.playbackController.playNext(sheetItem)
@@ -565,6 +743,184 @@ fun PlayableItemsList(
             onDismiss = { removeDownloadTarget = null },
         )
     }
+
+    // ---- Multi-select sheets and confirmations ----------------------------
+
+    val bulkItems = bulkPlaylistItems
+    if (bulkItems != null) {
+        val playlists by app.libraryRepository.observePlaylists().collectAsState(initial = emptyList())
+        // Adding to the playlist being viewed would be a no-op, so it isn't offered.
+        val targets = playlists.filter { it.id != playlistContext?.playlistId }
+        GlassSheet(onDismissRequest = { bulkPlaylistItems = null }) {
+            com.whiplash.music.ui.player.AddToPlaylistContent(
+                playlists = targets,
+                title = if (bulkItems.size == 1) "Add 1 song to playlist" else "Add ${bulkItems.size} songs to playlist",
+                onSelectPlaylist = { playlist ->
+                    songActionsViewModel.addAllToPlaylist(bulkItems, playlist.id, playlist.name)
+                    bulkPlaylistItems = null
+                    selectedKeys = emptySet()
+                },
+                onCreateNew = { showBulkCreatePlaylist = true },
+            )
+        }
+    }
+    if (showBulkCreatePlaylist) {
+        GlassTextInputDialog(
+            title = "New playlist",
+            confirmLabel = "Create",
+            onConfirm = { name ->
+                bulkPlaylistItems?.let { songActionsViewModel.createPlaylistAndAddAll(name, it) }
+                showBulkCreatePlaylist = false
+                bulkPlaylistItems = null
+                selectedKeys = emptySet()
+            },
+            onDismiss = { showBulkCreatePlaylist = false },
+        )
+    }
+
+    val bulk = pendingBulk
+    if (bulk != null) {
+        val n = bulk.count
+        val what = if (n == 1) "1 song" else "$n songs"
+        val (title, message) = when (bulk) {
+            is PendingBulkAction.Unfavorite -> "Remove $what from favorites?" to "You can like them again any time."
+            is PendingBulkAction.RemoveFromPlaylist ->
+                "Remove $what from ${playlistContext?.playlistName ?: "playlist"}?" to "The songs stay in your library."
+            is PendingBulkAction.RemoveFromHistory -> "Remove $what from history?" to "They'll also leave Speed dial and Replay."
+            is PendingBulkAction.RemoveDownloads ->
+                (if (n == 1) "Remove 1 download?" else "Remove $n downloads?") to "The files are deleted from this device."
+        }
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = title,
+            message = message,
+            confirmLabel = "Remove",
+            onConfirm = {
+                when (bulk) {
+                    is PendingBulkAction.Unfavorite -> songActionsViewModel.removeAllFromFavorites(bulk.items)
+                    is PendingBulkAction.RemoveFromPlaylist -> playlistContext?.let {
+                        songActionsViewModel.removeAllFromPlaylist(it.playlistId, it.playlistName, bulk.items)
+                    }
+                    is PendingBulkAction.RemoveFromHistory -> songActionsViewModel.removeAllFromHistory(bulk.items)
+                    is PendingBulkAction.RemoveDownloads -> songActionsViewModel.removeDownloads(bulk.ids)
+                }
+                pendingBulk = null
+                selectedKeys = emptySet()
+            },
+            onDismiss = { pendingBulk = null },
+        )
+    }
+}
+
+/**
+ * Highlight for a selected row. Liquid Glass gets the same raised 3D glass
+ * puck as the open tab in the tab bar (rim, bevel, gloss, soft lift); the
+ * other themes a soft accent tint.
+ */
+@Composable
+private fun selectedRowModifier(): Modifier {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.medium)
+    if (!WhiplashColors.isGlass) {
+        return Modifier.background(WhiplashColors.accent.copy(alpha = 0.14f), shape)
+    }
+    // Same recipe as FadeBottomBar's tab puck.
+    return Modifier
+        .glassShadow(shape, elevation = 6.dp, strength = if (WhiplashColors.isLight) 0.16f else 0.28f)
+        .clip(shape)
+        .background(
+            if (WhiplashColors.isLight) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.55f)
+            else WhiplashColors.textPrimary.copy(alpha = 0.14f),
+        )
+        .glassMaterial(shape)
+}
+
+/** Lets a list header (Search's top result) join the list's multi-select. */
+class ListSelectionAccess(
+    val selecting: Boolean,
+    val isSelected: (PlayableItem) -> Boolean,
+    val toggle: (PlayableItem) -> Unit,
+)
+
+val LocalListSelection = androidx.compose.runtime.compositionLocalOf<ListSelectionAccess?> { null }
+
+/** A multi-select action that needs confirming first. */
+private sealed interface PendingBulkAction {
+    val count: Int
+    data class Unfavorite(val items: List<PlayableItem>) : PendingBulkAction { override val count get() = items.size }
+    data class RemoveFromPlaylist(val items: List<PlayableItem>) : PendingBulkAction { override val count get() = items.size }
+    data class RemoveFromHistory(val items: List<PlayableItem>) : PendingBulkAction { override val count get() = items.size }
+    data class RemoveDownloads(val ids: List<String>) : PendingBulkAction { override val count get() = ids.size }
+}
+
+
+
+/**
+ * The selection bar's actions for [selected], matching what the single-song
+ * menu allows: play/queue/playlist everywhere, like/unlike only for songs
+ * that can be liked, Download for streamable songs not yet saved, and the
+ * removal that fits the screen (playlist, history, downloads).
+ */
+internal fun buildSelectionActions(
+    selected: List<PlayableItem>,
+    downloadedIds: Set<String>,
+    favoriteKeys: Set<String>,
+    playlistContext: PlaylistContext?,
+    inHistory: Boolean,
+    onPlay: () -> Unit,
+    onShuffle: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+    onFavorite: (List<PlayableItem>) -> Unit,
+    onUnfavorite: (List<PlayableItem>) -> Unit,
+    onDownload: (List<PlayableItem.YoutubeTrack>) -> Unit,
+    onRemoveFromPlaylist: () -> Unit,
+    onRemoveFromHistory: () -> Unit,
+    onRemoveDownloads: (List<String>) -> Unit,
+    onSaveToDevice: (List<String>) -> Unit,
+): List<com.whiplash.music.ui.common.SelectionAction> {
+    if (selected.isEmpty()) return emptyList()
+    val actions = mutableListOf(
+        com.whiplash.music.ui.common.SelectionAction("Play", Icons.Filled.PlayArrow, onClick = onPlay),
+        com.whiplash.music.ui.common.SelectionAction("Shuffle play", Icons.Filled.Shuffle, onClick = onShuffle),
+        com.whiplash.music.ui.common.SelectionAction("Play next", Icons.AutoMirrored.Filled.PlaylistPlay, onClick = onPlayNext),
+        com.whiplash.music.ui.common.SelectionAction("Add to queue", Icons.AutoMirrored.Filled.QueueMusic, onClick = onAddToQueue),
+        com.whiplash.music.ui.common.SelectionAction("Add to playlist", Icons.AutoMirrored.Filled.PlaylistAdd, onClick = onAddToPlaylist),
+    )
+    // Downloaded copies can't be liked (same rule as the song menu).
+    val likeable = selected.filter { it !is PlayableItem.DownloadedTrack }
+    if (likeable.isNotEmpty()) {
+        val allLiked = likeable.all { com.whiplash.music.data.repository.favoriteKey(it.id, it.source) in favoriteKeys }
+        actions += if (allLiked) {
+            com.whiplash.music.ui.common.SelectionAction("Unlike", Icons.Filled.Favorite, onClick = { onUnfavorite(likeable) })
+        } else {
+            com.whiplash.music.ui.common.SelectionAction("Like", Icons.Filled.FavoriteBorder, onClick = { onFavorite(likeable) })
+        }
+    }
+    val toDownload = selected.filterIsInstance<PlayableItem.YoutubeTrack>().filter { it.id !in downloadedIds }
+    if (toDownload.isNotEmpty()) {
+        actions += com.whiplash.music.ui.common.SelectionAction("Download", Icons.Filled.Download, onClick = { onDownload(toDownload) })
+    }
+    if (playlistContext != null) {
+        actions += com.whiplash.music.ui.common.SelectionAction(
+            "Remove", Icons.Filled.RemoveCircleOutline, destructive = true, onClick = onRemoveFromPlaylist,
+        )
+    }
+    if (inHistory) {
+        actions += com.whiplash.music.ui.common.SelectionAction(
+            "Remove", Icons.Filled.RemoveCircleOutline, destructive = true, onClick = onRemoveFromHistory,
+        )
+    }
+    val downloaded = selected.filter { it is PlayableItem.DownloadedTrack || it.id in downloadedIds }.map { it.id }.distinct()
+    if (downloaded.isNotEmpty()) {
+        // Copies the finished downloads out to Download/Whiplash (same as the song menu).
+        actions += com.whiplash.music.ui.common.SelectionAction(
+            "Save to device", Icons.Filled.SaveAlt, onClick = { onSaveToDevice(downloaded) },
+        )
+        actions += com.whiplash.music.ui.common.SelectionAction(
+            "Delete download", Icons.Filled.Delete, destructive = true, onClick = { onRemoveDownloads(downloaded) },
+        )
+    }
+    return actions
 }
 
 /**

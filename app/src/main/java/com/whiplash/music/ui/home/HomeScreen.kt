@@ -5,6 +5,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.filled.RemoveCircleOutline
+import com.whiplash.music.ui.common.selectedHighlight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -127,6 +129,54 @@ fun HomeScreen(
     val haptic = LocalHapticFeedback.current
     var actionsSheetItem by remember { mutableStateOf<PlayableItem?>(null) }
     var actionsSheetOrigin by remember { mutableStateOf(SheetOrigin.SPEED_DIAL) }
+
+    // ---- Quick Picks multi-select (song menu → Select) --------------------
+    val qpSelection = com.whiplash.music.ui.common.rememberItemSelection<PlayableItem>(quickPicks) { "${it.source}:${it.id}" }
+    var qpBulkPlaylist by remember { mutableStateOf<List<PlayableItem>?>(null) }
+    var qpBulkCreate by remember { mutableStateOf(false) }
+    var qpUnlikeConfirm by remember { mutableStateOf<List<PlayableItem>?>(null) }
+    val qpFavoriteKeys by app.libraryRepository.observeFavoriteKeys().collectAsState(initial = emptySet())
+    run {
+        val chosen = qpSelection.selected()
+        val all = com.whiplash.music.ui.player.buildSelectionActions(
+            selected = chosen,
+            downloadedIds = downloadedIds,
+            favoriteKeys = qpFavoriteKeys,
+            playlistContext = null,
+            inHistory = false,
+            onPlay = { app.playbackController.playQueue(chosen, 0); qpSelection.clear() },
+            onShuffle = { app.playbackController.playQueue(chosen.shuffled(), 0); qpSelection.clear() },
+            onPlayNext = { app.playbackController.playAllNext(chosen); qpSelection.clear() },
+            onAddToQueue = { app.playbackController.addAllToQueue(chosen); qpSelection.clear() },
+            onAddToPlaylist = { qpBulkPlaylist = chosen },
+            onFavorite = { songActionsViewModel.addAllToFavorites(it); qpSelection.clear() },
+            onUnfavorite = { qpUnlikeConfirm = it },
+            onDownload = { app.downloadManager.downloadAll(it); qpSelection.clear() },
+            onRemoveFromPlaylist = {},
+            onRemoveFromHistory = {},
+            onRemoveDownloads = {},
+            onSaveToDevice = {},
+        ).filter { it.label != "Save to device" && it.label != "Delete download" } +
+            // Quick Picks' own removal (the song menu offers it too); no confirm, it's only a suggestion.
+            listOfNotNull(
+                chosen.filterIsInstance<PlayableItem.YoutubeTrack>().takeIf { it.isNotEmpty() }?.let { yt ->
+                    com.whiplash.music.ui.common.action("Remove from Quick Picks", Icons.Filled.RemoveCircleOutline, destructive = true) {
+                        yt.forEach { viewModel.removeFromQuickPicks(it) }
+                        com.whiplash.music.ui.common.ToastController.show(if (yt.size == 1) "Removed from Quick Picks" else "${yt.size} songs removed from Quick Picks")
+                        qpSelection.clear()
+                    }
+                },
+            )
+        val third = all.firstOrNull { it.label == "Like" || it.label == "Unlike" } ?: all.firstOrNull { it.label == "Add to queue" }
+        val primary = all.filter { it.label == "Play next" || it.label == "Add to playlist" } + listOfNotNull(third)
+        com.whiplash.music.ui.common.SelectionChrome(
+            selection = qpSelection,
+            noun = "song",
+            primary = primary,
+            more = all.filter { it !in primary },
+        )
+    }
+    val qpClick: (PlayableItem) -> Unit = { track -> if (qpSelection.selecting) qpSelection.toggle(track) else onPlayTrack(track) }
     var addToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showClearSpeedDialConfirm by remember { mutableStateOf(false) }
@@ -299,36 +349,44 @@ fun HomeScreen(
                 }
                 val onLongPressQuickPick: (PlayableItem) -> Unit = { track ->
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    actionsSheetOrigin = SheetOrigin.QUICK_PICKS
-                    actionsSheetItem = track
+                    if (qpSelection.selecting) {
+                        qpSelection.toggle(track)
+                    } else {
+                        actionsSheetOrigin = SheetOrigin.QUICK_PICKS
+                        actionsSheetItem = track
+                    }
                 }
+                val qpSelected: (PlayableItem) -> Boolean = { qpSelection.isSelected(it) }
                 if (quickPicksGridView && quickPicks.isNotEmpty()) {
                     val perPage = quickPicksGridCount
                     if (perPage == 0) {
                         // "All": one tall grid, rows of three.
                         val rows = quickPicks.chunked(3)
                         items(rows.size, key = { "qpgrid:${rows[it].first().id}" }) { rowIndex ->
-                            QuickPicksTileRow(rows[rowIndex], onPlayTrack, onLongPressQuickPick, Modifier.animateItem())
+                            QuickPicksTileRow(rows[rowIndex], qpClick, onLongPressQuickPick, Modifier.animateItem(), qpSelected)
                         }
                     } else {
                         // Pages of [perPage] songs; swipe sideways for the rest,
                         // with the next page peeking in at the edge.
                         item(key = "qpgrid-pager") {
-                            QuickPicksPager(quickPicks, perPage, onPlayTrack, onLongPressQuickPick)
+                            QuickPicksPager(quickPicks, perPage, qpClick, onLongPressQuickPick, qpSelected)
                         }
                     }
                 }
                 if (!quickPicksGridView) items(quickPicks, key = { "quickpick:${it.id}" }) { track ->
+                    val qpIsSelected = qpSelection.isSelected(track)
                     GlassListItem(
                         title = track.title,
                         subtitle = track.artist,
-                        onClick = { onPlayTrack(track) },
-                        onLongClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            actionsSheetOrigin = SheetOrigin.QUICK_PICKS
-                            actionsSheetItem = track
+                        modifier = Modifier.selectedHighlight(qpIsSelected),
+                        onClick = { qpClick(track) },
+                        onLongClick = { onLongPressQuickPick(track) },
+                        leading = {
+                            Box(contentAlignment = Alignment.Center) {
+                                GlassArtworkThumbnail(artworkUri = track.artworkUri)
+                                com.whiplash.music.ui.common.SelectionCheck(visible = qpIsSelected)
+                            }
                         },
-                        leading = { GlassArtworkThumbnail(artworkUri = track.artworkUri) },
                         trailing = {
                             // Same animated progress-ring/checkmark/failed
                             // badge PlayableItemsList shows elsewhere (Search,
@@ -391,7 +449,8 @@ fun HomeScreen(
                                     else -> androidx.compose.foundation.layout.Spacer(Modifier.size(0.dp))
                                 }
                             }
-                            com.whiplash.music.ui.theme.PlainIconButton(
+                            if (qpSelection.selecting) androidx.compose.foundation.layout.Spacer(Modifier.size(48.dp))
+                            else com.whiplash.music.ui.theme.PlainIconButton(
                                 contentDescription = "More options for ${track.title}",
                                 onClick = {
                                     actionsSheetOrigin = SheetOrigin.QUICK_PICKS
@@ -496,6 +555,9 @@ fun HomeScreen(
             SongActionsContent(
                 item = sheetItem,
                 isFavorite = isFavorite,
+                onSelect = if (actionsSheetOrigin == SheetOrigin.QUICK_PICKS && quickPicks.any { it.id == sheetItem.id }) {
+                    { qpSelection.start(sheetItem); actionsSheetItem = null }
+                } else null,
                 onPlayNext = {
                     app.playbackController.playNext(sheetItem)
                     actionsSheetItem = null
@@ -554,6 +616,50 @@ fun HomeScreen(
                 } else null,
             )
         }
+    }
+
+    val qpBulk = qpBulkPlaylist
+    if (qpBulk != null) {
+        val playlists by app.libraryRepository.observePlaylists().collectAsState(initial = emptyList())
+        GlassSheet(onDismissRequest = { qpBulkPlaylist = null }) {
+            com.whiplash.music.ui.player.AddToPlaylistContent(
+                playlists = playlists,
+                title = if (qpBulk.size == 1) "Add 1 song to playlist" else "Add ${qpBulk.size} songs to playlist",
+                onSelectPlaylist = { p ->
+                    songActionsViewModel.addAllToPlaylist(qpBulk, p.id, p.name)
+                    qpBulkPlaylist = null
+                    qpSelection.clear()
+                },
+                onCreateNew = { qpBulkCreate = true },
+            )
+        }
+    }
+    if (qpBulkCreate) {
+        com.whiplash.music.ui.theme.GlassTextInputDialog(
+            title = "New playlist",
+            confirmLabel = "Create",
+            onConfirm = { name ->
+                qpBulkPlaylist?.let { songActionsViewModel.createPlaylistAndAddAll(name, it) }
+                qpBulkCreate = false
+                qpBulkPlaylist = null
+                qpSelection.clear()
+            },
+            onDismiss = { qpBulkCreate = false },
+        )
+    }
+    val qpUnlike = qpUnlikeConfirm
+    if (qpUnlike != null) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = if (qpUnlike.size == 1) "Remove 1 song from favorites?" else "Remove ${qpUnlike.size} songs from favorites?",
+            message = "You can like them again any time.",
+            confirmLabel = "Remove",
+            onConfirm = {
+                songActionsViewModel.removeAllFromFavorites(qpUnlike)
+                qpUnlikeConfirm = null
+                qpSelection.clear()
+            },
+            onDismiss = { qpUnlikeConfirm = null },
+        )
     }
 
     val playlistTargetItem = addToPlaylistItem
@@ -940,6 +1046,7 @@ private fun QuickPickTile(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
+    selected: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -961,6 +1068,8 @@ private fun QuickPickTile(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+            if (selected) Box(Modifier.matchParentSize().background(WhiplashColors.background.copy(alpha = 0.45f)))
+            com.whiplash.music.ui.common.SelectionCheck(visible = selected, modifier = Modifier.align(Alignment.Center), size = 36.dp)
         }
         Text(
             text = track.title,
@@ -987,6 +1096,7 @@ private fun QuickPicksTileRow(
     onPlayTrack: (PlayableItem) -> Unit,
     onLongPress: (PlayableItem) -> Unit,
     modifier: Modifier = Modifier,
+    isSelected: (PlayableItem) -> Boolean = { false },
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -998,6 +1108,7 @@ private fun QuickPicksTileRow(
                 onClick = { onPlayTrack(track) },
                 onLongClick = { onLongPress(track) },
                 modifier = Modifier.weight(1f),
+                selected = isSelected(track),
             )
         }
         repeat(3 - tracks.size) { Box(Modifier.weight(1f)) }
@@ -1015,6 +1126,7 @@ private fun QuickPicksPager(
     perPage: Int,
     onPlayTrack: (PlayableItem) -> Unit,
     onLongPress: (PlayableItem) -> Unit,
+    isSelected: (PlayableItem) -> Boolean = { false },
 ) {
     val pages = tracks.chunked(perPage)
     val rowsPerPage = (perPage + 2) / 3
@@ -1033,7 +1145,7 @@ private fun QuickPicksPager(
                 for (r in 0 until rowsPerPage) {
                     val row = rows.getOrNull(r)
                     if (row != null) {
-                        QuickPicksTileRow(row, onPlayTrack, onLongPress)
+                        QuickPicksTileRow(row, onPlayTrack, onLongPress, isSelected = isSelected)
                     } else {
                         // Invisible stand-in with a real tile's height.
                         QuickPicksTileRow(emptyList(), onPlayTrack, onLongPress, Modifier.graphicsLayer { alpha = 0f })

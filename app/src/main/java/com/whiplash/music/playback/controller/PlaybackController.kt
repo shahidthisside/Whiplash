@@ -469,6 +469,27 @@ class PlaybackController(
         ToastController.show("Playing next")
     }
 
+    /** Appends every item in [items], in order, with one toast for the batch. */
+    fun addAllToQueue(items: List<PlayableItem>) {
+        if (items.isEmpty()) return
+        queue.addAll(items)
+        _state.update { it.copy(queue = queue.toList()) }
+        ToastController.show(if (items.size == 1) "Added to queue" else "${items.size} songs added to queue")
+    }
+
+    /** Inserts [items] right after the current track, keeping their order, with one toast. */
+    fun playAllNext(items: List<PlayableItem>) {
+        if (items.isEmpty()) return
+        val start = (currentIndex + 1).coerceIn(0, queue.size)
+        items.forEachIndexed { i, item ->
+            queue.add(start + i, item)
+            shiftPreparedIndicesAfterInsert(start + i)
+            if (_state.value.shuffleEnabled) shuffleForward.addLast(item)
+        }
+        _state.update { it.copy(queue = queue.toList()) }
+        ToastController.show(if (items.size == 1) "Playing next" else "${items.size} songs playing next")
+    }
+
     /** Removes the item at [index]. If it's the currently playing item, advances to the next one. */
     fun removeFromQueue(index: Int) {
         if (index !in queue.indices) return
