@@ -3,6 +3,7 @@ package com.whiplash.music.ui.search
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.whiplash.music.data.repository.YoutubeSearchRepository
+import com.whiplash.music.recommend.dedupeSearchResults
 import com.whiplash.music.domain.model.PlayableItem
 import com.whiplash.music.domain.model.YoutubeArtistResult
 import com.whiplash.music.domain.model.YoutubePlaylistResult
@@ -328,7 +329,8 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
 
             val cached = repository.cachedResults(query)
             if (cached != null) {
-                _state.update { it.copy(results = cached, hasSearched = true, errorMessage = null) }
+                val shown = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { cached.dedupeSearchResults(query) }
+                _state.update { it.copy(results = shown, hasSearched = true, errorMessage = null) }
             }
 
             var songsError: String? = null
@@ -347,7 +349,8 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
                 // blank flash — a real, reported bug (skeleton -> black
                 // flicker -> results), distinct from the first "tap
                 // suggestion -> black screen" bug already fixed above.
-                _state.update { it.copy(results = fresh, hasSearched = true, isSearching = false) }
+                val shown = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { fresh.dedupeSearchResults(query) }
+                _state.update { it.copy(results = shown, hasSearched = true, isSearching = false) }
             } catch (failure: ProviderFailure) {
                 songsError = failure.toUserFacingMessage("Search failed")
                 _state.update { it.copy(hasSearched = true, isSearching = false, errorMessage = songsError) }
@@ -432,7 +435,7 @@ class SearchViewModel(private val repository: YoutubeSearchRepository) : ViewMod
                             // (IllegalArgumentException: duplicate key),
                             // not just a visual glitch — this must never
                             // reach the UI layer.
-                            results = if (page != null) dedupeAppend(it.results, page.items) { r -> r.id } else it.results,
+                            results = if (page != null) com.whiplash.music.recommend.appendWithoutNearDuplicates(it.results, page.items, it.query) else it.results,
                             // A failed/null page (transient network error)
                             // leaves hasMoreSongs unchanged so the next
                             // scroll near the bottom retries — only a
