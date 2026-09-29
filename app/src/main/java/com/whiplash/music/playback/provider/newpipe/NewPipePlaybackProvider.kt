@@ -175,6 +175,31 @@ class NewPipePlaybackProvider(
         }
     }
 
+    /**
+     * One page of YouTube Music's own song radio for [seedId] — the queue
+     * "Start radio" builds in YT Music (`list=RDAMVM<seed>`): music only,
+     * built around that one song, endless, and deduplicated by YouTube
+     * across pages. [cursor] is the previous page's `next` (null for the
+     * first page).
+     */
+    suspend fun getRadioPage(seedId: String, cursor: Any?): com.whiplash.music.recommend.RadioPage = withContext(Dispatchers.IO) {
+        runCatchingProviderFailure {
+            val youtube = NewPipe.getService(YOUTUBE_SERVICE_NAME)
+            val url = "https://www.youtube.com/watch?v=$seedId&list=RDAMVM$seedId"
+            val (items, next) = if (cursor is org.schabi.newpipe.extractor.Page) {
+                val more = org.schabi.newpipe.extractor.playlist.PlaylistInfo.getMoreItems(youtube, url, cursor)
+                more.items to more.nextPage
+            } else {
+                val info = org.schabi.newpipe.extractor.playlist.PlaylistInfo.getInfo(youtube, url)
+                info.relatedItems to info.nextPage
+            }
+            com.whiplash.music.recommend.RadioPage(
+                items.filterIsInstance<org.schabi.newpipe.extractor.stream.StreamInfoItem>().mapNotNull { it.toPlayableItemOrNull() },
+                next?.takeIf { org.schabi.newpipe.extractor.Page.isValid(it) },
+            )
+        }
+    }
+
     private fun org.schabi.newpipe.extractor.stream.StreamInfoItem.toPlayableItemOrNull(): PlayableItem.YoutubeTrack? {
         val videoId = extractVideoId(url) ?: return null
         return PlayableItem.YoutubeTrack(

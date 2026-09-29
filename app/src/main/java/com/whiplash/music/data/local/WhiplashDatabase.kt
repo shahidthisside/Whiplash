@@ -126,6 +126,18 @@ internal val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
     }
 }
 
+/** 7: play_events, the skip/completion log the radio learns from. */
+internal val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `play_events` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `trackId` TEXT NOT NULL, `source` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `artistKey` TEXT NOT NULL, `language` TEXT, `origin` TEXT NOT NULL, `radioSeedId` TEXT, `startedAtEpochMs` INTEGER NOT NULL, `playedMs` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL, `endReason` TEXT NOT NULL, `skipped` INTEGER NOT NULL, `completed` INTEGER NOT NULL)"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_play_events_trackId` ON `play_events` (`trackId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_play_events_artistKey` ON `play_events` (`artistKey`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_play_events_startedAtEpochMs` ON `play_events` (`startedAtEpochMs`)")
+    }
+}
+
 /**
  * Whiplash's local-first Room database (section 35, section 63).
  *
@@ -151,8 +163,9 @@ internal val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
         PinnedEntity::class,
         DownloadEntity::class,
         ReplayTallyEntity::class,
+        com.whiplash.music.data.local.entity.PlayEventEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -173,6 +186,7 @@ abstract class WhiplashDatabase : RoomDatabase() {
     abstract fun pinnedDao(): PinnedDao
     abstract fun downloadDao(): DownloadDao
     abstract fun replayTallyDao(): ReplayTallyDao
+    abstract fun playEventDao(): com.whiplash.music.data.local.dao.PlayEventDao
 
     companion object {
         private const val DATABASE_NAME = "whiplash.db"
@@ -202,7 +216,7 @@ abstract class WhiplashDatabase : RoomDatabase() {
                     // going forward is to keep adding a new Migration_
                     // object here every time the schema changes again,
                     // never relying on this fallback for a real release.
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }
             }

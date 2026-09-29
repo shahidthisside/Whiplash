@@ -92,6 +92,7 @@ class WhiplashApplication : Application() {
             pinnedDao = database.pinnedDao(),
             downloadDao = database.downloadDao(),
             replayTallyDao = database.replayTallyDao(),
+            playEventDao = database.playEventDao(),
         )
     }
 
@@ -154,7 +155,7 @@ class WhiplashApplication : Application() {
     }
 
     val playbackController: PlaybackController by lazy {
-        PlaybackController(this, playbackManager, settingsRepository, libraryRepository, newPipePlaybackProvider, audioCacheManager)
+        PlaybackController(this, playbackManager, settingsRepository, libraryRepository, newPipePlaybackProvider, audioCacheManager, database.playEventDao())
     }
 
     val downloadManager: com.whiplash.music.data.download.DownloadManager by lazy {
@@ -189,6 +190,10 @@ class WhiplashApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         NewPipe.init(OkHttpNewPipeDownloader(okHttpClient))
+        // YouTube asks for cookie consent before serving radio (Mix)
+        // playlists in some regions; accepting it is what NewPipe's own
+        // "accept YouTube cookies" setting does. Needed for song radio.
+        org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper.setConsentAccepted(true)
         playbackController.connect()
         // Does nothing until the user turns on Account & sync and signs in.
         cloudSyncManager.start()

@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The only class that talks to a Media3 [MediaController] directly
@@ -61,7 +62,29 @@ class PlaybackController(
     private val libraryRepository: LibraryRepository,
     private val newPipePlaybackProvider: NewPipePlaybackProvider,
     private val audioCacheManager: com.whiplash.music.playback.cache.AudioCacheManager,
+    private val playEventDao: com.whiplash.music.data.local.dao.PlayEventDao? = null,
 ) {
+
+    // ── Recommendations ─────────────────────────────────────────────────
+    /** Ids of queue entries autoplay added (vs. ones the listener chose). */
+    private val autoplayIds = HashSet<String>()
+    private var extendingQueue = false
+
+    /** Seed-anchored radio; see [com.whiplash.music.recommend.RadioEngine]. */
+    private val radioEngine = com.whiplash.music.recommend.RadioEngine(
+        fetchRadio = { id, cursor -> newPipePlaybackProvider.getRadioPage(id, cursor) },
+        fetchRelated = { id -> newPipePlaybackProvider.getRelatedTracks(id) },
+        isMusic = { id -> newPipePlaybackProvider.getPlayerInfo(id).category?.equals("Music", ignoreCase = true) ?: true },
+        feedback = com.whiplash.music.recommend.PlayEventFeedback(playEventDao),
+    )
+
+    // The play event being recorded (how long this track was really
+    // listened to and how it ended) — the radio's skip/complete signal.
+    private var eventItem: PlayableItem? = null
+    private var eventStartedAt = 0L
+    private var eventListenedMs = 0L
+    private var eventDurationMs = 0L
+    private var pendingEndReason: String? = null
 
     private var controller: MediaController? = null
     private var connectionFuture: ListenableFuture<MediaController>? = null
@@ -396,6 +419,9 @@ class PlaybackController(
 
     fun connect(onReady: () -> Unit = {}) {
         if (controller != null || connectionFuture != null) return
+        scope.launch(Dispatchers.IO) {
+            runCatching { playEventDao?.deleteOlderThan(System.currentTimeMillis() - PLAY_EVENT_RETENTION_MS) }
+        }
         val sessionToken = SessionToken(context, ComponentName(context, WhiplashPlaybackService::class.java))
         val future = MediaController.Builder(context, sessionToken).buildAsync()
         connectionFuture = future
@@ -416,6 +442,8 @@ class PlaybackController(
     fun stopForQuit() {
         trackListening(_state.value.currentItem)
         flushListening()
+        pendingEndReason = END_STOPPED
+        finishPlayEvent()
         controller?.stop()
         controller?.clearMediaItems()
         release()
@@ -443,6 +471,7 @@ class PlaybackController(
             if (leaving != null && leaving !== queue[currentIndex]) pushShuffleHistory(leaving)
         } else {
             resetShuffleState()
+            autoplayIds.clear()
         }
         _state.update { it.copy(queue = queue.toList(), currentIndex = currentIndex) }
         playIndex(currentIndex)
@@ -453,6 +482,7 @@ class PlaybackController(
 
     /** Appends [item] to the end of the queue without interrupting current playback (section 21: "add to queue"). */
     fun addToQueue(item: PlayableItem) {
+        autoplayIds.remove(item.id)
         queue.add(item)
         _state.update { it.copy(queue = queue.toList()) }
         ToastController.show("Added to queue")
@@ -460,6 +490,7 @@ class PlaybackController(
 
     /** Inserts [item] immediately after the currently playing track (section 21: "play next"). */
     fun playNext(item: PlayableItem) {
+        autoplayIds.remove(item.id)
         val insertAt = (currentIndex + 1).coerceIn(0, queue.size)
         queue.add(insertAt, item)
         shiftPreparedIndicesAfterInsert(insertAt)
@@ -472,6 +503,7 @@ class PlaybackController(
     /** Appends every item in [items], in order, with one toast for the batch. */
     fun addAllToQueue(items: List<PlayableItem>) {
         if (items.isEmpty()) return
+        items.forEach { autoplayIds.remove(it.id) }
         queue.addAll(items)
         _state.update { it.copy(queue = queue.toList()) }
         ToastController.show(if (items.size == 1) "Added to queue" else "${items.size} songs added to queue")
@@ -480,6 +512,7 @@ class PlaybackController(
     /** Inserts [items] right after the current track, keeping their order, with one toast. */
     fun playAllNext(items: List<PlayableItem>) {
         if (items.isEmpty()) return
+        items.forEach { autoplayIds.remove(it.id) }
         val start = (currentIndex + 1).coerceIn(0, queue.size)
         items.forEachIndexed { i, item ->
             queue.add(start + i, item)
@@ -594,6 +627,8 @@ class PlaybackController(
     private fun playIndex(index: Int) {
         if (index !in queue.indices) return
         val item = queue[index]
+        finishPlayEvent()
+        beginPlayEvent(item)
         currentIndex = index
         shufflePlayed.add(item)
         if (shuffleForward.lastOrNull() === item) shuffleForward.removeLast()
@@ -974,90 +1009,86 @@ class PlaybackController(
             if (!settingsRepository.autoplayEnabled.first()) return@launch
             val indexOfItem = queue.indexOfFirst { it.id == justStarted.id && it.source == justStarted.source }
             if (indexOfItem != queue.lastIndex) return@launch // not the last item; nothing to extend yet
-
+            if (extendingQueue) return@launch
+            extendingQueue = true
             try {
-                val related = newPipePlaybackProvider.getRelatedTracks(justStarted.id)
-                val existingIds = queue.map { it.id }.toSet()
-                val existingTracks = queue.filterIsInstance<PlayableItem.YoutubeTrack>()
-                // Dedupe both against the queue AND within this same batch of
-                // candidates — related-tracks results routinely include more
-                // than one near-duplicate upload of the same song in a single
-                // response, not just across separate autoplay extensions.
-                // isSameSong (title containment + duration proximity, not
-                // exact title match) is required here — see its doc comment
-                // for the real cases (both false negatives and false
-                // positives) that led to this specific combination.
-                val accepted = mutableListOf<Pair<String, Long>>().apply {
-                    addAll(existingTracks.map { it.title to it.durationMs })
-                }
-                val candidates = related
-                    .filter { it.id !in existingIds }
-                    .filter { candidate ->
-                        val isDuplicate = accepted.any { (title, durationMs) ->
-                            isSameSong(title, durationMs, candidate.title, candidate.durationMs)
-                        }
-                        if (!isDuplicate) accepted.add(candidate.title to candidate.durationMs)
-                        !isDuplicate
-                    }
+                // Anchor: the last song the listener chose, never one autoplay
+                // added. Re-seeding from autoplay's own picks was a random walk
+                // that drifted (Punjabi → 80s Hindi within an hour).
+                val chosen = queue.take(indexOfItem + 1).filterIsInstance<PlayableItem.YoutubeTrack>().filter { it.id !in autoplayIds }
+                val seed = chosen.lastOrNull() ?: radioEngine.current?.seed ?: justStarted
+                val fresh = radioEngine.current?.seed?.id != seed.id
+                val session = radioEngine.sessionFor(seed)
+                if (fresh) chosen.takeLast(RADIO_PROFILE_CHOSEN).forEach { if (it.id != seed.id) radioEngine.onChosen(session, it) }
 
-                // Filter out non-music content before adding to the queue.
-                // YouTube's own generic "related videos" (what NewPipeExtractor's
-                // StreamInfo.relatedItems returns for a watch?v= URL) is not
-                // the same as a music-scoped recommendation feed — it can
-                // freely mix in anything from the same channel/algorithmic
-                // bucket regardless of type (confirmed via real testing:
-                // playing "Perfect" by Ed Sheeran returned a real 948-second
-                // "Entertainment"-category clip and a 791-second "Education"-
-                // category clip alongside genuine songs). Each candidate's
-                // real YouTube category (Music/Comedy/Entertainment/etc,
-                // from the same full watch-page response used elsewhere in
-                // this provider) is checked in parallel and only Music-
-                // categorized items are kept — a real signal YouTube itself
-                // assigns per video, not a guess based on title/duration
-                // heuristics that would be fragile and easy to get wrong.
-                //
-                // Real, reported problem beyond just Music-category filtering:
-                // "Music" category alone doesn't distinguish a normal single
-                // song from a mashup/medley or a full-album/"audio jukebox"
-                // upload — all three are legitimately "Music" category, but a
-                // listener playing a normal song does not want a full album
-                // recommended next, and vice versa. classifySongLength (based
-                // purely on title keywords, deliberately NOT duration — see
-                // its doc comment for why) buckets both the seed track and
-                // every candidate into SINGLE/MASHUP/LONG_FORM, and only
-                // candidates matching the seed's own bucket are kept — so a
-                // normal song only ever gets normal songs recommended, a
-                // mashup only gets other mashups, and a full album/jukebox
-                // only gets other long-form uploads.
-                val seedLengthClass = classifySongLength(justStarted.title)
-                // Bounds how many getPlayerInfo() category-checks are in
-                // flight at once (see CATEGORY_CHECK_CONCURRENCY's doc
-                // comment for the real speed-vs-contention history here) —
-                // still checks every candidate, just not all simultaneously.
-                val categoryCheckLimiter = Semaphore(CATEGORY_CHECK_CONCURRENCY)
-                val filtered = candidates.take(MAX_AUTOPLAY_ADDITIONS * 2).map { candidate ->
-                    async {
-                        val info = categoryCheckLimiter.withPermit {
-                            runCatching { newPipePlaybackProvider.getPlayerInfo(candidate.id) }.getOrNull()
-                        }
-                        candidate to info?.category
-                    }
-                }.awaitAll()
-                    .filter { (_, category) -> category == null || category.equals("Music", ignoreCase = true) }
-                    .map { (candidate, _) -> candidate }
-                    .filter { classifySongLength(it.title) == seedLengthClass }
-
-                val toAdd = filtered.take(MAX_AUTOPLAY_ADDITIONS)
-                if (toAdd.isEmpty()) return@launch
-
+                val toAdd = radioEngine.nextBatch(session, queue.toList(), MAX_AUTOPLAY_ADDITIONS)
+                android.util.Log.i(
+                    "WhiplashRadio",
+                    "seed=${seed.title} lang=${session.profile.dominant()} +${toAdd.size}: " +
+                        toAdd.joinToString { "${it.title.take(28)}/${it.artist.take(16)}" },
+                )
+                // The queue may have been replaced while the radio was loading.
+                if (toAdd.isEmpty() || radioEngine.current !== session || queue.lastOrNull()?.id != justStarted.id) return@launch
+                autoplayIds += toAdd.map { it.id }
                 queue.addAll(toAdd)
                 trimConsumedQueueHistory()
                 _state.update { it.copy(queue = queue.toList()) }
             } catch (_: Exception) {
                 // Autoplay extension is a nice-to-have; a failure here must
-                // never disrupt the track that's already playing (matches
-                // the same safety principle used for stream-resolution
-                // failures elsewhere in this class).
+                // never disrupt the track that's already playing.
+            } finally {
+                extendingQueue = false
+            }
+        }
+    }
+
+    /** Starts recording how [item] is listened to (see [finishPlayEvent]). */
+    private fun beginPlayEvent(item: PlayableItem) {
+        eventItem = item
+        eventStartedAt = System.currentTimeMillis()
+        eventListenedMs = 0L
+        eventDurationMs = item.durationMs
+        pendingEndReason = null
+    }
+
+    /**
+     * Writes the play event for the track that's ending and tells the radio
+     * whether it was kept (played through) or skipped early. A skip is Next
+     * pressed before 30 s or half the song; a completion is the song ending
+     * or 90 % of it heard.
+     */
+    private fun finishPlayEvent() {
+        val item = eventItem ?: return
+        eventItem = null
+        val reason = pendingEndReason ?: END_REPLACED
+        pendingEndReason = null
+        val played = eventListenedMs
+        val duration = eventDurationMs
+        val fraction = if (duration > 0) played.toDouble() / duration else 0.0
+        val completed = reason == END_COMPLETED || fraction >= 0.9
+        val skipped = !completed && reason == END_SKIPPED && (played < SKIP_MAX_MS || fraction < 0.5)
+        val fromAutoplay = item.id in autoplayIds
+        val session = radioEngine.current
+        val event = com.whiplash.music.data.local.entity.PlayEventEntity(
+            trackId = item.id,
+            source = com.whiplash.music.data.local.entity.MediaSource.valueOf(item.source.name),
+            title = item.title,
+            artist = item.artist,
+            artistKey = com.whiplash.music.recommend.RadioRules.artistKey(item.artist),
+            language = com.whiplash.music.recommend.LanguageDetector.detect(item.title, item.artist)?.code,
+            origin = if (fromAutoplay) "AUTOPLAY" else "USER",
+            radioSeedId = if (fromAutoplay) session?.seed?.id else null,
+            startedAtEpochMs = eventStartedAt,
+            playedMs = played,
+            durationMs = duration,
+            endReason = reason,
+            skipped = skipped,
+            completed = completed,
+        )
+        scope.launch {
+            withContext(Dispatchers.IO) { runCatching { playEventDao?.insert(event) } }
+            if (fromAutoplay && item is PlayableItem.YoutubeTrack && session != null) {
+                if (completed) radioEngine.onKept(session, item) else if (skipped) radioEngine.onSkipped(session, item)
             }
         }
     }
@@ -1406,6 +1437,7 @@ class PlaybackController(
     /** Advances to the next queue item, honoring shuffle/repeat (section 21). */
     fun seekToNext() {
         val next = nextIndex() ?: return
+        if (pendingEndReason == null) pendingEndReason = END_SKIPPED
         if (_state.value.shuffleEnabled && next != currentIndex) {
             queue.getOrNull(currentIndex)?.let { pushShuffleHistory(it) }
         }
@@ -1430,6 +1462,7 @@ class PlaybackController(
             return
         }
         val prev = previousIndex() ?: return
+        if (pendingEndReason == null) pendingEndReason = END_PREVIOUS
         consumeShuffleHistoryFor(prev)
         playIndex(prev)
     }
@@ -1437,6 +1470,7 @@ class PlaybackController(
     /** Goes to the previous queue item unconditionally, never restarting (Media3's seekToPreviousMediaItem). */
     fun seekToPreviousItem() {
         val prev = previousIndex() ?: return
+        if (pendingEndReason == null) pendingEndReason = END_PREVIOUS
         consumeShuffleHistoryFor(prev)
         playIndex(prev)
     }
@@ -1690,6 +1724,7 @@ class PlaybackController(
     private fun handleTrackEnded() {
         if (handledEnded) return
         handledEnded = true
+        pendingEndReason = END_COMPLETED
 
         val c = controller ?: return
         val timer = _state.value.sleepTimer
@@ -1716,7 +1751,12 @@ class PlaybackController(
         if (listenItem != null && listenItem?.id != item.id) flushListening()
         listenItem = item
         // Capped so a stalled main thread can't turn into minutes of "listening".
-        listenPendingMs += (now - last).coerceIn(0L, MAX_LISTEN_TICK_MS)
+        val delta = (now - last).coerceIn(0L, MAX_LISTEN_TICK_MS)
+        listenPendingMs += delta
+        if (eventItem?.id == item.id) {
+            eventListenedMs += delta
+            _state.value.durationMs.takeIf { it > 0 }?.let { eventDurationMs = it }
+        }
         if (listenPendingMs >= LISTEN_FLUSH_MS) flushListening()
     }
 
@@ -1820,6 +1860,17 @@ class PlaybackController(
 
         /** Caps how many related tracks autoplay appends at once, to avoid an unbounded queue (section 22: "do not unexpectedly add enormous queues"). */
         const val MAX_AUTOPLAY_ADDITIONS = 10
+
+        private const val END_COMPLETED = "COMPLETED"
+        private const val END_SKIPPED = "SKIPPED"
+        private const val END_REPLACED = "REPLACED"
+        private const val END_PREVIOUS = "PREVIOUS"
+        private const val END_STOPPED = "STOPPED"
+        /** Next before this much listening is a skip, whatever the song's length. */
+        private const val SKIP_MAX_MS = 30_000L
+        private const val PLAY_EVENT_RETENTION_MS = 365L * 24 * 3_600_000
+        /** How many of the listener's own picks shape a new radio's language profile. */
+        private const val RADIO_PROFILE_CHOSEN = 5
 
         /**
          * Queue length past which [trimConsumedQueueHistory] starts dropping
