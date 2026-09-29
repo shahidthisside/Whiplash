@@ -94,6 +94,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -275,7 +276,12 @@ fun OnboardingFlow(
               if (s == OnboardingStep.WELCOME) {
                   val covers by vm.welcomeCovers.collectAsState()
                   WelcomeStep(covers, animate = !reduceMotion, onStart = ::next)
-              } else Column(
+              } else Box(Modifier.fillMaxSize()) {
+              if (s == OnboardingStep.ACCOUNT) {
+                  val covers by vm.welcomeCovers.collectAsState()
+                  AccountBackdrop(covers, animate = !reduceMotion)
+              }
+              Column(
                   Modifier
                       .fillMaxSize()
                       .windowInsetsPadding(WindowInsets.systemBars)
@@ -328,6 +334,7 @@ fun OnboardingFlow(
                         )
                     }
                 }
+              }
               }
             }
             Box(Modifier.windowInsetsPadding(WindowInsets.statusBars)) { topBar() }
@@ -514,19 +521,10 @@ private fun WelcomeStep(covers: List<String>, animate: Boolean, onStart: () -> U
     }
 }
 
-/** App logo on a softly pulsing accent glow. */
+/** App logo tile; no glow, so it sits quietly on the collage. */
 @Composable
 private fun GlowLogo(animate: Boolean) {
-    val pulse: State<Float> = if (animate) {
-        rememberInfiniteTransition(label = "logoGlow").animateFloat(
-            0.35f, 0.7f, infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "logoGlowA",
-        )
-    } else remember { mutableStateOf(0.5f) }
-    val accent = WhiplashColors.accent
     Box(contentAlignment = Alignment.Center) {
-        Canvas(Modifier.size(120.dp)) {
-            drawCircle(Brush.radialGradient(listOf(accent.copy(alpha = pulse.value * 0.55f), Color.Transparent)), radius = size.minDimension / 2)
-        }
         Box(
             Modifier
                 .size(72.dp)
@@ -878,12 +876,85 @@ private fun LanguageChips(selected: List<String>, onToggle: (String) -> Unit) {
     }
 }
 
+/**
+ * Bright two-stop gradients, one per language (Spotify-browse style), so the
+ * grid reads as vivid and joyful. Text on them is always white.
+ */
+private val LANGUAGE_GRADIENTS = listOf(
+    Color(0xFF4F7CFF) to Color(0xFF8A5CFF), // English: blue → violet
+    Color(0xFFFF8A3D) to Color(0xFFFF3D6E), // Hindi: sunset
+    Color(0xFFFFB627) to Color(0xFFFF5E1A), // Punjabi: mango
+    Color(0xFFE8457F) to Color(0xFF8E2DE2), // Tamil: magenta → purple
+    Color(0xFF12B886) to Color(0xFF0C8599), // Telugu: emerald
+    Color(0xFFFF6FB5) to Color(0xFFFF9A7B), // Bengali: pink → peach
+    Color(0xFFF59F00) to Color(0xFFE8590C), // Marathi: saffron
+    Color(0xFF15AABF) to Color(0xFF3B5BDB), // Urdu: teal → indigo
+    Color(0xFFFF5A36) to Color(0xFFD6336C), // Spanish: red → rose
+    Color(0xFF748FFC) to Color(0xFF5F3DC4), // Korean: periwinkle
+    Color(0xFFFA5252) to Color(0xFFBE2A7A), // Japanese: cherry
+    Color(0xFFD4A017) to Color(0xFF9C5B12), // Arabic: gold
+    Color(0xFF339AF0) to Color(0xFF1C3FD6), // French: azure
+    Color(0xFF20C997) to Color(0xFF94C11F), // Portuguese: green → lime
+)
+
+private fun languageGradient(name: String): Pair<Color, Color> {
+    val i = OnboardingCatalog.languages.indexOfFirst { it.name == name }.coerceAtLeast(0)
+    return LANGUAGE_GRADIENTS[i % LANGUAGE_GRADIENTS.size]
+}
+
+/**
+ * Behind the sign-in step: the album covers, heavily blurred and slowly
+ * drifting, under a dark scrim, so the page glows with real artwork colour
+ * instead of flat black. Low-res images upscaled give the blur on API < 31.
+ */
+@Composable
+private fun AccountBackdrop(covers: List<String>, animate: Boolean) {
+    val drift: State<Float> = if (animate) {
+        rememberInfiniteTransition(label = "backdrop").animateFloat(
+            0f, 1f, infiniteRepeatable(tween(18_000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "backdropDrift",
+        )
+    } else remember { mutableStateOf(0.5f) }
+    val bg = WhiplashColors.background
+    Box(Modifier.fillMaxSize().background(bg)) {
+        if (covers.isNotEmpty()) {
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().blur(48.dp).graphicsLayer { alpha = 0.95f }) {
+                val w = maxWidth
+                // Two big colour blobs from different covers, crossing slowly.
+                listOf(0, 2).forEachIndexed { n, idx ->
+                    val url = covers.getOrNull(idx) ?: covers.first()
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current).data(artworkAtSize(url, 60)).crossfade(800).build(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(w * 1.1f)
+                            .graphicsLayer {
+                                val d = if (n == 0) drift.value else 1f - drift.value
+                                translationX = (if (n == 0) -0.25f else 0.35f) * w.toPx() + (d - 0.5f) * 0.2f * w.toPx()
+                                translationY = (if (n == 0) 0.05f else 0.55f) * size.height + (d - 0.5f) * 0.15f * size.height
+                                rotationZ = (d - 0.5f) * 20f
+                                alpha = 1f
+                            }
+                            .clip(CircleShape),
+                    )
+                }
+            }
+        }
+        // Scrim: keeps text readable and fades the colour out at the bottom.
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(0f to bg.copy(alpha = 0.30f), 0.5f to bg.copy(alpha = 0.18f), 0.78f to bg.copy(alpha = 0.60f), 1f to bg.copy(alpha = 0.94f)),
+            ),
+        )
+    }
+}
+
 @Composable
 private fun LanguageCard(lang: TasteLanguage, on: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(20.dp)
-    val accent = WhiplashColors.accent
-    val bg by animateColorAsState(if (on) accent.copy(alpha = 0.18f) else WhiplashColors.textPrimary.copy(alpha = 0.06f), tween(260), label = "langBg")
-    val border by animateColorAsState(if (on) accent else WhiplashColors.glassBorder, tween(260), label = "langBorder")
+    val (c1, c2) = languageGradient(lang.name)
+    val strength by animateFloatAsState(if (on) 1f else 0f, tween(320, easing = FastOutSlowInEasing), label = "langOn")
+    val border by animateColorAsState(if (on) Color.White else Color.White.copy(alpha = 0.14f), tween(260), label = "langBorder")
     val scale by animateFloatAsState(if (on) 0.97f else 1f, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow), label = "langScale")
     Box(
         Modifier
@@ -891,8 +962,10 @@ private fun LanguageCard(lang: TasteLanguage, on: Boolean, onClick: () -> Unit) 
             .height(84.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(shape)
-            .background(bg)
-            .border(if (on) 2.dp else 1.dp, border, shape)
+            .background(Brush.linearGradient(listOf(c1, c2)))
+            // Unpicked cards sit slightly back; the picked one pops to full colour.
+            .background(Color.Black.copy(alpha = 0.22f * (1f - strength)))
+            .border(if (on) 2.5.dp else 1.dp, border, shape)
             .clickable(role = Role.Checkbox, onClick = onClick)
             .semantics(mergeDescendants = true) { this.selected = on }
             .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -901,14 +974,14 @@ private fun LanguageCard(lang: TasteLanguage, on: Boolean, onClick: () -> Unit) 
         Text(
             lang.native,
             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-            color = (if (on) accent else WhiplashColors.textPrimary).copy(alpha = if (on) 0.30f else 0.10f),
+            color = Color.White.copy(alpha = 0.20f + 0.08f * strength),
             maxLines = 1,
             modifier = Modifier.align(Alignment.BottomEnd),
         )
         Column(Modifier.align(Alignment.CenterStart)) {
-            Text(lang.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), color = WhiplashColors.textPrimary)
+            Text(lang.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = Color.White)
             if (lang.native != lang.name) {
-                Text(lang.native, style = MaterialTheme.typography.bodySmall, color = WhiplashColors.textSecondary, maxLines = 1)
+                Text(lang.native, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.82f), maxLines = 1)
             }
         }
         // Reserved corner: an empty ring that fills when picked, so nothing moves.
@@ -917,12 +990,12 @@ private fun LanguageCard(lang: TasteLanguage, on: Boolean, onClick: () -> Unit) 
                 .align(Alignment.TopEnd)
                 .size(22.dp)
                 .clip(CircleShape)
-                .border(1.5.dp, if (on) Color.Transparent else WhiplashColors.textTertiary, CircleShape),
+                .border(1.5.dp, if (on) Color.Transparent else Color.White.copy(alpha = 0.75f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             androidx.compose.animation.AnimatedVisibility(on, enter = scaleIn(spring(dampingRatio = 0.5f)) + fadeIn(), exit = scaleOut() + fadeOut()) {
-                Box(Modifier.size(22.dp).clip(CircleShape).background(accent), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.Check, contentDescription = null, tint = WhiplashColors.onAccent, modifier = Modifier.size(15.dp))
+                Box(Modifier.size(22.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Check, contentDescription = null, tint = c2, modifier = Modifier.size(15.dp))
                 }
             }
         }
