@@ -322,8 +322,10 @@ internal fun uploadQuality(item: PlayableItem): Int {
         SongVersion.COVER -> 40
         else -> 20 // slowed, 8D, sped up, lofi, karaoke, instrumental
     }
-    if (item.artist.endsWith(" - Topic", ignoreCase = true) || "official audio" in t) q += 12
-    else if (RX_SK16.containsMatchIn(t)) q += 8
+    val kind = UploadKinds.of(item.id)
+    if (kind == UploadKind.AUDIO || item.artist.endsWith(" - Topic", ignoreCase = true) || "official audio" in t) q += 12
+    else if (kind == UploadKind.OFFICIAL_VIDEO || RX_SK16.containsMatchIn(t)) q += 8
+    else if (kind == UploadKind.USER_VIDEO) q -= 4
     else if (RX_SK17.containsMatchIn(t)) q += 4
     if (RX_SK18.containsMatchIn(t)) q -= 30
     return q

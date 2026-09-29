@@ -130,6 +130,7 @@ class RadioEngine(
 
         // 1. Candidates that pass every hard rule, in feed order.
         val accepted = mutableListOf<PlayableItem.YoutubeTrack>()
+        val acceptedAt = java.util.IdentityHashMap<SongKey, Int>()
         // Played in the last few hours: only used when there aren't enough fresh songs.
         val recentBackup = mutableListOf<PlayableItem.YoutubeTrack>()
         // Only failed "soft" rules (artist skipped twice this session): used before the radio would run dry.
@@ -168,8 +169,17 @@ class RadioEngine(
                 if (softBackup.size < count) softBackup += c
                 continue
             }
-            if (!dupes.accept(c)) continue
-            if (c.id in session.unverified && !runCatching { isMusic(c.id) }.getOrDefault(true)) continue
+            val original = dupes.match(SongKey.of(c), c.durationMs)
+            if (original != null) {
+                // Same song as one already picked: keep whichever upload is better
+                // (the official audio over its music video, say).
+                val at = acceptedAt[original] ?: continue
+                if (uploadQuality(c) > uploadQuality(accepted[at])) accepted[at] = c
+                continue
+            }
+            // YouTube Music only lists music; other sources need checking.
+            if (c.id in session.unverified && UploadKinds.of(c.id) == null && !runCatching { isMusic(c.id) }.getOrDefault(true)) continue
+            acceptedAt[SongKey.of(c)] = accepted.size
             accepted += c
         }
         // Never let the radio run dry: relax the soft rules before giving up,

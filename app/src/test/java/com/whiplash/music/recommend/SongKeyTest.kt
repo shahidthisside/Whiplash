@@ -118,4 +118,13 @@ class SongKeyTest {
         assertEquals(SongVersion.ORIGINAL, SongKey.versionOf("Live Your Life"))
         assertEquals(SongVersion.REMIX, SongKey.versionOf("Tauba Tauba (Remix)"))
     }
+
+    @Test fun officialAudioBeatsItsMusicVideo() {
+        val video = PlayableItem.YoutubeTrack("vid1", "Channa Mereya", "Arijit Singh", null, null, 290_000L)
+        val audio = PlayableItem.YoutubeTrack("aud1", "Channa Mereya", "Arijit Singh", null, null, 289_000L)
+        UploadKinds.record("vid1", UploadKind.OFFICIAL_VIDEO)
+        UploadKinds.record("aud1", UploadKind.AUDIO)
+        assertEquals(listOf("aud1"), listOf(video, audio).withoutNearDuplicates().map { it.id })
+    }
+
 }
