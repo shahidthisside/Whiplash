@@ -127,4 +127,51 @@ class LearningTest {
         assertEquals(1 to 0.0, m.bySource["RELATED"])
         assertEquals(1 to 1.0, m.bySource["?"])
     }
+
+    // ── wiring ─────────────────────────────────────────────────────────
+    private class MemStore : LearnedStore {
+        var json: String? = null
+        override var generation = 0
+        override fun load() = json
+        override fun save(json: String) { this.json = json }
+    }
+
+    private class Feedback(val plays: List<PastPlay>) : RadioFeedback {
+        override suspend fun rejectedTrackIds() = emptySet<String>()
+        override suspend fun blockedArtistKeys() = emptySet<String>()
+        override suspend fun recentlyPlayedIds() = emptySet<String>()
+        override suspend fun artistLanguages(artistKeys: Collection<String>) = emptyMap<String, String>()
+        override suspend fun history() = plays
+    }
+
+    @Test fun coListenedArtistMovesUpTheBatch() = runBlocking {
+        val seed = t("seed", "Some Song", "Seed Artist")
+        // The listener always plays Friend Artist right after Seed Artist.
+        val plays = (0 until 8).flatMap { listOf(play("Seed Artist", it * day), play("Friend Artist", it * day + 60_000)) }
+        val page = listOf(t("x1", "Track One", "Stranger One"), t("x2", "Track Two", "Stranger Two"), t("f", "Track Three", "Friend Artist"))
+        val e = RadioEngine({ _, c -> RadioPage(if (c == null) page else emptyList(), null) }, { emptyList() }, { true }, Feedback(plays), random = Random(1))
+        val batch = e.nextBatch(e.sessionFor(seed), listOf(seed), 3)
+        assertEquals("f", batch.first().id)
+        assertEquals(RadioSource.SEED, e.sourceOf("f"))
+    }
+
+    @Test fun learningIsSavedAndForgotten() = runBlocking {
+        val store = MemStore()
+        val seed = t("seed", "Some Song", "Seed Artist")
+        val page = (1..6).map { t("p$it", "Track $it", "Artist $it", 180_000L + it * 7_000L) }
+        val e = RadioEngine({ _, c -> RadioPage(if (c == null) page else emptyList(), null) }, { emptyList() }, { true }, Feedback(emptyList()), store = store)
+        val s = e.sessionFor(seed)
+        val batch = e.nextBatch(s, listOf(seed), 4)
+        batch.forEach { e.onKept(s, it) }
+        e.nextBatch(s, listOf(seed) + batch, 2)
+        val saved = JSONObject(store.json!!)
+        assertEquals(4, saved.getJSONObject("ranker").getInt("n"))
+        assertNotNull(saved.getJSONObject("coListen").optJSONObject("links"))
+        // Clearing history bumps the generation: a fresh engine state, no examples.
+        store.generation++
+        store.json = null
+        val s2 = e.sessionFor(t("other", "Other", "Other Artist"))
+        e.nextBatch(s2, emptyList(), 1)
+        assertEquals(0, JSONObject(store.json!!).getJSONObject("ranker").getInt("n"))
+    }
 }

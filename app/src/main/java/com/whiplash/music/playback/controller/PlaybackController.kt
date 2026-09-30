@@ -63,6 +63,7 @@ class PlaybackController(
     private val newPipePlaybackProvider: NewPipePlaybackProvider,
     private val audioCacheManager: com.whiplash.music.playback.cache.AudioCacheManager,
     private val playEventDao: com.whiplash.music.data.local.dao.PlayEventDao? = null,
+    private val learnedStore: com.whiplash.music.recommend.LearnedStore? = null,
     private val musicSources: com.whiplash.music.recommend.MusicSources = com.whiplash.music.recommend.MusicSources(
         null, null, { id, cursor -> newPipePlaybackProvider.getRadioPage(id, cursor) }, { id -> newPipePlaybackProvider.getRelatedTracks(id) },
     ),
@@ -87,6 +88,8 @@ class PlaybackController(
         fetchRelated = { id -> musicSources.related(id) },
         isMusic = { id -> newPipePlaybackProvider.getPlayerInfo(id).category?.equals("Music", ignoreCase = true) ?: true },
         feedback = com.whiplash.music.recommend.PlayEventFeedback(playEventDao),
+        store = learnedStore,
+        log = { android.util.Log.i("WhiplashRadio", it) },
     )
 
     // The play event being recorded (how long this track was really
@@ -1089,7 +1092,8 @@ class PlaybackController(
             artist = item.artist,
             artistKey = com.whiplash.music.recommend.RadioRules.artistKey(item.artist),
             language = com.whiplash.music.recommend.LanguageDetector.detect(item.title, item.artist)?.code,
-            origin = if (fromAutoplay) "AUTOPLAY" else "USER",
+            // "AUTOPLAY:KEPT" etc., so skip rates can be told apart per source.
+            origin = if (fromAutoplay) "AUTOPLAY" + (radioEngine.sourceOf(item.id)?.let { ":${it.name}" } ?: "") else "USER",
             radioSeedId = if (fromAutoplay) session?.seed?.id else null,
             startedAtEpochMs = eventStartedAt,
             playedMs = played,

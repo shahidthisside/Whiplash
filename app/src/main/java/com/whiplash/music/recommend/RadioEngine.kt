@@ -23,6 +23,9 @@ interface RadioFeedback {
 
     /** 0…1 per artist key: how reliably the listener finishes their songs (missing = no data). */
     suspend fun artistAffinity(): Map<String, Double> = emptyMap()
+
+    /** Recent plays, oldest first or any order, for learning co-listening and habits. */
+    suspend fun history(): List<PastPlay> = emptyList()
 }
 
 /**
@@ -34,6 +37,12 @@ interface RadioFeedback {
  */
 class RadioSession(val seed: PlayableItem.YoutubeTrack) {
     internal var feedSeed: PlayableItem.YoutubeTrack = seed
+    internal var feedSource = RadioSource.SEED
+    /** Which source each candidate came from, and the features it was served with. */
+    internal val sourceOf = HashMap<String, RadioSource>()
+    internal val featuresOf = HashMap<String, DoubleArray>()
+    /** Artists the listener chose or kept this session: what co-listening compares to. */
+    internal val anchorArtists = linkedSetOf(RadioRules.artistKey(seed.artist))
     internal var cursor: Any? = null
     internal var feedStarted = false
     internal var feedDone = false
@@ -76,7 +85,67 @@ class RadioEngine(
     private val fetchRelated: suspend (trackId: String) -> List<PlayableItem.YoutubeTrack>,
     private val isMusic: suspend (trackId: String) -> Boolean,
     private val feedback: RadioFeedback,
+    private val store: LearnedStore? = null,
+    private val random: java.util.Random = java.util.Random(),
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val log: (String) -> Unit = {},
 ) {
+    // What's been learned across sessions (see [Learned]).
+    private var learned: Learned? = null
+    private var historyLoadedAt: Long? = null
+    private var energyByTime = EnergyByTime.EMPTY
+    private var pendingSaves = 0
+
+    private class Learned(val generation: Int, random: java.util.Random) {
+        val coListen = CoListen()
+        val bandit = SourceBandit(random)
+        val ranker = Ranker()
+    }
+
+    private fun learned(): Learned {
+        val gen = store?.generation ?: 0
+        learned?.takeIf { it.generation == gen }?.let { return it }
+        historyLoadedAt = null
+        return Learned(gen, random).also { l ->
+            runCatching { store?.load()?.let { org.json.JSONObject(it) } }.getOrNull()?.let { json ->
+                l.coListen.loadPages(json.optJSONObject("coListen"))
+                l.bandit.load(json.optJSONObject("bandit"))
+                l.ranker.load(json.optJSONObject("ranker"))
+            }
+            learned = l
+        }
+    }
+
+    private val bandit: SourceBandit get() = learned().bandit
+
+    private fun save(force: Boolean = false) {
+        val s = store ?: return
+        val l = learned ?: return
+        if (!force && ++pendingSaves < SAVE_EVERY) return
+        pendingSaves = 0
+        s.save(
+            org.json.JSONObject()
+                .put("coListen", l.coListen.toJson())
+                .put("bandit", bandit.toJson())
+                .put("ranker", l.ranker.toJson())
+                .toString(),
+        )
+    }
+
+    /** Where autoplay song [id] came from, for the play log. */
+    fun sourceOf(id: String): RadioSource? = current?.sourceOf?.get(id)
+
+    /** Rebuilds what's learned from the play log (co-listening, time-of-day habits) at most every few minutes. */
+    private suspend fun refreshHistory() {
+        learned() // notices a history clear first
+        val now = clock()
+        historyLoadedAt?.let { if (now - it < HISTORY_REFRESH_MS) return }
+        historyLoadedAt = now
+        val plays = runCatching { feedback.history() }.getOrDefault(emptyList())
+        learned().coListen.rebuildHistory(plays)
+        energyByTime = EnergyByTime.from(plays)
+        if (plays.isNotEmpty()) log("metrics: ${RadioMetrics.from(plays)} ranker n=${learned().ranker.examples}")
+    }
     var current: RadioSession? = null
         private set
 
@@ -91,6 +160,7 @@ class RadioEngine(
 
     /** The listener picked [track] themselves: strong evidence of what they want now. */
     suspend fun onChosen(session: RadioSession, track: PlayableItem.YoutubeTrack) {
+        session.anchorArtists += RadioRules.artistKey(track.artist)
         languageOf(track)?.let { session.profile.add(it.code, langWeight(it, 2.0)) }
         session.vibe.add(VibeTagger.tag(track, session.learnedVibes), 2.0)
     }
@@ -98,6 +168,8 @@ class RadioEngine(
     /** An autoplay song was played through: it's on target. */
     suspend fun onKept(session: RadioSession, track: PlayableItem.YoutubeTrack) {
         if (session.kept.none { it.id == track.id }) session.kept += track
+        session.anchorArtists += RadioRules.artistKey(track.artist)
+        learn(session, track, kept = true)
         languageOf(track)?.let { session.profile.add(it.code, langWeight(it, 1.0)) }
         session.vibe.add(VibeTagger.tag(track, session.learnedVibes), 1.0)
     }
@@ -106,6 +178,7 @@ class RadioEngine(
     suspend fun onSkipped(session: RadioSession, track: PlayableItem.YoutubeTrack) {
         val key = RadioRules.artistKey(track.artist)
         session.skippedIds += track.id
+        learn(session, track, kept = false)
         session.skippedArtists[key] = (session.skippedArtists[key] ?: 0) + 1
         // A skip is about that song, not its language: language is left alone.
         session.vibe.add(VibeTagger.tag(track, session.learnedVibes), -0.4)
@@ -116,6 +189,7 @@ class RadioEngine(
      * network failure; returns fewer (or none) instead.
      */
     suspend fun nextBatch(session: RadioSession, queue: List<PlayableItem>, count: Int): List<PlayableItem.YoutubeTrack> {
+        refreshHistory()
         if (!session.seedLanguageResolved) {
             session.seedLanguageResolved = true
             languageOf(session.seed)?.let { session.profile.add(it.code, langWeight(it, 3.0)) }
@@ -194,6 +268,10 @@ class RadioEngine(
         val tailKeys = queue.takeLast(20).mapTo(HashSet()) { RadioRules.artistKey(it.artist) }
         val vibes = accepted.associate { it.id to VibeTagger.tag(it, session.learnedVibes) }
         val langs = accepted.associate { it.id to languageOf(it) }
+        val coListen = learned().coListen
+        val ranker = learned().ranker
+        val now = clock()
+        val features = HashMap<String, DoubleArray>()
         val scores = accepted.mapIndexed { i, c ->
             val key = RadioRules.artistKey(c.artist)
             val rank = 1.0 - i.toDouble() / accepted.size
@@ -201,9 +279,25 @@ class RadioEngine(
             val liked = aff[key] ?: 0.5
             val novel = if (key !in tailKeys) 1.0 else 0.0
             val lang = langs[c.id]
-            val offLanguage = session.profile.penalty(lang?.code, lang?.strength ?: 0)
-            c.id to (W_RANK * rank + W_VIBE * fit + W_AFFINITY * liked + W_NOVELTY * novel - W_LANGUAGE * offLanguage)
-        }.toMap()
+            val x = DoubleArray(Features.COUNT)
+            x[Features.RANK] = rank
+            x[Features.VIBE] = fit
+            x[Features.AFFINITY] = liked
+            x[Features.NOVELTY] = novel
+            x[Features.OFF_LANGUAGE] = session.profile.penalty(lang?.code, lang?.strength ?: 0)
+            x[Features.CO_LISTEN] = coListen.affinity(key, session.anchorArtists)
+            // Centred: "no idea" (0.5) must not shift scores.
+            x[Features.TIME] = energyByTime.fit(vibes.getValue(c.id).energy, now) - 0.5
+            x[Features.AUDIO] = if (UploadKinds.of(c.id) == UploadKind.AUDIO) 1.0 else 0.0
+            features[c.id] = x
+            c.id to Features.HAND.indices.sumOf { Features.HAND[it] * x[it] }
+        }.toMap().let { hand ->
+            // Lean on the learned model as it earns it; hand-set weights until then.
+            val trust = ranker.trust()
+            if (trust == 0.0) return@let hand
+            val top = hand.values.max().takeIf { it > 0 } ?: 1.0
+            hand.mapValues { (id, h) -> (1 - trust) * (h / top) + trust * ranker.predict(features.getValue(id)) }
+        }
 
         // 3. Pick with MMR: best score, minus likeness to what's already picked
         //    (and the end of the queue), so the batch doesn't clump.
@@ -229,6 +323,8 @@ class RadioEngine(
         // Good candidates that didn't make this batch go back, best first.
         (capped.placed.drop(count) + capped.deferred).asReversed().forEach { session.pool.addFirst(it) }
         session.served += out
+        out.forEach { t -> features[t.id]?.let { session.featuresOf[t.id] = it } }
+        save(force = true)
         return out
     }
 
@@ -285,45 +381,60 @@ class RadioEngine(
                     session.feedStarted = true
                     session.cursor = page.next
                     if (page.next == null) session.feedDone = true
+                    // YouTube Music puts artists that go together on one radio.
+                    learned().coListen.addPage(page.items.map { RadioRules.artistKey(it.artist) })
                     val fresh = page.items.filter { session.seen.add(it.id) }
                     // A page of only repeats means this radio has looped.
                     if (fresh.isEmpty()) session.feedDone = true
+                    fresh.forEach { session.sourceOf[it.id] = session.feedSource }
                     session.pool.addAll(fresh)
                     if (fresh.isNotEmpty()) return true
                 }
             }
-            // Continue from the most recent song the listener kept.
-            val nextSeed = session.kept.lastOrNull { it.id !in session.usedFeedSeeds }
-            if (nextSeed != null) {
-                session.usedFeedSeeds += nextSeed.id
-                session.feedSeed = nextSeed
-                session.cursor = null
-                session.feedStarted = false
-                session.feedDone = false
-                return@repeat
+            // The seed's radio is used up. Continue from: a song the listener
+            // kept, a served song they didn't skip, or "related" songs; the
+            // bandit picks whichever has been working for this listener.
+            val keptSeed = session.kept.lastOrNull { it.id !in session.usedFeedSeeds }
+            val sampledSeed = session.served.lastOrNull { it.id !in session.usedFeedSeeds && it.id !in session.skippedIds && it.id != keptSeed?.id }
+            val relatedBase = (listOf(session.seed) + session.kept.asReversed()).firstOrNull { it.id !in session.usedRelatedSeeds }
+            val options = buildSet {
+                if (keptSeed != null) add(RadioSource.KEPT)
+                if (sampledSeed != null) add(RadioSource.SAMPLED)
+                if (relatedBase != null) add(RadioSource.RELATED)
             }
-            // Nothing finished yet (the listener is sampling): continue from the
-            // most recent song this radio served that wasn't skipped.
-            val sampled = session.served.lastOrNull { it.id !in session.usedFeedSeeds && it.id !in session.skippedIds }
-            if (sampled != null) {
-                session.usedFeedSeeds += sampled.id
-                session.feedSeed = sampled
-                session.cursor = null
-                session.feedStarted = false
-                session.feedDone = false
-                return@repeat
+            when (bandit.choose(options)) {
+                RadioSource.KEPT -> startFeed(session, keptSeed!!, RadioSource.KEPT)
+                RadioSource.SAMPLED -> startFeed(session, sampledSeed!!, RadioSource.SAMPLED)
+                RadioSource.RELATED -> {
+                    val base = relatedBase!!
+                    session.usedRelatedSeeds += base.id
+                    val related = runCatching { fetchRelated(base.id) }.getOrDefault(emptyList())
+                    val fresh = related.filter { session.seen.add(it.id) }
+                    session.unverified += fresh.map { it.id }
+                    fresh.forEach { session.sourceOf[it.id] = RadioSource.RELATED }
+                    session.pool.addAll(fresh)
+                    if (fresh.isNotEmpty()) return true
+                }
+                RadioSource.SEED, null -> return false
             }
-            // Last resort: generic related videos of the seed or a kept song.
-            val base = (listOf(session.seed) + session.kept.asReversed()).firstOrNull { it.id !in session.usedRelatedSeeds }
-                ?: return false
-            session.usedRelatedSeeds += base.id
-            val related = runCatching { fetchRelated(base.id) }.getOrDefault(emptyList())
-            val fresh = related.filter { session.seen.add(it.id) }
-            session.unverified += fresh.map { it.id }
-            session.pool.addAll(fresh)
-            if (fresh.isNotEmpty()) return true
         }
         return false
+    }
+
+    private fun startFeed(session: RadioSession, seed: PlayableItem.YoutubeTrack, source: RadioSource) {
+        session.usedFeedSeeds += seed.id
+        session.feedSeed = seed
+        session.feedSource = source
+        session.cursor = null
+        session.feedStarted = false
+        session.feedDone = false
+    }
+
+    /** One more example for the bandit and the ranker from how [track] went. */
+    private fun learn(session: RadioSession, track: PlayableItem.YoutubeTrack, kept: Boolean) {
+        session.sourceOf[track.id]?.let { bandit.reward(it, kept) }
+        session.featuresOf.remove(track.id)?.let { learned().ranker.update(it, kept) }
+        save()
     }
 
     companion object {
@@ -333,11 +444,8 @@ class RadioEngine(
         )
         /** Candidates gathered per song wanted, so scoring has a real choice. */
         private const val CANDIDATE_FACTOR = 3
-        private const val W_RANK = 1.0
-        private const val W_VIBE = 1.4
-        private const val W_AFFINITY = 0.6
-        private const val W_NOVELTY = 0.25
-        private const val W_LANGUAGE = 1.2
+        private const val SAVE_EVERY = 5
+        private const val HISTORY_REFRESH_MS = 10 * 60_000L
         private const val MMR_LAMBDA = 0.72
         private const val MAX_SOURCE_HOPS = 6
     }

@@ -93,12 +93,16 @@ class WhiplashApplication : Application() {
             downloadDao = database.downloadDao(),
             replayTallyDao = database.replayTallyDao(),
             playEventDao = database.playEventDao(),
+            forgetRadioLearning = { radioLearnedStore.clear() },
         )
     }
 
     val providerHealthTracker: ProviderHealthTracker by lazy {
         ProviderHealthTracker(database.providerHealthDao())
     }
+
+    /** What the radio learned about this listener; wiped with listening history. */
+    val radioLearnedStore by lazy { com.whiplash.music.recommend.FileLearnedStore(java.io.File(filesDir, "radio_learned.json")) }
 
     private val innerTube by lazy { com.whiplash.music.innertube.InnerTubeClient(okHttpClient) }
 
@@ -167,7 +171,7 @@ class WhiplashApplication : Application() {
     }
 
     val playbackController: PlaybackController by lazy {
-        PlaybackController(this, playbackManager, settingsRepository, libraryRepository, newPipePlaybackProvider, audioCacheManager, database.playEventDao(), musicSources)
+        PlaybackController(this, playbackManager, settingsRepository, libraryRepository, newPipePlaybackProvider, audioCacheManager, database.playEventDao(), radioLearnedStore, musicSources)
     }
 
     val downloadManager: com.whiplash.music.data.download.DownloadManager by lazy {

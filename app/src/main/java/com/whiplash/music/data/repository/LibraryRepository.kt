@@ -54,6 +54,8 @@ class LibraryRepository(
     private val downloadDao: DownloadDao,
     private val replayTallyDao: com.whiplash.music.data.local.dao.ReplayTallyDao,
     private val playEventDao: com.whiplash.music.data.local.dao.PlayEventDao? = null,
+    /** Forgets what the radio learned from listening (called with history clears). */
+    private val forgetRadioLearning: () -> Unit = {},
 ) {
 
     /** Caches metadata for a YouTube track so it can be resolved later by id alone. */
@@ -103,6 +105,7 @@ class LibraryRepository(
         replayTallyDao.clear()
         // The radio's skip/complete log is listening history as well.
         playEventDao?.clear()
+        forgetRadioLearning()
     }
 
     // ── 4.7 Monthly Replay ───────────────────────────────────────────────

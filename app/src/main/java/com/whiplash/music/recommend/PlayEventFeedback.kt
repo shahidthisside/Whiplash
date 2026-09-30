@@ -32,7 +32,13 @@ class PlayEventFeedback(private val dao: PlayEventDao?) : RadioFeedback {
             .filter { it.plays >= 2 }
             .associate { it.artistKey to (it.completes + 1.0) / (it.plays + 2.0) }
 
+    override suspend fun history(): List<PastPlay> =
+        dao?.recent(HISTORY_LIMIT).orEmpty().filter { it.startedAtEpochMs >= now() - 120 * DAY }.map {
+            PastPlay(it.trackId, it.title, it.artist, it.artistKey, it.language, it.origin, it.radioSeedId, it.startedAtEpochMs, it.completed, it.skipped)
+        }
+
     private companion object {
+        const val HISTORY_LIMIT = 3_000
         const val HOUR = 3_600_000L
         const val DAY = 24 * HOUR
     }
