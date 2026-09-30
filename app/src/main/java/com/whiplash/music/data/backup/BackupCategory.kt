@@ -18,7 +18,7 @@ package com.whiplash.music.data.backup
 enum class BackupCategory(val displayName: String, val description: String) {
     PLAYLISTS("Playlists", "Your created and imported playlists, and their tracks"),
     FAVORITES("Favorites", "Songs you've marked as favorites"),
-    HISTORY("History", "Your recently played history"),
+    HISTORY("History", "Your recently played history, and what recommendations learned from it"),
     PINNED("Pinned", "Songs pinned to your Home screen's Speed dial"),
     DOWNLOADS("Downloads", "Records of what you've downloaded (not the audio files themselves)"),
     SETTINGS("Settings", "Accent colour, playback, and other app preferences"),

@@ -68,6 +68,7 @@ class BackupManager(
     private val database: WhiplashDatabase,
     private val settingsRepository: com.whiplash.music.data.repository.SettingsRepository,
     private val lyricOffsetStore: com.whiplash.music.data.repository.LyricOffsetStore? = null,
+    private val radioLearnedStore: com.whiplash.music.recommend.FileLearnedStore? = null,
 ) {
 
     /**
@@ -103,6 +104,12 @@ class BackupManager(
                     if (settingsFile.exists()) {
                         zipOut.putNextEntry(ZipEntry(SETTINGS_FILENAME))
                         settingsFile.inputStream().use { it.copyTo(zipOut) }
+                        zipOut.closeEntry()
+                    }
+                    // What the radio learned (play events are already in the database).
+                    radioLearnedStore?.load()?.let { learned ->
+                        zipOut.putNextEntry(ZipEntry(RADIO_LEARNED_ENTRY))
+                        zipOut.write(learned.toByteArray(Charsets.UTF_8))
                         zipOut.closeEntry()
                     }
                 }
@@ -334,6 +341,11 @@ class BackupManager(
                 put("categories", manifest)
                 categoryPayloads.forEach { (category, payload) -> put(category.name, payload) }
                 replayJson?.let { put(REPLAY_TALLY_KEY, it) }
+                if (BackupCategory.HISTORY in categories) {
+                    // The radio's play log and what it learned count as listening history.
+                    put(PLAY_EVENTS_KEY, playEventsJson())
+                    radioLearnedStore?.load()?.let { put(RADIO_LEARNED_KEY, it) }
+                }
                 put("songs", songsJson)
             }
 
@@ -348,6 +360,64 @@ class BackupManager(
         }.onFailure { Log.w(TAG, "backupSelective() failed", it) }.getOrDefault(false)
     }
 
+
+    private suspend fun playEventsJson(): JSONArray = JSONArray().apply {
+        database.playEventDao().all().forEach { e ->
+            put(
+                JSONObject().apply {
+                    put("trackId", e.trackId)
+                    put("source", e.source.name)
+                    put("title", e.title)
+                    put("artist", e.artist)
+                    put("artistKey", e.artistKey)
+                    put("language", e.language)
+                    put("origin", e.origin)
+                    put("radioSeedId", e.radioSeedId)
+                    put("startedAtEpochMs", e.startedAtEpochMs)
+                    put("playedMs", e.playedMs)
+                    put("durationMs", e.durationMs)
+                    put("endReason", e.endReason)
+                    put("skipped", e.skipped)
+                    put("completed", e.completed)
+                }
+            )
+        }
+    }
+
+    /** Adds play events not already here (same song, same start time), so restoring twice doesn't double them. */
+    private suspend fun restorePlayEvents(rows: JSONArray) {
+        val dao = database.playEventDao()
+        val existing = dao.all().mapTo(HashSet()) { it.trackId + "@" + it.startedAtEpochMs }
+        val fresh = (0 until rows.length()).mapNotNull { i ->
+            val r = rows.optJSONObject(i) ?: return@mapNotNull null
+            runCatching {
+                com.whiplash.music.data.local.entity.PlayEventEntity(
+                    trackId = r.getString("trackId"),
+                    source = MediaSource.valueOf(r.getString("source")),
+                    title = r.getString("title"),
+                    artist = r.getString("artist"),
+                    artistKey = r.getString("artistKey"),
+                    language = if (r.isNull("language")) null else r.optString("language"),
+                    origin = r.getString("origin"),
+                    radioSeedId = if (r.isNull("radioSeedId")) null else r.optString("radioSeedId"),
+                    startedAtEpochMs = r.getLong("startedAtEpochMs"),
+                    playedMs = r.getLong("playedMs"),
+                    durationMs = r.getLong("durationMs"),
+                    endReason = r.getString("endReason"),
+                    skipped = r.getBoolean("skipped"),
+                    completed = r.getBoolean("completed"),
+                )
+            }.getOrNull()?.takeIf { existing.add(it.trackId + "@" + it.startedAtEpochMs) }
+        }
+        fresh.chunked(500).forEach { dao.insertAll(it) }
+    }
+
+    /** Keeps whichever learning knows more: this device's or the backup's. */
+    private fun restoreRadioLearned(json: JSONObject) {
+        val store = radioLearnedStore ?: return
+        val incoming = json.optString(RADIO_LEARNED_KEY).ifEmpty { return }
+        if (store.examples(incoming) > store.examples()) store.replace(incoming)
+    }
 
     /**
      * Every user setting as one flat JSON object — the SETTINGS payload of a
@@ -594,6 +664,7 @@ class BackupManager(
             database.withTransaction {
                 restoreDatabaseCategories(json)
             }
+            restoreRadioLearned(json)
 
             json.optJSONArray(BackupCategory.SETTINGS.name)?.let { settingsArray ->
                 if (settingsArray.length() > 0) applySettings(settingsArray.getJSONObject(0))
@@ -658,6 +729,9 @@ class BackupManager(
                             SETTINGS_FILENAME -> {
                                 settingsFile.outputStream().use { zipIn.copyTo(it) }
                                 restoredAnything = true
+                            }
+                            RADIO_LEARNED_ENTRY -> {
+                                radioLearnedStore?.replace(zipIn.readBytes().toString(Charsets.UTF_8))
                             }
                         }
                         zipIn.closeEntry()
@@ -761,6 +835,8 @@ class BackupManager(
 
         // Replaces each (month, song) row, so restoring the same file twice
         // doesn't double anyone's play counts.
+        json.optJSONArray(PLAY_EVENTS_KEY)?.let { restorePlayEvents(it) }
+
         json.optJSONArray(REPLAY_TALLY_KEY)?.let { rows ->
             val entities = (0 until rows.length()).mapNotNull { i ->
                 val r = rows.getJSONObject(i)
@@ -847,6 +923,9 @@ class BackupManager(
         /** Distinguishes a selective (category JSON) backup zip from a legacy full-DB zip — see [isSelectiveBackup]. */
         private const val ZIP_MANIFEST_ENTRY = "whiplash_backup_manifest.json"
         private const val REPLAY_TALLY_KEY = "replayTally"
+        private const val PLAY_EVENTS_KEY = "playEvents"
+        private const val RADIO_LEARNED_KEY = "radioLearned"
+        private const val RADIO_LEARNED_ENTRY = "radio_learned.json"
 
         /** Bumped only if the selective JSON schema itself changes shape; not tied to [WhiplashDatabase]'s own Room schema version. */
         private const val SELECTIVE_FORMAT_VERSION = 1

@@ -434,7 +434,10 @@ class PlaybackController(
     fun connect(onReady: () -> Unit = {}) {
         if (controller != null || connectionFuture != null) return
         scope.launch(Dispatchers.IO) {
-            runCatching { playEventDao?.deleteOlderThan(System.currentTimeMillis() - PLAY_EVENT_RETENTION_MS) }
+            runCatching {
+                playEventDao?.deleteOlderThan(System.currentTimeMillis() - PLAY_EVENT_RETENTION_MS)
+                playEventDao?.keepNewest(PLAY_EVENT_MAX_ROWS)
+            }
         }
         val sessionToken = SessionToken(context, ComponentName(context, WhiplashPlaybackService::class.java))
         val future = MediaController.Builder(context, sessionToken).buildAsync()
@@ -1887,7 +1890,9 @@ class PlaybackController(
         private const val END_STOPPED = "STOPPED"
         /** Next before this much listening is a skip, whatever the song's length. */
         private const val SKIP_MAX_MS = 30_000L
-        private const val PLAY_EVENT_RETENTION_MS = 365L * 24 * 3_600_000
+        // The radio only learns from the last few months; older plays are noise.
+        private const val PLAY_EVENT_RETENTION_MS = 180L * 24 * 3_600_000
+        private const val PLAY_EVENT_MAX_ROWS = 20_000
         /** How many of the listener's own picks shape a new radio's language profile. */
         private const val RADIO_PROFILE_CHOSEN = 5
 

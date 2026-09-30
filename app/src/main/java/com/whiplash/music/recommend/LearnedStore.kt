@@ -28,4 +28,14 @@ class FileLearnedStore(private val file: File) : LearnedStore {
         generation++
         runCatching { file.delete() }
     }
+
+    /** Replaces what's learned (a restore); the radio reloads it on its next batch. */
+    fun replace(json: String) {
+        save(json)
+        generation++
+    }
+
+    /** How many examples the saved ranker has seen: which of two learning files knows more. */
+    fun examples(json: String? = load()): Int =
+        runCatching { org.json.JSONObject(json!!).optJSONObject("ranker")?.optInt("n", 0) ?: 0 }.getOrDefault(0)
 }

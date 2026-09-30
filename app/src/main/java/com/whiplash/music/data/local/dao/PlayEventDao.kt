@@ -70,6 +70,19 @@ interface PlayEventDao {
     @Query("DELETE FROM play_events WHERE startedAtEpochMs < :beforeMs")
     suspend fun deleteOlderThan(beforeMs: Long)
 
+    /** Drops all but the newest [limit] events, so the log can't grow without bound. */
+    @Query("DELETE FROM play_events WHERE id NOT IN (SELECT id FROM play_events ORDER BY startedAtEpochMs DESC LIMIT :limit)")
+    suspend fun keepNewest(limit: Int)
+
+    @Query("SELECT COUNT(*) FROM play_events")
+    suspend fun count(): Int
+
+    @Query("SELECT * FROM play_events ORDER BY startedAtEpochMs")
+    suspend fun all(): List<PlayEventEntity>
+
+    @Insert
+    suspend fun insertAll(events: List<PlayEventEntity>)
+
     @Query("DELETE FROM play_events")
     suspend fun clear()
 }
