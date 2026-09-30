@@ -77,6 +77,49 @@ class RadioRulesTest {
         assertEquals(6, r.placed.size + r.deferred.size)
     }
 
+    @Test fun creditKeysSplitCoCredits() {
+        assertEquals(listOf("pritam", "arijitsingh"), RadioRules.creditKeys("Pritam & Arijit Singh"))
+        assertEquals(listOf("karanaujla", "ikky"), RadioRules.creditKeys("Karan Aujla x Ikky"))
+        assertEquals(listOf("badshah", "yoyohoneysingh"), RadioRules.creditKeys("Badshah feat. Yo Yo Honey Singh"))
+        // "and" is not a separator: band names.
+        assertEquals(listOf("simonandgarfunkel"), RadioRules.creditKeys("Simon and Garfunkel"))
+        assertEquals(listOf("diljitdosanjh"), RadioRules.creditKeys("Diljit Dosanjh - Topic"))
+    }
+
+    @Test fun allowanceNeedsRepeatedEvidence() {
+        assertEquals(RadioRules.DEFAULT_ALLOWANCE, RadioRules.allowanceFor(0, 0))
+        assertEquals(RadioRules.DEFAULT_ALLOWANCE, RadioRules.allowanceFor(1, 0)) // one finish isn't enough
+        assertEquals(RadioRules.FAVOURED_ALLOWANCE, RadioRules.allowanceFor(2, 0))
+        assertEquals(RadioRules.FAVOURED_ALLOWANCE, RadioRules.allowanceFor(3, 1))
+        assertEquals(RadioRules.DEFAULT_ALLOWANCE, RadioRules.allowanceFor(2, 2))
+        assertEquals(RadioRules.DISLIKED_ALLOWANCE, RadioRules.allowanceFor(0, 1))
+        assertEquals(RadioRules.DISLIKED_ALLOWANCE, RadioRules.allowanceFor(1, 2))
+        // Hard ceiling: never more than 2 in a row, even for a favourite.
+        assertEquals(2, RadioRules.FAVOURED_ALLOWANCE.maxRun)
+    }
+
+    @Test fun favouredArtistGetsMoreButNeverThreeInARow() {
+        val batch = (1..8).map { t("a$it", "A song $it", "A") } + listOf(t("b1", "B", "B"), t("c1", "C", "C"), t("d1", "D", "D"))
+        val normal = RadioRules.applyArtistCap(batch, emptyList()).placed.map { it.artist }
+        val favoured = RadioRules.applyArtistCap(batch, emptyList()) { if (it == "a") RadioRules.FAVOURED_ALLOWANCE else RadioRules.DEFAULT_ALLOWANCE }.placed.map { it.artist }
+        assertTrue("$normal vs $favoured", favoured.count { it == "A" } > normal.count { it == "A" })
+        for (i in 2 until favoured.size) assertFalse("3 in a row: $favoured", favoured[i] == "A" && favoured[i - 1] == "A" && favoured[i - 2] == "A")
+        favoured.windowed(RadioRules.ARTIST_WINDOW).forEach { w -> assertTrue("window $w", w.count { it == "A" } <= 4) }
+    }
+
+    @Test fun dislikedArtistNeverBackToBack() {
+        val batch = listOf(t("a1", "1", "A"), t("a2", "2", "A"), t("b1", "3", "B"), t("a3", "4", "A"), t("c1", "5", "C"))
+        val out = RadioRules.applyArtistCap(batch, emptyList()) { if (it == "a") RadioRules.DISLIKED_ALLOWANCE else RadioRules.DEFAULT_ALLOWANCE }.placed.map { it.artist }
+        for (i in 1 until out.size) assertFalse("back to back: $out", out[i] == "A" && out[i - 1] == "A")
+    }
+
+    @Test fun coCreditedSongsCountForEachArtist() {
+        // Arijit already twice in a row (once co-credited): a third Arijit song must wait.
+        val tail = listOf(RadioRules.creditKeys("Arijit Singh"), RadioRules.creditKeys("Pritam & Arijit Singh"))
+        val out = RadioRules.applyArtistCapByCredits(listOf(t("x", "X", "Arijit Singh & Shreya Ghoshal"), t("y", "Y", "Atif Aslam")), tail)
+        assertEquals("Atif Aslam", out.placed.first().artist)
+    }
+
     @Test fun artistCapCountsQueueTail() {
         val r = RadioRules.applyArtistCap(listOf(t("1", "a", "A"), t("2", "b", "B")), tailArtistKeys = listOf("a", "a"))
         assertEquals("B", r.placed.first().artist)
@@ -142,6 +185,27 @@ class RadioEngineTest {
         // The seed's radio is used up (both pages) before anything else is tried.
         assertEquals(listOf("seed@0", "seed@1"), calls.take(2))
         assertEquals(queue.size, queue.map { it.id }.toSet().size)
+    }
+
+    @Test fun engineLoosensAfterFinishesAndTightensAfterSkips() = runBlocking {
+        val loved = (1..12).map { t("l$it", "Loved $it", "Loved Artist") }
+        val others = (1..12).map { t("o$it", "Other $it", "Other $it") }
+        val page = loved.zip(others).flatMap { listOf(it.first, it.second) }
+        val e = engine(mapOf("seed" to listOf(page)))
+        val s = e.sessionFor(seed)
+        val first = e.nextBatch(s, listOf(seed), 6)
+        val before = first.count { it.artist == "Loved Artist" }
+        // The listener finishes two of their songs.
+        val finished = (first.filter { it.artist == "Loved Artist" } + loved).distinct().take(2)
+        finished.forEach { e.onKept(s, it) }
+        assertEquals(RadioRules.FAVOURED_ALLOWANCE, s.allowance("lovedartist"))
+        val second = e.nextBatch(s, (listOf(seed) + first + finished).distinct(), 10)
+        val keys = second.map { it.artist }
+        for (i in 2 until keys.size) assertFalse("3 in a row: $keys", keys[i] == keys[i - 1] && keys[i] == keys[i - 2])
+        assertTrue("before=$before after=$keys", keys.count { it == "Loved Artist" } >= 4)
+        // Skipping them now tightens it again.
+        second.filter { it.artist == "Loved Artist" }.forEach { e.onSkipped(s, it) }
+        assertEquals(RadioRules.DISLIKED_ALLOWANCE, s.allowance("lovedartist"))
     }
 
     @Test fun dropsOtherLanguageRetroAndRejected() = runBlocking {

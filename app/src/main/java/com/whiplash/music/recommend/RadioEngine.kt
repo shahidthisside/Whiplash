@@ -57,6 +57,11 @@ class RadioSession(val seed: PlayableItem.YoutubeTrack) {
     internal val served = mutableListOf<PlayableItem.YoutubeTrack>()
     internal val skippedIds = HashSet<String>()
     internal val skippedArtists = HashMap<String, Int>()
+    /** Per credited artist ([RadioRules.creditKeys]) this session: autoplay songs finished and skipped. */
+    internal val creditFinishes = HashMap<String, Int>()
+    internal val creditSkips = HashMap<String, Int>()
+
+    internal fun allowance(key: String) = RadioRules.allowanceFor(creditFinishes[key] ?: 0, creditSkips[key] ?: 0)
     val profile = LanguageProfile()
     val vibe = SessionVibe()
     /** What the session learned about artists' feel (from songs they were heard with). */
@@ -167,7 +172,11 @@ class RadioEngine(
 
     /** An autoplay song was played through: it's on target. */
     suspend fun onKept(session: RadioSession, track: PlayableItem.YoutubeTrack) {
-        if (session.kept.none { it.id == track.id }) session.kept += track
+        val firstTime = session.kept.none { it.id == track.id }
+        if (firstTime) {
+            session.kept += track
+            RadioRules.creditKeys(track.artist).forEach { session.creditFinishes.merge(it, 1, Int::plus) }
+        }
         session.anchorArtists += RadioRules.artistKey(track.artist)
         learn(session, track, kept = true)
         languageOf(track)?.let { session.profile.add(it.code, langWeight(it, 1.0)) }
@@ -177,9 +186,10 @@ class RadioEngine(
     /** An autoplay song was skipped early: steer away from it. */
     suspend fun onSkipped(session: RadioSession, track: PlayableItem.YoutubeTrack) {
         val key = RadioRules.artistKey(track.artist)
-        session.skippedIds += track.id
+        val firstSkip = session.skippedIds.add(track.id)
         learn(session, track, kept = false)
         session.skippedArtists[key] = (session.skippedArtists[key] ?: 0) + 1
+        if (firstSkip) RadioRules.creditKeys(track.artist).forEach { session.creditSkips.merge(it, 1, Int::plus) }
         // A skip is about that song, not its language: language is left alone.
         session.vibe.add(VibeTagger.tag(track, session.learnedVibes), -0.4)
     }
@@ -268,6 +278,9 @@ class RadioEngine(
         val tailKeys = queue.takeLast(20).mapTo(HashSet()) { RadioRules.artistKey(it.artist) }
         val vibes = accepted.associate { it.id to VibeTagger.tag(it, session.learnedVibes) }
         val langs = accepted.associate { it.id to languageOf(it) }
+        // Artists the listener keeps finishing aren't pushed apart as hard or scored as stale.
+        fun favoured(c: PlayableItem.YoutubeTrack) =
+            RadioRules.creditKeys(c.artist).any { session.allowance(it) == RadioRules.FAVOURED_ALLOWANCE }
         val coListen = learned().coListen
         val ranker = learned().ranker
         val now = clock()
@@ -277,7 +290,8 @@ class RadioEngine(
             val rank = 1.0 - i.toDouble() / accepted.size
             val fit = session.vibe.similarity(vibes.getValue(c.id))
             val liked = aff[key] ?: 0.5
-            val novel = if (key !in tailKeys) 1.0 else 0.0
+            // Hearing more of an artist the listener keeps finishing isn't "stale".
+            val novel = if (key !in tailKeys || favoured(c)) 1.0 else 0.0
             val lang = langs[c.id]
             val x = DoubleArray(Features.COUNT)
             x[Features.RANK] = rank
@@ -310,15 +324,19 @@ class RadioEngine(
             val best = remaining.maxBy { c ->
                 val cv = vibes.getValue(c.id)
                 val like = (ordered.map { it to vibes.getValue(it.id) } + contextVibes)
-                    .maxOfOrNull { (o, ov) -> vibeLikeness(c, cv, o, ov) } ?: 0.0
+                    .maxOfOrNull { (o, ov) -> vibeLikeness(c, cv, o, ov, sameArtistWeight = if (favoured(c)) FAVOURED_SAME_ARTIST else 0.65) } ?: 0.0
                 MMR_LAMBDA * (scores.getValue(c.id) / maxScore) - (1 - MMR_LAMBDA) * like
             }
             remaining.remove(best)
             ordered += best
         }
 
-        val tail = queue.takeLast(RadioRules.ARTIST_WINDOW).map { RadioRules.artistKey(it.artist) }
-        val capped = RadioRules.applyArtistCap(ordered, tail)
+        val tail = queue.takeLast(RadioRules.ARTIST_WINDOW).map { RadioRules.creditKeys(it.artist) }
+        // Adaptive spacing, but never worse than the fixed rule: if the tighter
+        // limits would leave too little to play, fall back to it.
+        val capped = RadioRules.applyArtistCapByCredits(ordered, tail, session::allowance)
+            .takeIf { it.placed.size >= minOf(count, ordered.size) || it.placed.size >= RadioRules.applyArtistCapByCredits(ordered, tail).placed.size }
+            ?: RadioRules.applyArtistCapByCredits(ordered, tail)
         val out = capped.placed.take(count)
         // Good candidates that didn't make this batch go back, best first.
         (capped.placed.drop(count) + capped.deferred).asReversed().forEach { session.pool.addFirst(it) }
@@ -445,6 +463,7 @@ class RadioEngine(
         /** Candidates gathered per song wanted, so scoring has a real choice. */
         private const val CANDIDATE_FACTOR = 3
         private const val SAVE_EVERY = 5
+        private const val FAVOURED_SAME_ARTIST = 0.35
         private const val HISTORY_REFRESH_MS = 10 * 60_000L
         private const val MMR_LAMBDA = 0.72
         private const val MAX_SOURCE_HOPS = 6

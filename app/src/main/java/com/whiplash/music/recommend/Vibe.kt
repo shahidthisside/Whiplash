@@ -222,13 +222,13 @@ class SessionVibe {
 }
 
 /** How alike two songs are for variety purposes: same artist or same feel. */
-internal fun vibeLikeness(a: PlayableItem, av: Vibe, b: PlayableItem, bv: Vibe): Double {
+internal fun vibeLikeness(a: PlayableItem, av: Vibe, b: PlayableItem, bv: Vibe, sameArtistWeight: Double = 0.65): Double {
     val sameArtist = RadioRules.artistKey(a.artist).let { it.isNotEmpty() && it == RadioRules.artistKey(b.artist) }
     val tagsA = av.moods.map { it.name } + av.genres
     val tagsB = bv.moods.map { it.name } + bv.genres
     val jaccard = if (tagsA.isEmpty() || tagsB.isEmpty()) 0.0
     else tagsA.intersect(tagsB.toSet()).size.toDouble() / (tagsA.toSet() + tagsB).size
-    return (if (sameArtist) 0.65 else 0.0) + 0.35 * jaccard
+    return (if (sameArtist) sameArtistWeight else 0.0) + 0.35 * jaccard
 }
 
 // Compiled once: building a Regex per call made the radio freeze the UI.

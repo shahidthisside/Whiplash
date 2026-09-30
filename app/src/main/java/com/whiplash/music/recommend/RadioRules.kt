@@ -33,6 +33,41 @@ object RadioRules {
         "(?i)\\b(19[5-9]\\d|[5-9]0'?s|old is gold|evergreen|purane|purana|retro|golden era|classic hits|oldies)\\b",
     )
 
+    /**
+     * One key per credited artist ("Pritam & Arijit Singh" → pritam,
+     * arijitsingh), so a co-credited song counts toward each of them.
+     * Only unambiguous separators split: "and" doesn't (band names).
+     */
+    fun creditKeys(artist: String): List<String> = creditKeys.getOrPut(artist) {
+        artist.split(CREDIT_SPLIT).map { artistKey(it) }.filter { it.isNotEmpty() }.distinct()
+            .ifEmpty { listOf(artistKey(artist)) }
+    }
+
+    private val creditKeys = Memo<String, List<String>>()
+    private val CREDIT_SPLIT = Regex("\\s*[,&]\\s*|\\s+(?:x|feat\\.?|ft\\.?|featuring|with)\\s+", RegexOption.IGNORE_CASE)
+
+    /** How many songs one artist may take in a row and per [ARTIST_WINDOW]. */
+    data class Allowance(val maxRun: Int, val maxPerWindow: Int)
+
+    val DEFAULT_ALLOWANCE = Allowance(MAX_ARTIST_RUN, MAX_ARTIST_PER_WINDOW)
+    /** Artists the listener keeps finishing this session. Never above 2 in a row. */
+    val FAVOURED_ALLOWANCE = Allowance(MAX_ARTIST_RUN, 4)
+    /** Artists the listener skips more than finishes this session. */
+    val DISLIKED_ALLOWANCE = Allowance(1, 2)
+
+    /**
+     * This session's allowance for an artist: looser after [MIN_FINISHES]
+     * finishes that outnumber skips, tighter when skips outnumber finishes,
+     * today's rule otherwise.
+     */
+    fun allowanceFor(finishes: Int, skips: Int): Allowance = when {
+        finishes >= MIN_FINISHES && finishes > skips -> FAVOURED_ALLOWANCE
+        skips >= 1 && skips > finishes -> DISLIKED_ALLOWANCE
+        else -> DEFAULT_ALLOWANCE
+    }
+
+    const val MIN_FINISHES = 2
+
     /** Titles that announce old songs ("80s Hits", "Old Is Gold", "1985"). */
     fun isRetro(title: String): Boolean = RETRO.containsMatchIn(title)
 
@@ -47,27 +82,39 @@ object RadioRules {
     fun applyArtistCap(
         batch: List<PlayableItem.YoutubeTrack>,
         tailArtistKeys: List<String>,
+        allowance: (String) -> Allowance = { DEFAULT_ALLOWANCE },
+    ): ArtistCapResult = applyArtistCapByCredits(batch, tailArtistKeys.map { listOf(it) }, allowance)
+
+    /**
+     * Like [applyArtistCap], with the queue tail given as each song's
+     * [creditKeys]: a song fits only if every artist credited on it is
+     * within their own [Allowance].
+     */
+    fun applyArtistCapByCredits(
+        batch: List<PlayableItem.YoutubeTrack>,
+        tailCredits: List<List<String>>,
+        allowance: (String) -> Allowance = { DEFAULT_ALLOWANCE },
     ): ArtistCapResult {
         val placed = mutableListOf<PlayableItem.YoutubeTrack>()
-        val recent = tailArtistKeys.takeLast(ARTIST_WINDOW).toMutableList()
+        val recent = tailCredits.takeLast(ARTIST_WINDOW).toMutableList()
         val pending = batch.toMutableList()
         while (pending.isNotEmpty()) {
-            val i = pending.indexOfFirst { fits(artistKey(it.artist), recent) }
+            val i = pending.indexOfFirst { c -> creditKeys(c.artist).all { fits(it, recent, allowance(it)) } }
             if (i < 0) break
             val pick = pending.removeAt(i)
             placed += pick
-            recent += artistKey(pick.artist)
+            recent += creditKeys(pick.artist)
             if (recent.size > ARTIST_WINDOW) recent.removeAt(0)
         }
         return ArtistCapResult(placed, pending)
     }
 
-    private fun fits(key: String, recent: List<String>): Boolean {
+    private fun fits(key: String, recent: List<List<String>>, a: Allowance): Boolean {
         if (key.isEmpty()) return true
-        val run = recent.takeLastWhile { it == key }.size
-        if (run >= MAX_ARTIST_RUN) return false
-        val inWindow = recent.takeLast(ARTIST_WINDOW - 1).count { it == key }
-        return inWindow < MAX_ARTIST_PER_WINDOW
+        val run = recent.takeLastWhile { key in it }.size
+        if (run >= a.maxRun) return false
+        val inWindow = recent.takeLast(ARTIST_WINDOW - 1).count { key in it }
+        return inWindow < a.maxPerWindow
     }
 
     data class ArtistCapResult(
