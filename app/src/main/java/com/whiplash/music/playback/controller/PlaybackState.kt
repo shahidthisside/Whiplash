@@ -25,6 +25,8 @@ data class PlaybackState(
     val sleepTimerRemainingMs: Long? = null,
     /** Codec/sample rate/etc. of the audio track actually playing (Stats for nerds), or null while unknown. */
     val audioInfo: AudioStreamInfo? = null,
+    /** Ids of queue entries autoplay added rather than the listener. */
+    val autoplayIds: Set<String> = emptySet(),
 )
 
 enum class RepeatMode { OFF, ONE, ALL }

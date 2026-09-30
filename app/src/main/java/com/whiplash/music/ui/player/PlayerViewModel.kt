@@ -150,6 +150,13 @@ class PlayerViewModel(
 
     fun removeFromQueue(index: Int) = controller.removeFromQueue(index)
 
+    /** Removal from the Queue sheet, which shows its own Undo instead of a toast. */
+    fun removeFromQueueQuietly(index: Int) = controller.removeFromQueue(index, announce = false)
+
+    fun restoreToQueue(index: Int, item: PlayableItem, fromAutoplay: Boolean) = controller.restoreToQueue(index, item, fromAutoplay)
+
+    fun shuffleUpcoming() = controller.shuffleUpcoming()
+
     fun moveInQueue(from: Int, to: Int) = controller.moveInQueue(from, to)
 
     fun clearQueueExceptCurrent() = controller.clearQueueExceptCurrent()

@@ -501,7 +501,7 @@ class PlaybackController(
             resetShuffleState()
             autoplayIds.clear()
         }
-        _state.update { it.copy(queue = queue.toList(), currentIndex = currentIndex) }
+        _state.update { it.copy(queue = queue.toList(), currentIndex = currentIndex, autoplayIds = autoplayIds.toSet()) }
         playIndex(currentIndex)
     }
 
@@ -512,7 +512,7 @@ class PlaybackController(
     fun addToQueue(item: PlayableItem) {
         autoplayIds.remove(item.id)
         queue.add(item)
-        _state.update { it.copy(queue = queue.toList()) }
+        _state.update { it.copy(queue = queue.toList(), autoplayIds = autoplayIds.toSet()) }
         ToastController.show("Added to queue")
     }
 
@@ -524,7 +524,7 @@ class PlaybackController(
         shiftPreparedIndicesAfterInsert(insertAt)
         // "Play next" means next, shuffle or not.
         if (_state.value.shuffleEnabled) shuffleForward.addLast(item)
-        _state.update { it.copy(queue = queue.toList()) }
+        _state.update { it.copy(queue = queue.toList(), autoplayIds = autoplayIds.toSet()) }
         ToastController.show("Playing next")
     }
 
@@ -533,7 +533,7 @@ class PlaybackController(
         if (items.isEmpty()) return
         items.forEach { autoplayIds.remove(it.id) }
         queue.addAll(items)
-        _state.update { it.copy(queue = queue.toList()) }
+        _state.update { it.copy(queue = queue.toList(), autoplayIds = autoplayIds.toSet()) }
         ToastController.show(if (items.size == 1) "Added to queue" else "${items.size} songs added to queue")
     }
 
@@ -547,12 +547,15 @@ class PlaybackController(
             shiftPreparedIndicesAfterInsert(start + i)
             if (_state.value.shuffleEnabled) shuffleForward.addLast(item)
         }
-        _state.update { it.copy(queue = queue.toList()) }
+        _state.update { it.copy(queue = queue.toList(), autoplayIds = autoplayIds.toSet()) }
         ToastController.show(if (items.size == 1) "Playing next" else "${items.size} songs playing next")
     }
 
-    /** Removes the item at [index]. If it's the currently playing item, advances to the next one. */
-    fun removeFromQueue(index: Int) {
+    /**
+     * Removes the item at [index]. If it's the currently playing item, advances
+     * to the next one. [announce] = false when the caller shows its own Undo.
+     */
+    fun removeFromQueue(index: Int, announce: Boolean = true) {
         if (index !in queue.indices) return
         val wasCurrentIndex = index == currentIndex
         queue.removeAt(index)
@@ -599,7 +602,30 @@ class PlaybackController(
         // obviously confirmed (especially if that part of the queue sheet
         // isn't even in view), so it gets the same brief confirmation as
         // every other queue action.
-        if (!wasCurrentIndex) ToastController.show("Removed from queue")
+        if (!wasCurrentIndex && announce) ToastController.show("Removed from queue")
+    }
+
+    /** Undo for [removeFromQueue]: puts [item] back at [index]. Never touches the playing track. */
+    fun restoreToQueue(index: Int, item: PlayableItem, fromAutoplay: Boolean) {
+        val at = index.coerceIn(0, queue.size)
+        queue.add(at, item)
+        shiftPreparedIndicesAfterInsert(at)
+        if (at <= currentIndex) currentIndex += 1
+        if (fromAutoplay) autoplayIds += item.id else autoplayIds.remove(item.id)
+        _state.update { it.copy(queue = queue.toList(), currentIndex = currentIndex, autoplayIds = autoplayIds.toSet()) }
+    }
+
+    /** Shuffles only what's still to come; the playing track and history stay put. */
+    fun shuffleUpcoming() {
+        val start = currentIndex + 1
+        if (start >= queue.size - 1) return
+        val upcoming = queue.subList(start, queue.size)
+        val shuffled = upcoming.shuffled()
+        upcoming.clear()
+        upcoming.addAll(shuffled)
+        preparedIndices.clear()
+        _state.update { it.copy(queue = queue.toList()) }
+        ToastController.show("Up next shuffled")
     }
 
     /** Moves a queue item from [from] to [to] (section 21: "reorder"). */
@@ -1062,7 +1088,7 @@ class PlaybackController(
                 autoplayIds += toAdd.map { it.id }
                 queue.addAll(toAdd)
                 trimConsumedQueueHistory()
-                _state.update { it.copy(queue = queue.toList()) }
+                _state.update { it.copy(queue = queue.toList(), currentIndex = currentIndex, autoplayIds = autoplayIds.toSet()) }
             } catch (_: Exception) {
                 // Autoplay extension is a nice-to-have; a failure here must
                 // never disrupt the track that's already playing.
