@@ -96,4 +96,16 @@ class LearningTest {
         assertEquals(0, r.examples)
         assertEquals(Features.HAND.toList(), r.weights().toList())
     }
+
+    // ── 3.4 time of day ────────────────────────────────────────────────
+    @Test fun learnsCalmNightsAndLoudMornings() {
+        val nights = (0 until 8).map { play("Unknown", it * day + 1 * hour, title = "Tanha Dil | Sad Song") }
+        val mornings = (0 until 8).map { play("Unknown", it * day + 8 * hour, title = "Party Night Dance Song") }
+        val e = EnergyByTime.from(nights + mornings, utc)
+        val night = e.preferred(DayPart.NIGHT)!!
+        val morning = e.preferred(DayPart.MORNING)!!
+        assertTrue("night=$night morning=$morning", morning > night + 0.2)
+        assertTrue(e.fit(night.toFloat(), 2 * hour, utc) > e.fit(morning.toFloat(), 2 * hour, utc))
+        assertEquals(0.5, e.fit(0.9f, 14 * hour, utc), 1e-9) // afternoon: no data
+    }
 }
