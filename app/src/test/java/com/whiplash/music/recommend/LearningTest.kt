@@ -108,4 +108,23 @@ class LearningTest {
         assertTrue(e.fit(night.toFloat(), 2 * hour, utc) > e.fit(morning.toFloat(), 2 * hour, utc))
         assertEquals(0.5, e.fit(0.9f, 14 * hour, utc), 1e-9) // afternoon: no data
     }
+
+    // ── 3.5 metrics ────────────────────────────────────────────────────
+    @Test fun metricsPerSourceAndDrift() {
+        val plays = listOf(
+            play("Seed", 0, lang = "hi", id = "s"),
+            play("A", 1, origin = "AUTOPLAY:SEED", seed = "s", lang = "hi"),
+            play("B", 2, origin = "AUTOPLAY:SEED", seed = "s", lang = "pa"), // same family: not drift
+            play("C", 3, origin = "AUTOPLAY:RELATED", seed = "s", lang = "en", completed = false, skipped = true),
+            play("D", 4, origin = "AUTOPLAY", seed = "s", lang = null, completed = false),
+        )
+        val m = RadioMetrics.from(plays)
+        assertEquals(4, m.plays)
+        assertEquals(0.25, m.skipRate, 1e-9)
+        assertEquals(0.5, m.completionRate, 1e-9)
+        assertEquals(1.0 / 3, m.languageDrift, 1e-9)
+        assertEquals(2 to 1.0, m.bySource["SEED"])
+        assertEquals(1 to 0.0, m.bySource["RELATED"])
+        assertEquals(1 to 1.0, m.bySource["?"])
+    }
 }
