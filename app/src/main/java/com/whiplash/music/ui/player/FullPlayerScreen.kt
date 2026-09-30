@@ -107,6 +107,8 @@ fun FullPlayerScreen(
     onToggleFavorite: () -> Unit = {},
     onPlayQueueIndex: (Int) -> Unit = {},
     onRemoveFromQueue: (Int) -> Unit = {},
+    onRestoreToQueue: (Int, com.whiplash.music.domain.model.PlayableItem, Boolean) -> Unit = { _, _, _ -> },
+    onShuffleUpcoming: () -> Unit = {},
     onMoveInQueue: (Int, Int) -> Unit = { _, _ -> },
     onClearQueue: () -> Unit = {},
     autoplayEnabled: Boolean = true,
@@ -654,6 +656,9 @@ fun FullPlayerScreen(
             QueueContent(
                 queue = state.queue,
                 currentIndex = state.currentIndex,
+                isPlaying = state.isPlaying,
+                autoplayIds = state.autoplayIds,
+                tint = if (playerColors.fromArtwork) playerColors.accent else null,
                 autoplayEnabled = autoplayEnabled,
                 onToggleAutoplay = onToggleAutoplay,
                 onPlayIndex = { index ->
@@ -661,7 +666,9 @@ fun FullPlayerScreen(
                     isQueueSheetOpen = false
                 },
                 onRemove = onRemoveFromQueue,
+                onRestore = onRestoreToQueue,
                 onMove = onMoveInQueue,
+                onShuffleUpcoming = onShuffleUpcoming,
                 onClear = onClearQueue,
             )
         }
