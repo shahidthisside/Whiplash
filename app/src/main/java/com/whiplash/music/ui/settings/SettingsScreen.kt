@@ -149,6 +149,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val reduceAnimations by viewModel.reduceAnimations.collectAsState()
     val playerArtworkColors by viewModel.playerArtworkColors.collectAsState()
     val playerLyricStrip by viewModel.playerLyricStrip.collectAsState()
+    val swipeUpForLyrics by viewModel.swipeUpForLyrics.collectAsState()
     val lyricsSource by viewModel.lyricsSource.collectAsState()
     val lyricsBlurUnfocused by viewModel.lyricsBlurUnfocused.collectAsState()
     val homeShelvesEnabled by viewModel.homeShelvesEnabled.collectAsState()
@@ -885,6 +886,18 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     subtitle = "Show the current lyric above the seek bar in the full player.",
                                     checked = playerLyricStrip,
                                     onCheckedChange = viewModel::setPlayerLyricStrip,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.SWIPE_UP_LYRICS)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingToggleRow(
+                                    title = "Swipe up for lyrics",
+                                    icon = Icons.Filled.Lyrics,
+                                    subtitle = "Swipe up on the full player to open the lyrics.",
+                                    checked = swipeUpForLyrics,
+                                    onCheckedChange = viewModel::setSwipeUpForLyrics,
                                 )
                             }
                         }

@@ -101,6 +101,13 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setPlayerLyricStrip(enabled) }
     }
 
+    val swipeUpForLyrics: StateFlow<Boolean> = repository.swipeUpForLyrics
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    fun setSwipeUpForLyrics(enabled: Boolean) {
+        viewModelScope.launch { repository.setSwipeUpForLyrics(enabled) }
+    }
+
     val quickPicksGridCount: StateFlow<Int> = repository.quickPicksGridCount
         .stateIn(viewModelScope, SharingStarted.Eagerly, 9)
 

@@ -127,6 +127,8 @@ fun FullPlayerScreen(
     showStatsForNerds: Boolean = false,
     artworkColorsEnabled: Boolean = true,
     showLyricStrip: Boolean = true,
+    /** Changes each time the swipe-up gesture asks for the lyrics. */
+    openLyricsRequest: Int = 0,
     onSetLyricStrip: (Boolean) -> Unit = {},
     lyricsBlurUnfocused: Boolean = false,
     heroArtwork: Boolean = false,
@@ -154,6 +156,18 @@ fun FullPlayerScreen(
     var isQueueSheetOpen by remember { mutableStateOf(false) }
     var isSleepTimerSheetOpen by remember { mutableStateOf(false) }
     var isLyricsSheetOpen by remember { mutableStateOf(false) }
+    // Swipe up on the player (gesture lives on the player's root, in MainActivity).
+    // Keyed on the counter, so opening the player again doesn't reopen the lyrics.
+    var handledLyricsRequest by remember { mutableStateOf(openLyricsRequest) }
+    LaunchedEffect(openLyricsRequest) {
+        if (openLyricsRequest != handledLyricsRequest) {
+            handledLyricsRequest = openLyricsRequest
+            if (item != null) {
+                isLyricsSheetOpen = true
+                onLyricsSheetOpened()
+            }
+        }
+    }
     var isSpeedSheetOpen by remember { mutableStateOf(false) }
     var isAddToPlaylistSheetOpen by remember { mutableStateOf(false) }
     var isCreatePlaylistDialogOpen by remember { mutableStateOf(false) }

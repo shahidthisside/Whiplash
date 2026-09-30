@@ -285,6 +285,13 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[PLAYER_LYRIC_STRIP_KEY] = enabled }
     }
 
+    /** Swipe up on the full player to open the lyrics. On by default. */
+    val swipeUpForLyrics: Flow<Boolean> = dataStore.data.map { prefs -> prefs[SWIPE_UP_LYRICS_KEY] ?: true }
+
+    suspend fun setSwipeUpForLyrics(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[SWIPE_UP_LYRICS_KEY] = enabled }
+    }
+
     /**
      * 4.7 Monthly Replay: the recap card on Home, and counting plays and
      * listening time for it. Off stops counting; nothing already counted is
@@ -582,6 +589,7 @@ class SettingsRepository(context: Context) {
         val REDUCE_ANIMATIONS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("reduce_animations")
         val PLAYER_ARTWORK_COLORS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_artwork_colors")
         val PLAYER_LYRIC_STRIP_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_lyric_strip")
+        val SWIPE_UP_LYRICS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_swipe_up_lyrics")
         val EXPLORE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("explore_enabled")
         val CLOUD_SYNC_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("cloud_sync_enabled")
         val SHOW_ACCOUNT_EMAIL_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("show_account_email")

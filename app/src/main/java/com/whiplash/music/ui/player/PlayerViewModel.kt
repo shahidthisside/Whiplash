@@ -59,6 +59,9 @@ class PlayerViewModel(
     val playerLyricStrip: StateFlow<Boolean> = settingsRepository.playerLyricStrip
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    val swipeUpForLyrics: StateFlow<Boolean> = settingsRepository.swipeUpForLyrics
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     /** The lyric line above the scrubber, switched from the lyrics sheet (same setting as Settings > Now Playing). */
     fun setPlayerLyricStrip(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setPlayerLyricStrip(enabled) }

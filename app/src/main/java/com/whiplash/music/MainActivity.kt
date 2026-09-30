@@ -380,6 +380,9 @@ private fun WhiplashApp() {
     // 2.11: predictive back previews the player's exit (shrink) and only
     // collapses on commit; a plain back press still collapses immediately.
     val playerDismiss = com.whiplash.music.ui.player.rememberPlayerDismissState()
+    // Bumped by the swipe-up gesture; FullPlayerScreen opens its lyrics sheet on each change.
+    var openLyricsRequest by remember { mutableStateOf(0) }
+    val swipeUpForLyrics by playerViewModel.swipeUpForLyrics.collectAsState()
     var playerBackGestureActive by remember { mutableStateOf(false) }
     com.whiplash.music.ui.player.PlayerPredictiveBack(
         enabled = isPlayerExpanded,
@@ -1020,6 +1023,7 @@ private fun WhiplashApp() {
                             heightPx = { playerHeightPx },
                             enabled = !playerBackGestureActive,
                             onDismiss = { isPlayerExpanded = false },
+                            onSwipeUp = if (swipeUpForLyrics) ({ openLyricsRequest++ }) else null,
                         )
                         .background(playerDarkPalette?.background ?: MaterialTheme.colorScheme.background)
                         .clickable(
@@ -1072,6 +1076,7 @@ private fun WhiplashApp() {
                         showStatsForNerds = statsForNerdsEnabled,
                         artworkColorsEnabled = playerArtworkColors,
                         showLyricStrip = playerLyricStrip,
+                        openLyricsRequest = openLyricsRequest,
                         onSetLyricStrip = playerViewModel::setPlayerLyricStrip,
                         heroArtwork = playerHeroArtwork,
                         lyricsBlurUnfocused = lyricsBlurUnfocused,

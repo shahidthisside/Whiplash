@@ -45,6 +45,7 @@ enum class SettingEntry(val section: SettingsSection, val title: String, val key
     FULL_BLEED(SettingsSection.NOW_PLAYING, "Full-bleed artwork", "hero edge to edge album art"),
     STATS(SettingsSection.NOW_PLAYING, "Stats for Nerds", "codec bitrate sample rate channels"),
     LYRIC_LINE(SettingsSection.LYRICS, "Lyric line in player", "current lyric strip"),
+    SWIPE_UP_LYRICS(SettingsSection.LYRICS, "Swipe up for lyrics", "gesture swipe up open lyrics full player"),
     LYRICS_BLUR(SettingsSection.LYRICS, "Blur other lyric lines", "focus"),
     LYRICS_SOURCE(SettingsSection.LYRICS, "Lyrics source", "lrclib lyrics.ovh provider"),
     MUSIC_TASTE(SettingsSection.APPEARANCE, "Your music taste", "personalise personalize onboarding languages genres artists favourite home recommendations"),

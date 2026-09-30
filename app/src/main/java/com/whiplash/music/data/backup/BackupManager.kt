@@ -460,6 +460,7 @@ class BackupManager(
         put("reduceAnimations", settingsRepository.reduceAnimations.first())
         put("playerArtworkColors", settingsRepository.playerArtworkColors.first())
         put("playerLyricStrip", settingsRepository.playerLyricStrip.first())
+        put("swipeUpForLyrics", settingsRepository.swipeUpForLyrics.first())
         put("lyricsSource", settingsRepository.lyricsSource.first().name)
         put("lyricsBlurUnfocused", settingsRepository.lyricsBlurUnfocused.first())
         put("speedDialListView", settingsRepository.speedDialListView.first())
@@ -574,6 +575,9 @@ class BackupManager(
                     com.whiplash.music.data.lyrics.LyricsSourcePreference.valueOf(s.getString("lyricsSource")),
                 )
             }
+        }
+        if (s.has("swipeUpForLyrics")) {
+            runCatching { settingsRepository.setSwipeUpForLyrics(s.getBoolean("swipeUpForLyrics")) }
         }
         if (s.has("playerLyricStrip")) {
             runCatching { settingsRepository.setPlayerLyricStrip(s.getBoolean("playerLyricStrip")) }
