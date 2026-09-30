@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.filled.GridView
@@ -117,12 +116,13 @@ fun HomeScreen(
             app.libraryRepository, app.youtubeSearchRepository, app.settingsRepository, app.cloudSyncManager.onlineChanges(),
             QuickPicksRadio(app.database.playEventDao()) { id ->
                 // YT Music's "You might also like" for the seed, then its radio.
-                kotlinx.coroutines.coroutineScope {
-                    val related = async { runCatching { app.musicSources.related(id) }.getOrDefault(emptyList()) }
-                    val radio = async { runCatching { app.musicSources.radioPage(id, null).items }.getOrDefault(emptyList()) }
-                    (related.await().take(12) + radio.await()).distinctBy { it.id }
-                }
+                // Radio first: its response also says where "related" lives,
+                // so related needs one request instead of two, in the same time.
+                val radio = runCatching { app.musicSources.radioPage(id, null).items }.getOrDefault(emptyList())
+                val related = runCatching { app.musicSources.related(id) }.getOrDefault(emptyList())
+                (related.take(12) + radio).distinctBy { it.id }
             },
+            app.quickPicksSnapshot,
         ),
     )
     val songActionsViewModel: SongActionsViewModel = viewModel(

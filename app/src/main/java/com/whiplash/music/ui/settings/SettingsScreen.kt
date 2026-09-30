@@ -319,6 +319,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                 showResetRecsConfirm = false
                 cloudScope.launch {
                     app.playbackController.resetRecommendations()
+                    app.quickPicksSnapshot.clear()
                     com.whiplash.music.ui.common.ToastController.show("Recommendations reset")
                 }
             },

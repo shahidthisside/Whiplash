@@ -8,6 +8,7 @@ import com.whiplash.music.recommend.RadioRules
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Quick Picks' best source, the way YouTube Music builds its own: the song
@@ -31,7 +32,9 @@ class QuickPicksRadio(
         return coroutineScope {
             seeds.map { id ->
                 async {
-                    runCatching { fetchRadio(id) }.getOrDefault(emptyList())
+                    // One stuck radio mustn't hold up the rest; it just sits
+                    // this refresh out.
+                    runCatching { withTimeoutOrNull(RADIO_TIMEOUT_MS) { fetchRadio(id) } }.getOrNull().orEmpty()
                         .filter { it.id != id && it.id !in rejected && RadioRules.artistKey(it.artist) !in blocked }
                 }
             }.awaitAll()
@@ -59,6 +62,7 @@ class QuickPicksRadio(
 
     private companion object {
         const val MAX_SEEDS = 3
+        const val RADIO_TIMEOUT_MS = 8_000L
         const val DAY = 24 * 3_600_000L
     }
 }

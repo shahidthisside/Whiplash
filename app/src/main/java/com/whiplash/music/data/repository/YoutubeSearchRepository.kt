@@ -11,8 +11,6 @@ import com.whiplash.music.domain.model.YoutubePlaylistResult
 import com.whiplash.music.playback.provider.newpipe.YoutubeSearchProvider
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import org.json.JSONArray
-import org.json.JSONObject
 
 /**
  * Bridges [YoutubeSearchProvider], [SearchCacheDao], and [SearchHistoryDao]:
@@ -144,37 +142,9 @@ class YoutubeSearchRepository(
 
     private fun normalize(query: String): String = query.trim().lowercase()
 
-    private fun serialize(results: List<PlayableItem.YoutubeTrack>): String {
-        val array = JSONArray()
-        results.forEach { track ->
-            array.put(
-                JSONObject().apply {
-                    put("id", track.id)
-                    put("title", track.title)
-                    put("artist", track.artist)
-                    put("album", track.album ?: JSONObject.NULL)
-                    put("artworkUri", track.artworkUri ?: JSONObject.NULL)
-                    put("durationMs", track.durationMs)
-                },
-            )
-        }
-        return array.toString()
-    }
+    private fun serialize(results: List<PlayableItem.YoutubeTrack>): String = YoutubeTrackJson.encode(results)
 
-    private fun deserialize(json: String): List<PlayableItem.YoutubeTrack> {
-        val array = JSONArray(json)
-        return (0 until array.length()).map { i ->
-            val obj = array.getJSONObject(i)
-            PlayableItem.YoutubeTrack(
-                id = obj.getString("id"),
-                title = obj.getString("title"),
-                artist = obj.getString("artist"),
-                album = obj.optString("album", null.toString()).takeIf { it != "null" },
-                artworkUri = obj.optString("artworkUri", null.toString()).takeIf { it != "null" },
-                durationMs = obj.getLong("durationMs"),
-            )
-        }
-    }
+    private fun deserialize(json: String): List<PlayableItem.YoutubeTrack> = YoutubeTrackJson.decode(json)
 
     private companion object {
         const val TAG = "YoutubeSearchRepository"

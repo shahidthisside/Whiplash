@@ -93,7 +93,10 @@ class WhiplashApplication : Application() {
             downloadDao = database.downloadDao(),
             replayTallyDao = database.replayTallyDao(),
             playEventDao = database.playEventDao(),
-            forgetRadioLearning = { radioLearnedStore.clear() },
+            forgetRadioLearning = {
+                radioLearnedStore.clear()
+                quickPicksSnapshot.clear()
+            },
         )
     }
 
@@ -104,7 +107,17 @@ class WhiplashApplication : Application() {
     /** What the radio learned about this listener; wiped with listening history. */
     val radioLearnedStore by lazy { com.whiplash.music.recommend.FileLearnedStore(java.io.File(filesDir, "radio_learned.json")) }
 
-    private val innerTube by lazy { com.whiplash.music.innertube.InnerTubeClient(okHttpClient) }
+    /** The last Quick Picks, shown instantly on the next launch; wiped with history. */
+    val quickPicksSnapshot by lazy {
+        com.whiplash.music.data.repository.QuickPicksSnapshot(java.io.File(filesDir, "quick_picks.json"))
+    }
+
+    private val innerTube by lazy {
+        com.whiplash.music.innertube.InnerTubeClient(
+            okHttpClient,
+            com.whiplash.music.innertube.SharedPrefsVersionStore(getSharedPreferences("innertube", MODE_PRIVATE)),
+        )
+    }
 
     /** Radio and "related" songs: YouTube Music's own API, NewPipe as the fallback. */
     val musicSources: com.whiplash.music.recommend.MusicSources by lazy {

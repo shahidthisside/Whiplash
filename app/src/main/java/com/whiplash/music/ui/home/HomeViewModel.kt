@@ -53,6 +53,8 @@ class HomeViewModel(
     private val onlineChanges: kotlinx.coroutines.flow.Flow<Boolean>? = null,
     /** Song radios of what the listener finishes: Quick Picks' first source. */
     private val radioSource: QuickPicksRadio? = null,
+    /** The last full Quick Picks, shown at once while a fresh list loads. */
+    private val snapshot: com.whiplash.music.data.repository.QuickPicksSnapshot? = null,
 ) : ViewModel() {
 
     // Layout settings held here (not collected fresh in the screen) so their
@@ -401,15 +403,23 @@ class HomeViewModel(
     val quickPicksSettled: StateFlow<Boolean> = _quickPicksSettled
 
     private suspend fun fetchQuickPicks() {
+        // Opening Home: the last full list (radios included) shows at once,
+        // like YouTube Music's own feed, and is replaced when the fresh one
+        // is ready.
+        if (_quickPicks.value.isEmpty()) {
+            val saved = snapshot?.read().orEmpty()
+            if (saved.isNotEmpty()) _quickPicks.value = saved
+        }
         val queries = personalizedQuickPicksQueries()
 
-        // Show cached results immediately (from any query that already
-        // has a fresh cache entry) while a real network refresh runs,
-        // same "cache -> display immediately -> background refresh"
-        // pattern YoutubeSearchRepository already documents.
-        val cachedSets = queries.map { youtubeSearchRepository.cachedResults(it) ?: emptyList() }
-        val cachedBlend = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { blend(cachedSets) }
-        if (cachedBlend.isNotEmpty()) _quickPicks.value = cachedBlend
+        // Nothing saved yet: searches cached in the last few minutes stand in
+        // while the real refresh runs. Never over a list already showing, so
+        // a refresh swaps the list once instead of twice.
+        if (_quickPicks.value.isEmpty()) {
+            val cachedSets = queries.map { youtubeSearchRepository.cachedResults(it) ?: emptyList() }
+            val cachedBlend = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { blend(cachedSets) }
+            if (cachedBlend.isNotEmpty()) _quickPicks.value = cachedBlend
+        }
 
         _isLoadingQuickPicks.value = true
         try {
@@ -430,6 +440,16 @@ class HomeViewModel(
                 val resultSets = queries.map { query ->
                     async { runCatching { youtubeSearchRepository.search(query) }.getOrDefault(emptyList()) }
                 }.awaitAll()
+                // Still nothing on screen (first launch): the searches land in
+                // a second or two, the radios take longer. Show the searches
+                // now; the full blend below replaces them as usual.
+                if (_quickPicks.value.isEmpty()) {
+                    val early = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { blend(resultSets) }
+                    if (early.isNotEmpty()) {
+                        _quickPicks.value = early
+                        com.whiplash.music.ui.onboarding.OnboardingController.homeReady.value = true
+                    }
+                }
                 // Radios of songs you finish lead; artist/taste searches fill in
                 // and keep it fresh.
                 val sets = radios.await() + resultSets
@@ -441,7 +461,9 @@ class HomeViewModel(
             // rather than clearing them, same as the old catch-all
             // behavior.
             if (blended.isNotEmpty()) {
-                _quickPicks.value = fillPages(blended)
+                val full = fillPages(blended)
+                _quickPicks.value = full
+                snapshot?.write(full)
                 com.whiplash.music.ui.onboarding.OnboardingController.homeReady.value = true
             }
         } finally {
@@ -539,14 +561,9 @@ class HomeViewModel(
         val history = withTimeoutOrNull(5_000L) {
             libraryRepository.observeRecentlyPlayed(limit = 25).first()
         } ?: emptyList()
-        val topArtists = history
-            .groupingBy { it.artist }
-            .eachCount()
-            .entries
-            .filter { it.key.isNotBlank() }
-            .sortedWith(compareByDescending { it.value })
-            .take(MAX_BLEND_ARTISTS)
-            .map { it.key }
+        // Counted by main artist, so "A" and "A & B" are one artist and the
+        // search is "A songs" rather than the whole credit line.
+        val topArtists = com.whiplash.music.domain.model.rankArtists(history.map { it.artist }, MAX_BLEND_ARTISTS)
         // Onboarding picks fill whatever listening history doesn't cover yet, so
         // Home is personal from the first launch and gradually becomes all
         // history. Nothing picked and nothing played: the generic default.
@@ -591,6 +608,8 @@ class HomeViewModel(
      */
     fun removeFromQuickPicks(item: PlayableItem.YoutubeTrack) {
         _quickPicks.value = _quickPicks.value.filter { it.id != item.id }
+        // So it doesn't come back with the saved list on the next launch.
+        viewModelScope.launch { snapshot?.write(_quickPicks.value) }
         ToastController.show("Removed from Quick Picks")
     }
 
