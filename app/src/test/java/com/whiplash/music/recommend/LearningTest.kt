@@ -73,4 +73,27 @@ class LearningTest {
         val copy = SourceBandit().apply { load(JSONObject(b.toJson().toString())) }
         assertEquals(b.mean(RadioSource.KEPT), copy.mean(RadioSource.KEPT), 1e-9)
     }
+
+    // ── 3.3 ranker ─────────────────────────────────────────────────────
+    @Test fun rankerLearnsAFeatureThatPredictsKeeps() {
+        val r = Ranker()
+        val rnd = Random(1)
+        fun x(audio: Boolean) = DoubleArray(Features.COUNT) { 0.5 }.also { it[Features.AUDIO] = if (audio) 1.0 else 0.0; it[Features.RANK] = rnd.nextDouble() }
+        val before = r.weights()[Features.AUDIO]
+        repeat(600) { r.update(x(true), kept = true); r.update(x(false), kept = false) }
+        assertTrue(r.weights()[Features.AUDIO] > before + 0.5)
+        assertTrue(r.predict(x(true)) > r.predict(x(false)) + 0.2)
+        assertEquals(0.6, r.trust(), 1e-9)
+        val copy = Ranker().apply { load(JSONObject(r.toJson().toString())) }
+        assertEquals(r.predict(x(true)), copy.predict(x(true).also { it[Features.RANK] = 0.3 }.let { x -> x }), 0.5)
+        assertEquals(r.examples, copy.examples)
+    }
+
+    @Test fun rankerStartsAtHandWeightsAndIgnoresBadState() {
+        val r = Ranker()
+        assertEquals(0.0, r.trust(), 1e-9)
+        r.load(JSONObject("{\"w\":[1,2],\"b\":0,\"n\":5}"))
+        assertEquals(0, r.examples)
+        assertEquals(Features.HAND.toList(), r.weights().toList())
+    }
 }
