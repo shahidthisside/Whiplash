@@ -55,4 +55,22 @@ class LearningTest {
         val copy = CoListen().apply { loadPages(JSONObject(c.toJson().toString())) }
         assertEquals(c.similarity("arijitsingh", "pritam"), copy.similarity("arijitsingh", "pritam"), 1e-9)
     }
+
+    // ── 3.2 bandit ─────────────────────────────────────────────────────
+    @Test fun banditLearnsWhichSourceWorks() {
+        val b = SourceBandit(Random(7))
+        repeat(40) { b.reward(RadioSource.RELATED, kept = true); b.reward(RadioSource.KEPT, kept = false) }
+        val picks = (1..200).map { b.choose(setOf(RadioSource.KEPT, RadioSource.RELATED)) }
+        assertTrue(picks.count { it == RadioSource.RELATED } > 180)
+        assertNull(b.choose(emptySet()))
+    }
+
+    @Test fun banditStillExploresAndPersists() {
+        val b = SourceBandit(Random(3))
+        repeat(5) { b.reward(RadioSource.KEPT, kept = true) }
+        val picks = (1..300).map { b.choose(setOf(RadioSource.KEPT, RadioSource.SAMPLED)) }
+        assertTrue(picks.count { it == RadioSource.SAMPLED } in 5..150)
+        val copy = SourceBandit().apply { load(JSONObject(b.toJson().toString())) }
+        assertEquals(b.mean(RadioSource.KEPT), copy.mean(RadioSource.KEPT), 1e-9)
+    }
 }
