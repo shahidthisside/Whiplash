@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -52,9 +53,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.SwipeToDismissBoxState
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -137,6 +138,8 @@ fun QueueContent(
     tint: Color? = null,
     onRestore: (index: Int, item: PlayableItem, fromAutoplay: Boolean) -> Unit = { _, _, _ -> },
     onShuffleUpcoming: () -> Unit = {},
+    /** A drag has started; the sheet uses it to go full height so there's room to move. */
+    onReorderStart: () -> Unit = {},
 ) {
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -187,6 +190,7 @@ fun QueueContent(
         localOrder = latestUpcoming
         reorder.start(key)
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        onReorderStart()
     }
 
     fun endDrag() {
@@ -218,7 +222,10 @@ fun QueueContent(
 
     var showPlayed by remember { mutableStateOf(false) }
 
-    Box {
+    // Always as tall as the screen allows, so the sheet's "full" position
+    // doesn't move when a song is removed or restored (it used to drop
+    // back to half height).
+    Box(modifier = Modifier.fillMaxHeight()) {
         Column {
             QueueHeader(
                 upcoming = upcoming,
@@ -338,7 +345,8 @@ fun QueueContent(
                         removed?.let { onRestore(it.index, it.item, it.fromAutoplay) }
                         removed = null
                     },
-                    modifier = Modifier.align(Alignment.BottomCenter),
+                    // Top, not bottom: at half height the bottom of the list is off screen.
+                    modifier = Modifier.align(Alignment.TopCenter),
                 )
             }
         }
@@ -569,8 +577,16 @@ private fun LazyItemScope.QueueRow(
     var menuOpen by remember { mutableStateOf(false) }
     var gone by remember { mutableStateOf(false) }
     val latestRemove by rememberUpdatedState(onRemove)
-    val swipe = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
+    // Plain remember, not the saveable rememberSwipeToDismissBoxState: the
+    // saved "dismissed" value came back with a row restored by Undo (same
+    // key) and removed it again straight away.
+    val density = LocalDensity.current
+    val swipe = remember {
+        SwipeToDismissBoxState(
+            initialValue = SwipeToDismissBoxValue.Settled,
+            density = density,
+            positionalThreshold = { distance -> distance * 0.4f },
+            confirmValueChange = { value ->
             if (value == SwipeToDismissBoxValue.EndToStart && !gone) {
                 gone = true
                 latestRemove()
@@ -579,7 +595,8 @@ private fun LazyItemScope.QueueRow(
                 false
             }
         },
-    )
+        )
+    }
     val elevation by animateFloatAsState(if (dragging) 1f else 0f, tween(GlassTokens.animFast), label = "dragLift")
     val shape = RoundedCornerShape(WhiplashRadius.small)
     val itemModifier = when {
@@ -746,9 +763,9 @@ private fun UndoBar(removed: RemovedEntry?, onUndo: () -> Unit, modifier: Modifi
     if (removed != null) shown = removed
     AnimatedVisibility(
         visible = removed != null,
-        enter = fadeIn(tween(GlassTokens.animRegular)) + slideInVertically(tween(GlassTokens.animRegular)) { it / 2 },
-        exit = fadeOut(tween(GlassTokens.animFast)) + slideOutVertically(tween(GlassTokens.animFast)) { it / 2 },
-        modifier = modifier.padding(bottom = GlassTokens.spaceMd),
+        enter = fadeIn(tween(GlassTokens.animRegular)) + slideInVertically(tween(GlassTokens.animRegular)) { -it / 2 },
+        exit = fadeOut(tween(GlassTokens.animFast)) + slideOutVertically(tween(GlassTokens.animFast)) { -it / 2 },
+        modifier = modifier.padding(top = GlassTokens.spaceXs),
     ) {
         val shape = RoundedCornerShape(WhiplashRadius.pill)
         Row(

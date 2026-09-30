@@ -1,5 +1,6 @@
 package com.whiplash.music.ui.player
 
+import kotlinx.coroutines.launch
 import com.whiplash.music.ui.theme.glassSource
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.requiredWidth
@@ -652,7 +653,12 @@ fun FullPlayerScreen(
     }
 
     if (isQueueSheetOpen) {
-        GlassSheet(onDismissRequest = { isQueueSheetOpen = false }) {
+        // Opens at half height (the playing song and the next few), and
+        // drags or scrolls up to full. Only the queue does this; the other
+        // sheets open fully so every option is visible at once.
+        val queueSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = false)
+        val queueSheetScope = androidx.compose.runtime.rememberCoroutineScope()
+        GlassSheet(onDismissRequest = { isQueueSheetOpen = false }, sheetState = queueSheetState) {
             QueueContent(
                 queue = state.queue,
                 currentIndex = state.currentIndex,
@@ -669,6 +675,11 @@ fun FullPlayerScreen(
                 onRestore = onRestoreToQueue,
                 onMove = onMoveInQueue,
                 onShuffleUpcoming = onShuffleUpcoming,
+                onReorderStart = {
+                    if (queueSheetState.currentValue != androidx.compose.material3.SheetValue.Expanded) {
+                        queueSheetScope.launch { runCatching { queueSheetState.expand() } }
+                    }
+                },
                 onClear = onClearQueue,
             )
         }
