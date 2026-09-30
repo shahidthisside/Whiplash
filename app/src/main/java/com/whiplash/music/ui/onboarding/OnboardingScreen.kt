@@ -310,7 +310,6 @@ fun OnboardingFlow(
                         scrollable = false,
                     ) {
                         val art by vm.genreArt.collectAsState()
-                        LaunchedEffect(Unit) { vm.loadGenreArt() } // retries any that failed
                         GenreGrid(genres, art) { name -> genres = genres.toggle(name) }
                     }
                     OnboardingStep.ARTISTS -> PickStep(

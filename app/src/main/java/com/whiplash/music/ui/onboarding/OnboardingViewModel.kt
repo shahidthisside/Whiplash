@@ -10,8 +10,6 @@ import com.whiplash.music.domain.model.YoutubeArtistResult
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,11 +18,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Onboarding's data side: artist photos for the suggestions, artist search,
- * and saving the picks. Everything network is best effort: with no
- * connection the artist step still works, just with initials for photos.
+ * and saving the picks. Covers, genre tiles and the suggested artists'
+ * photos ship with the app ([OnboardingArt]), so every step looks complete
+ * with no connection. The network only fills in artists that aren't
+ * bundled, retrying until it gets through.
  */
 class OnboardingViewModel(
     private val search: YoutubeSearchRepository,
@@ -32,7 +33,7 @@ class OnboardingViewModel(
 ) : ViewModel() {
 
     /** Artist name → photo URL (null = looked up, none found). Missing = not looked up yet. */
-    private val _photos = MutableStateFlow<Map<String, String?>>(emptyMap())
+    private val _photos = MutableStateFlow<Map<String, String?>>(OnboardingArt.artists)
     val photos: StateFlow<Map<String, String?>> = _photos
 
     private val _searchResults = MutableStateFlow<List<YoutubeArtistResult>>(emptyList())
@@ -43,50 +44,38 @@ class OnboardingViewModel(
 
     private val lookups = Semaphore(4)
 
-    /** Genre name → cover of its top playlist (same source as Explore's genre tiles). */
-    private val _genreArt = MutableStateFlow<Map<String, String>>(emptyMap())
-    val genreArt: StateFlow<Map<String, String>> = _genreArt
-    private val requestedGenres = mutableSetOf<String>()
+    /** Genre name → tile artwork, bundled. */
+    val genreArt: StateFlow<Map<String, String>> = MutableStateFlow(OnboardingArt.genres)
 
-    fun loadGenreArt() {
-        OnboardingCatalog.genres.forEach { g ->
-            if (!requestedGenres.add(g.name)) return@forEach
-            viewModelScope.launch {
-                val url = lookups.withPermit {
-                    runCatching { search.searchPlaylists("${g.query} playlist") }.getOrNull()?.firstNotNullOfOrNull { it.artworkUrl }
-                }
-                if (url != null) _genreArt.update { it + (g.name to url) } else requestedGenres.remove(g.name)
-            }
-        }
-    }
+    /** Album covers for the welcome collage and sign-in step, bundled. */
+    val welcomeCovers: StateFlow<List<String>> = MutableStateFlow(OnboardingArt.covers)
 
-    /** Album covers for the welcome collage; empty (a gradient collage) when offline. */
-    private val _welcomeCovers = MutableStateFlow<List<String>>(emptyList())
-    val welcomeCovers: StateFlow<List<String>> = _welcomeCovers
+    /** Names being looked up right now, so a retry never runs twice. */
+    private val inFlight = mutableSetOf<String>()
 
-    init {
-        viewModelScope.launch {
-            val covers = runCatching { search.searchAlbums("top albums 2026") }.getOrDefault(emptyList())
-                .mapNotNull { it.artworkUrl }.distinct().take(12)
-            _welcomeCovers.value = covers
-        }
-        // Warm up the genre covers while the first screens are read.
-        loadGenreArt()
-    }
-
-    /** Looks up photos for [names] not seen yet, a few at a time. */
+    /**
+     * Looks up photos for [names] that aren't bundled or known yet, a few at
+     * a time. A failed lookup (no connection, timeout) is retried with
+     * backoff instead of being remembered as "no photo"; only a search that
+     * worked but found no artwork records null.
+     */
     fun loadPhotos(names: List<String>) {
-        val todo = names.filter { it !in _photos.value }
+        val todo = names.filter { it !in _photos.value && inFlight.add(it) }
         if (todo.isEmpty()) return
-        viewModelScope.launch {
-            todo.map { name ->
-                async {
-                    lookups.withPermit {
-                        val url = runCatching { search.searchArtists(name).firstOrNull()?.artworkUrl }.getOrNull()
-                        _photos.update { it + (name to url) }
+        todo.forEach { name ->
+            viewModelScope.launch {
+                for (wait in PHOTO_RETRY_DELAYS_MS) {
+                    delay(wait)
+                    val result = lookups.withPermit {
+                        withTimeoutOrNull(LOOKUP_TIMEOUT_MS) { runCatching { search.searchArtists(name) }.getOrNull() }
+                    }
+                    if (result != null) {
+                        _photos.update { it + (name to result.firstOrNull()?.artworkUrl) }
+                        break
                     }
                 }
-            }.awaitAll()
+                inFlight.remove(name)
+            }
         }
     }
 
@@ -116,6 +105,12 @@ class OnboardingViewModel(
     suspend fun finish(languages: List<String>, genres: List<String>, artists: List<String>) {
         settings.setTaste(languages, genres, artists)
         settings.setOnboardingDone(true)
+    }
+
+    private companion object {
+        const val LOOKUP_TIMEOUT_MS = 8_000L
+        /** First try at once, then back off; about a minute in total before giving up. */
+        val PHOTO_RETRY_DELAYS_MS = listOf(0L, 3_000L, 8_000L, 15_000L, 30_000L)
     }
 
     class Factory(

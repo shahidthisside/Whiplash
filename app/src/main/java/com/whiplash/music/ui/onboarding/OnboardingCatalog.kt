@@ -89,17 +89,34 @@ object OnboardingCatalog {
     )
 
     /**
-     * Artist names to suggest for the picked [languages] and [genres], most
-     * relevant first, without repeats. Nothing picked: a mix of English and
-     * Hindi, the two biggest groups.
+     * The best-known names across the app's audience, used to fill the
+     * artist step when the picks alone give only a handful (Marathi, say).
      */
-    fun suggestedArtists(languages: List<String>, genres: List<String>, max: Int = 24): List<String> {
+    private val topArtists = listOf(
+        "Arijit Singh", "Taylor Swift", "Diljit Dosanjh", "The Weeknd", "Shreya Ghoshal", "AP Dhillon",
+        "Ed Sheeran", "Pritam", "Billie Eilish", "A. R. Rahman", "Karan Aujla", "Dua Lipa",
+        "Atif Aslam", "BTS", "Sidhu Moose Wala", "Coldplay", "Badshah", "Bad Bunny",
+        "Anirudh Ravichander", "Drake", "Neha Kakkar", "Bruno Mars", "Sid Sriram", "Eminem",
+        "Jubin Nautiyal", "BLACKPINK", "Imagine Dragons", "Shakira",
+    )
+
+    /**
+     * Artist names to suggest for the picked [languages] and [genres], most
+     * relevant first, without repeats, topped up with [topArtists] to at
+     * least [min] so the step never looks empty. Nothing picked: a mix of
+     * English and Hindi, the two biggest groups.
+     */
+    fun suggestedArtists(languages: List<String>, genres: List<String>, max: Int = 24, min: Int = 24): List<String> {
         val langs = languages.ifEmpty { listOf("English", "Hindi") }
         val lists = langs.mapNotNull { artistsByLanguage[it] } + genres.mapNotNull { artistsByGenre[it] }
         // Round-robin so every pick is represented near the top.
         val out = LinkedHashSet<String>()
         val longest = lists.maxOfOrNull { it.size } ?: 0
         for (i in 0 until longest) for (list in lists) list.getOrNull(i)?.let { out += it }
+        for (name in topArtists) {
+            if (out.size >= min) break
+            out += name
+        }
         return out.take(max)
     }
 
