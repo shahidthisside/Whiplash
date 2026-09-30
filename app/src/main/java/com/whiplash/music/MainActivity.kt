@@ -1075,6 +1075,8 @@ private fun WhiplashApp() {
                         artworkColorsEnabled = playerArtworkColors,
                         showLyricStrip = playerLyricStrip,
                         openLyricsRequest = openLyricsRequest,
+                        lyricsPeekFraction = { if (playerHeightPx > 0f) playerDismiss.lift / playerHeightPx else 0f },
+                        onLyricsPeekConsumed = { playerDismiss.clearLift() },
                         onSetLyricStrip = playerViewModel::setPlayerLyricStrip,
                         heroArtwork = playerHeroArtwork,
                         lyricsBlurUnfocused = lyricsBlurUnfocused,

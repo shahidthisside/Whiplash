@@ -29,14 +29,25 @@ import kotlinx.coroutines.launch
 class PlayerDismissState internal constructor() {
     internal val progressAnim = Animatable(0f)
 
-    /** Upward pull in px while swiping up for lyrics; drawn with resistance. */
+    /**
+     * Upward finger travel in px while swiping up for lyrics. The player
+     * itself stays put; the lyrics follow this up from the bottom edge.
+     */
     internal val liftAnim = Animatable(0f)
 
     /** 0..1, read in the draw layer only. */
     val progress: Float get() = progressAnim.value
 
+    /** How far the lyrics have been pulled up so far, in px. */
+    val lift: Float get() = liftAnim.value
+
+    /** Once the lyrics own their position, the pull is handed over and cleared. */
+    suspend fun clearLift() {
+        liftAnim.snapTo(0f)
+    }
+
     internal suspend fun settleLift() {
-        liftAnim.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium))
+        liftAnim.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
     }
 
     internal suspend fun settleBack() {
@@ -64,8 +75,6 @@ private const val DISMISS_VELOCITY = 1800f
 private const val SWIPE_UP_DP = 72
 /** Upward fling speed (px/s) that opens the lyrics regardless of distance. */
 private const val SWIPE_UP_VELOCITY = 1500f
-/** The player moves this fraction of the finger's upward travel, as a hint. */
-private const val LIFT_RESISTANCE = 0.25f
 /** How far the player shrinks while a predictive back is in progress. */
 private const val BACK_PREVIEW_SHRINK = 0.1f
 
@@ -85,8 +94,8 @@ fun Modifier.playerDragToDismiss(
 ): Modifier = composed {
     val scope = rememberCoroutineScope()
     val swipeUpPx = with(androidx.compose.ui.platform.LocalDensity.current) { SWIPE_UP_DP.dp.toPx() }
-    // Raw upward travel of the finger (px), kept outside the animatables so
-    // the threshold isn't affected by the resistance applied when drawing.
+    // Upward travel of the finger (px), tracked synchronously so
+    // onDragStopped always sees the whole gesture.
     val upTravel = remember { floatArrayOf(0f) }
     val latestSwipeUp = androidx.compose.runtime.rememberUpdatedState(onSwipeUp)
     val dragState = rememberDraggableState { delta ->
@@ -95,8 +104,8 @@ fun Modifier.playerDragToDismiss(
         // Travel is tracked here, synchronously, so onDragStopped always sees
         // the full gesture; only the drawing is posted.
         if (canLift && state.progress == 0f && (delta < 0f || upTravel[0] > 0f)) {
-            upTravel[0] = (upTravel[0] - delta).coerceAtLeast(0f)
-            val lift = upTravel[0] * LIFT_RESISTANCE
+            upTravel[0] = (upTravel[0] - delta).coerceIn(0f, h)
+            val lift = upTravel[0]
             scope.launch { state.liftAnim.snapTo(lift) }
         } else {
             scope.launch { state.progressAnim.snapTo((state.progress + delta / h).coerceIn(0f, 1f)) }
@@ -113,8 +122,9 @@ fun Modifier.playerDragToDismiss(
             upTravel[0] = 0f
             when {
                 swipeUp != null && state.progress == 0f && (lifted >= swipeUpPx || (lifted > 0f && velocity <= -SWIPE_UP_VELOCITY)) -> {
+                    // The lyrics carry on from where the finger left them
+                    // and clear the lift once they've taken over.
                     swipeUp()
-                    state.settleLift()
                 }
                 state.progress >= DISMISS_FRACTION || velocity >= DISMISS_VELOCITY -> onDismiss()
                 else -> {
@@ -146,7 +156,7 @@ fun Modifier.playerDismissTransform(
         shape = androidx.compose.foundation.shape.RoundedCornerShape((p * 32).dp)
         clip = p > 0f
     } else {
-        translationY = p * heightPx() - state.liftAnim.value
+        translationY = p * heightPx()
     }
 }
 

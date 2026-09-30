@@ -128,6 +128,10 @@ fun FullPlayerScreen(
     showLyricStrip: Boolean = true,
     /** Changes each time the swipe-up gesture asks for the lyrics. */
     openLyricsRequest: Int = 0,
+    /** 0..1: how far a swipe up has pulled the lyrics in, before it's released. */
+    lyricsPeekFraction: () -> Float = { 0f },
+    /** The lyrics have taken over from the swipe; the pull can be cleared. */
+    onLyricsPeekConsumed: suspend () -> Unit = {},
     onSetLyricStrip: (Boolean) -> Unit = {},
     lyricsBlurUnfocused: Boolean = false,
     heroArtwork: Boolean = false,
@@ -164,8 +168,35 @@ fun FullPlayerScreen(
             if (item != null) {
                 isLyricsSheetOpen = true
                 onLyricsSheetOpened()
+            } else {
+                onLyricsPeekConsumed()
             }
         }
+    }
+    // How much of the lyrics is on screen: 0 = off the bottom, 1 = fully in.
+    // A swipe up drives it directly, so the lyrics follow the finger; open
+    // and close then carry on from wherever it is, so nothing ever jumps.
+    val lyricsReveal = remember { androidx.compose.animation.core.Animatable(0f) }
+    val lyricsOnScreen by remember { androidx.compose.runtime.derivedStateOf { lyricsReveal.value > 0f } }
+    LaunchedEffect(Unit) {
+        androidx.compose.runtime.snapshotFlow { lyricsPeekFraction() }.collect { f ->
+            if (!isLyricsSheetOpen) lyricsReveal.snapTo(f.coerceIn(0f, 1f))
+        }
+    }
+    LaunchedEffect(isLyricsSheetOpen) {
+        val target = if (isLyricsSheetOpen) 1f else 0f
+        if (reducedMotion) {
+            lyricsReveal.snapTo(target)
+        } else {
+            lyricsReveal.animateTo(
+                target,
+                androidx.compose.animation.core.spring(
+                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
+                ),
+            )
+        }
+        if (isLyricsSheetOpen) onLyricsPeekConsumed()
     }
     var isSpeedSheetOpen by remember { mutableStateOf(false) }
     var isAddToPlaylistSheetOpen by remember { mutableStateOf(false) }
@@ -664,14 +695,8 @@ fun FullPlayerScreen(
         )
     }
     // Full-screen lyrics over the player, sliding up from the bottom.
-    androidx.compose.animation.AnimatedVisibility(
-        visible = isLyricsSheetOpen && item != null,
-        enter = if (reducedMotion) androidx.compose.animation.EnterTransition.None else
-            androidx.compose.animation.slideInVertically(tween(GlassTokens.animSlow)) { it } + androidx.compose.animation.fadeIn(tween(GlassTokens.animRegular)),
-        exit = if (reducedMotion) androidx.compose.animation.ExitTransition.None else
-            androidx.compose.animation.slideOutVertically(tween(GlassTokens.animSlow)) { it } + androidx.compose.animation.fadeOut(tween(GlassTokens.animSlow)),
-    ) {
-        val shown = item ?: return@AnimatedVisibility
+    if ((isLyricsSheetOpen || lyricsOnScreen) && item != null) {
+        val shown = item
         LyricsScreen(
             item = shown,
             isPlaying = state.isPlaying,
@@ -682,6 +707,9 @@ fun FullPlayerScreen(
             onSeekTo = onSeekTo,
             onTogglePlayPause = onTogglePlayPause,
             onClose = { isLyricsSheetOpen = false },
+            modifier = Modifier.graphicsLayer {
+                translationY = (1f - lyricsReveal.value) * size.height
+            },
             offsetMs = lyricOffsetMs,
             blurUnfocused = lyricsBlurUnfocused,
             onAdjustOffset = onAdjustLyricOffset,
