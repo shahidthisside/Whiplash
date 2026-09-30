@@ -285,7 +285,6 @@ private fun WhiplashApp() {
     )
     val lyrics by lyricsViewModel.lyrics.collectAsState()
     val lyricOffsetMs by lyricsViewModel.lyricOffsetMs.collectAsState()
-    val lyricsSourceName by lyricsViewModel.lyricsProviderName.collectAsState()
 
     var isPlayerExpanded by rememberSaveable { mutableStateOf(false) }
     // Bumped when the Library tab is tapped again, to close an album/artist page.
@@ -1067,7 +1066,6 @@ private fun WhiplashApp() {
                         onSetSleepTimer = playerViewModel::setSleepTimer,
                         lyrics = lyrics,
                         lyricOffsetMs = lyricOffsetMs,
-                        lyricsSourceName = lyricsSourceName,
                         onAdjustLyricOffset = lyricsViewModel::adjustLyricOffset,
                         onResetLyricOffset = lyricsViewModel::resetLyricOffset,
                         playbackSpeed = playbackSpeed,

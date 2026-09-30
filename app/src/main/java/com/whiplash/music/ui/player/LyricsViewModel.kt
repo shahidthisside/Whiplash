@@ -70,11 +70,6 @@ class LyricsViewModel(
         .map { it?.result }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    /** Display name of the provider that supplied the current lyrics (for attribution). */
-    val lyricsProviderName: StateFlow<String?> = lookup
-        .map { l -> l?.providerId?.let { id -> providerChain.providers.firstOrNull { it.id == id }?.displayName } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
     /**
      * The listener's timing offset for the current track's synced lyrics
      * (see [com.whiplash.music.domain.model.normalizeLyricOffsetMs] for the

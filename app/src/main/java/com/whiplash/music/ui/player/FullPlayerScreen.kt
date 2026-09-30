@@ -117,7 +117,6 @@ fun FullPlayerScreen(
     onSetSleepTimer: (SleepTimerMode?) -> Unit = {},
     lyrics: com.whiplash.music.domain.model.LyricsResult? = null,
     lyricOffsetMs: Long = 0L,
-    lyricsSourceName: String? = null,
     onAdjustLyricOffset: (Long) -> Unit = {},
     onResetLyricOffset: () -> Unit = {},
     onLyricsSheetOpened: () -> Unit = {},
@@ -158,7 +157,7 @@ fun FullPlayerScreen(
     var isLyricsSheetOpen by remember { mutableStateOf(false) }
     // Swipe up on the player (gesture lives on the player's root, in MainActivity).
     // Keyed on the counter, so opening the player again doesn't reopen the lyrics.
-    var handledLyricsRequest by remember { mutableStateOf(openLyricsRequest) }
+    var handledLyricsRequest by remember { androidx.compose.runtime.mutableIntStateOf(openLyricsRequest) }
     LaunchedEffect(openLyricsRequest) {
         if (openLyricsRequest != handledLyricsRequest) {
             handledLyricsRequest = openLyricsRequest
@@ -229,7 +228,8 @@ fun FullPlayerScreen(
     var topBarBottomPx by remember { mutableStateOf(0f) }
     var heroSlotBottomPx by remember { mutableStateOf(0f) }
     val collapse by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (isLyricsSheetOpen || isQueueSheetOpen) 1f else 0f,
+        // Lyrics cover the whole player now, so only the queue collapses it.
+        targetValue = if (isQueueSheetOpen) 1f else 0f,
         animationSpec = tween(if (reducedMotion) 0 else COLLAPSE_ANIM_MS),
         label = "playerCollapse",
     )
@@ -663,6 +663,33 @@ fun FullPlayerScreen(
                 .padding(horizontal = GlassTokens.spaceLg, vertical = GlassTokens.spaceMd),
         )
     }
+    // Full-screen lyrics over the player, sliding up from the bottom.
+    androidx.compose.animation.AnimatedVisibility(
+        visible = isLyricsSheetOpen && item != null,
+        enter = if (reducedMotion) androidx.compose.animation.EnterTransition.None else
+            androidx.compose.animation.slideInVertically(tween(GlassTokens.animSlow)) { it } + androidx.compose.animation.fadeIn(tween(GlassTokens.animRegular)),
+        exit = if (reducedMotion) androidx.compose.animation.ExitTransition.None else
+            androidx.compose.animation.slideOutVertically(tween(GlassTokens.animSlow)) { it } + androidx.compose.animation.fadeOut(tween(GlassTokens.animSlow)),
+    ) {
+        val shown = item ?: return@AnimatedVisibility
+        LyricsScreen(
+            item = shown,
+            isPlaying = state.isPlaying,
+            positionMs = state.positionMs,
+            durationMs = state.durationMs,
+            colors = playerColors,
+            lyrics = lyrics,
+            onSeekTo = onSeekTo,
+            onTogglePlayPause = onTogglePlayPause,
+            onClose = { isLyricsSheetOpen = false },
+            offsetMs = lyricOffsetMs,
+            blurUnfocused = lyricsBlurUnfocused,
+            onAdjustOffset = onAdjustLyricOffset,
+            onResetOffset = onResetLyricOffset,
+            showLyricStrip = showLyricStrip,
+            onSetLyricStrip = onSetLyricStrip,
+        )
+    }
     }
     }
 
@@ -769,24 +796,6 @@ fun FullPlayerScreen(
             },
             onDismiss = { isRemoveDownloadConfirmOpen = false },
         )
-    }
-
-    if (isLyricsSheetOpen) {
-        GlassSheet(onDismissRequest = { isLyricsSheetOpen = false }) {
-            LyricsContent(
-                result = lyrics,
-                positionMs = state.positionMs,
-                isPlaying = state.isPlaying,
-                onSeekTo = onSeekTo,
-                offsetMs = lyricOffsetMs,
-                sourceName = lyricsSourceName,
-                blurUnfocused = lyricsBlurUnfocused,
-                onAdjustOffset = onAdjustLyricOffset,
-                onResetOffset = onResetLyricOffset,
-                showLyricStrip = showLyricStrip,
-                onSetLyricStrip = onSetLyricStrip,
-            )
-        }
     }
 
     if (isSpeedSheetOpen) {
