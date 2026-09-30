@@ -171,6 +171,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val cacheSizeBytes by viewModel.cacheSizeBytes.collectAsState()
     val downloadsUsage by viewModel.downloadsUsage.collectAsState()
     var showClearDownloadsConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showResetRecsConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var showQuitConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val lastBackupTimeMs by viewModel.lastBackupTimeMs.collectAsState()
     val backupResult by viewModel.backupResult.collectAsState()
@@ -304,6 +305,23 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                 }
             },
             onDismiss = { showCloudOffConfirm = false },
+        )
+    }
+
+    if (showResetRecsConfirm) {
+        com.whiplash.music.ui.theme.GlassConfirmDialog(
+            title = "Reset recommendations?",
+            message = "Autoplay and Quick Picks forget what they learned from your skips and finishes. Your history, favorites and playlists stay.",
+            confirmLabel = "Reset",
+            destructive = true,
+            onConfirm = {
+                showResetRecsConfirm = false
+                cloudScope.launch {
+                    app.playbackController.resetRecommendations()
+                    com.whiplash.music.ui.common.ToastController.show("Recommendations reset")
+                }
+            },
+            onDismiss = { showResetRecsConfirm = false },
         )
     }
 
@@ -607,6 +625,17 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                     subtitle = "Automatically queue related songs when your queue is about to end.",
                                     checked = autoplayEnabled,
                                     onCheckedChange = viewModel::setAutoplayEnabled,
+                                )
+                            }
+                        }
+
+                        if (shown(SettingEntry.RESET_RECOMMENDATIONS)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingActionRow(
+                                    title = "Reset recommendations",
+                                    icon = Icons.Filled.RestartAlt,
+                                    subtitle = "Forget what autoplay learned. History stays.",
+                                    onClick = { showResetRecsConfirm = true },
                                 )
                             }
                         }

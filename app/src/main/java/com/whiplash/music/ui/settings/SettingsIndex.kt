@@ -32,6 +32,7 @@ enum class SettingEntry(val section: SettingsSection, val title: String, val key
     AUDIO_QUALITY(SettingsSection.AUDIO_QUALITY, "Audio Quality", "streaming bitrate sound"),
     PER_NETWORK(SettingsSection.AUDIO_QUALITY, "Per-Network Audio Quality", "wifi wi-fi cellular mobile data plan"),
     AUTOPLAY(SettingsSection.PLAYBACK, "Autoplay", "radio related queue continue"),
+    RESET_RECOMMENDATIONS(SettingsSection.PLAYBACK, "Reset recommendations", "radio autoplay quick picks learned taste skips forget"),
     GAPLESS(SettingsSection.PLAYBACK, "Gapless Playback", "pause between songs preload"),
     SKIP_SILENCE(SettingsSection.PLAYBACK, "Skip Silence", "quiet"),
     CROSSFADE(SettingsSection.PLAYBACK, "Crossfade", "fade transition mix"),

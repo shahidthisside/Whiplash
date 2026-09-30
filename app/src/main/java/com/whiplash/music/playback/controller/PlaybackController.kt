@@ -431,6 +431,17 @@ class PlaybackController(
         }
     }
 
+    /**
+     * Forgets everything recommendations learned (play log and learned
+     * model) while keeping listening history. The running radio starts a
+     * fresh session on its next batch.
+     */
+    suspend fun resetRecommendations() {
+        withContext(Dispatchers.IO) { runCatching { playEventDao?.clear() } }
+        (learnedStore as? com.whiplash.music.recommend.FileLearnedStore)?.clear()
+        withContext(radioDispatcher) { radioEngine.reset() }
+    }
+
     fun connect(onReady: () -> Unit = {}) {
         if (controller != null || connectionFuture != null) return
         scope.launch(Dispatchers.IO) {
