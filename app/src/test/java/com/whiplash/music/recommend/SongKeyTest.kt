@@ -127,4 +127,17 @@ class SongKeyTest {
         assertEquals(listOf("aud1"), listOf(video, audio).withoutNearDuplicates().map { it.id })
     }
 
+
+    @Test fun coCreditedUploadMatchesSoloCredit() {
+        // YouTube Music credits "Pritam & Arijit Singh"; another upload credits only Arijit.
+        val a = PlayableItem.YoutubeTrack("1", "Janam Janam", "Pritam & Arijit Singh", null, null, 238_000L)
+        val b = PlayableItem.YoutubeTrack("2", "Janam Janam", "Arijit Singh", null, null, 290_000L)
+        assertEquals(1, listOf(a, b).withoutNearDuplicates().size)
+        val d = PlayableItem.YoutubeTrack("4", "Janam Janam - Dilwale | Shah Rukh Khan | Kajol", "Arijit Singh", null, null, 300_000L)
+        assertEquals(1, listOf(a, d).withoutNearDuplicates().size)
+        // Different artists sharing a title stay apart.
+        val c = PlayableItem.YoutubeTrack("3", "Janam Janam", "Atif Aslam & Someone", null, null, 200_000L)
+        assertEquals(2, listOf(a, c).withoutNearDuplicates().size)
+    }
+
 }

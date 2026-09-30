@@ -55,7 +55,11 @@ data class SongKey(
             val uploader = RadioRules.artistKey(artist)
             val artists = HashSet<String>()
             val byLabel = uploader.isEmpty() || isLabel(uploader) || isLabelName(artist)
-            if (!byLabel) artists += uploader
+            if (!byLabel) {
+                artists += uploader
+                // "Pritam & Arijit Singh" (YouTube Music's credits): each artist counts.
+                RadioRules.creditKeys(artist).filter { it.length >= 3 && !isLabel(it) }.forEach { artists += it }
+            }
             // Credits hiding in the title ("ft. X", "| Karan Aujla |") count too.
             FEAT.findAll(title).forEach { m ->
                 m.groupValues[1].split(RX_SK0).map { RadioRules.artistKey(it) }.filter { it.length >= 3 }.forEach { artists += it }
@@ -175,7 +179,14 @@ data class SongKey(
      */
     fun sameSongAs(other: SongKey): Boolean {
         if (combo != other.combo) return false
-        if (core != other.core || core.length < 2) return pairMatch(other) || other.pairMatch(this)
+        if (core != other.core || core.length < 2) {
+            if (pairMatch(other) || other.pairMatch(this)) return true
+            // "Janam Janam - Dilwale | …" vs "Janam Janam": one side of the pair is the
+            // other's song name, and they share an artist.
+            val pairSide = (pair != null && other.core.length >= 4 && other.core in names) ||
+                (other.pair != null && core.length >= 4 && core in other.names)
+            return pairSide && artistsOverlap(other)
+        }
         if (pair != null && other.pair != null) return pair.toList().toSet() == other.pair.toList().toSet() || artistsOverlap(other)
         if (artists.isEmpty() || other.artists.isEmpty()) return true
         // "Kesariya (Slowed + Reverb)" by some lofi channel is still Kesariya.
