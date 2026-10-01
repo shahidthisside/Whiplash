@@ -129,7 +129,6 @@ fun HomeScreen(
         factory = SongActionsViewModelFactory(app.libraryRepository, app.downloadManager),
     )
     val downloadedIds by app.libraryRepository.observeDownloadedIds().collectAsState(initial = emptySet())
-    val downloadProgress by app.downloadManager.progress.collectAsState()
     var cancelDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
     var removeDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
     val speedDial by viewModel.speedDial.collectAsState()
@@ -457,7 +456,7 @@ fun HomeScreen(
                             // sheet via long-press, with no visible affordance
                             // for it at all, unlike every other track list in
                             // the app.
-                            val inFlightProgress = downloadProgress[track.id]
+                            val inFlightProgress by com.whiplash.music.ui.common.rememberDownloadProgress(track.id)
                             val downloaded = track.id in downloadedIds
                             androidx.compose.animation.AnimatedContent(
                                 targetState = when {

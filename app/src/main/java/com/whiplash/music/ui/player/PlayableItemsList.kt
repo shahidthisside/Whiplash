@@ -174,11 +174,6 @@ fun PlayableItemsList(
     // length for no benefit (every row needs the exact same set).
     val downloadedIds by app.libraryRepository.observeDownloadedIds().collectAsState(initial = emptySet())
 
-    // In-flight download progress (section: Downloads tab redesign) —
-    // drives the animated progress-ring badge for any YoutubeTrack row
-    // currently downloading, in any list (Search, Home, Downloads tab
-    // itself, etc), not just the Downloads tab.
-    val downloadProgress by app.downloadManager.progress.collectAsState()
     var cancelDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
     var removeDownloadTarget by remember { mutableStateOf<PlayableItem?>(null) }
 
@@ -323,7 +318,10 @@ fun PlayableItemsList(
                     // canceling on a single accidental tap. On completion,
                     // AnimatedContent crossfades the ring into the
                     // checkmark rather than an abrupt swap.
-                    val inFlightProgress = if (item is PlayableItem.YoutubeTrack) downloadProgress[item.id] else null
+                    // In-flight progress, read per row (see rememberDownloadProgress).
+                    val inFlightProgress by com.whiplash.music.ui.common.rememberDownloadProgress(
+                        (item as? PlayableItem.YoutubeTrack)?.id,
+                    )
                     // Real, reported bug: this used to trust
                     // `item is PlayableItem.DownloadedTrack` outright as
                     // proof of being downloaded — but a playlist's track
