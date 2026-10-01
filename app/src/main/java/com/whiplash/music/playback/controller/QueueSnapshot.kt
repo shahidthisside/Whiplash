@@ -21,6 +21,8 @@ data class QueueSnapshot(
     val autoplayIds: Set<String>,
     val shuffleEnabled: Boolean,
     val repeatMode: RepeatMode,
+    /** The playing song's real length, which search results don't always carry. */
+    val durationMs: Long = 0L,
 ) {
     /** A snapshot is only worth restoring if it points at a real song. */
     val isUsable: Boolean get() = items.isNotEmpty() && currentIndex in items.indices
@@ -32,6 +34,7 @@ data class QueueSnapshot(
             .put("v", VERSION)
             .put("index", s.currentIndex)
             .put("positionMs", s.positionMs)
+            .put("durationMs", s.durationMs)
             .put("shuffle", s.shuffleEnabled)
             .put("repeat", s.repeatMode.name)
             .put("autoplay", JSONArray(s.autoplayIds.toList()))
@@ -54,6 +57,7 @@ data class QueueSnapshot(
                 autoplayIds = if (auto == null) emptySet() else (0 until auto.length()).mapTo(HashSet()) { auto.getString(it) },
                 shuffleEnabled = o.optBoolean("shuffle"),
                 repeatMode = runCatching { RepeatMode.valueOf(o.optString("repeat")) }.getOrDefault(RepeatMode.OFF),
+                durationMs = o.optLong("durationMs").coerceAtLeast(0L),
             )
         }.getOrNull()
 

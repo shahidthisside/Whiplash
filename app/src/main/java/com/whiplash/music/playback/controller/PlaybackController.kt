@@ -535,7 +535,7 @@ class PlaybackController(
                         currentIndex = currentIndex,
                         currentItem = item,
                         positionMs = saved.positionMs,
-                        durationMs = item.durationMs,
+                        durationMs = saved.durationMs.takeIf { it > 0 } ?: item.durationMs,
                         isPlaying = false,
                         autoplayIds = autoplayIds.toSet(),
                         shuffleEnabled = saved.shuffleEnabled,
@@ -555,7 +555,7 @@ class PlaybackController(
                     val s = _state.value
                     runCatching {
                         store.write(
-                            QueueSnapshot(s.queue, s.currentIndex, s.positionMs, s.autoplayIds, s.shuffleEnabled, s.repeatMode),
+                            QueueSnapshot(s.queue, s.currentIndex, s.positionMs, s.autoplayIds, s.shuffleEnabled, s.repeatMode, s.durationMs),
                         )
                     }
                 }

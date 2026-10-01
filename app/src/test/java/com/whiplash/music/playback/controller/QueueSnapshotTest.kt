@@ -21,6 +21,7 @@ class QueueSnapshotTest {
         autoplayIds = setOf("v2"),
         shuffleEnabled = true,
         repeatMode = RepeatMode.ALL,
+        durationMs = 180_000L,
     )
 
     @Test fun roundTripsEveryKindOfSong() {
