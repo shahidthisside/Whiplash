@@ -184,7 +184,9 @@ class WhiplashApplication : Application() {
     }
 
     val playbackController: PlaybackController by lazy {
-        PlaybackController(this, playbackManager, settingsRepository, libraryRepository, newPipePlaybackProvider, audioCacheManager, database.playEventDao(), radioLearnedStore, musicSources)
+        PlaybackController(this, playbackManager, settingsRepository, libraryRepository, newPipePlaybackProvider, audioCacheManager, database.playEventDao(), radioLearnedStore, musicSources,
+            com.whiplash.music.playback.controller.FileQueueStore(java.io.File(filesDir, "queue.json")),
+        )
     }
 
     val downloadManager: com.whiplash.music.data.download.DownloadManager by lazy {

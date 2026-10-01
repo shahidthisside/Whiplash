@@ -346,8 +346,10 @@ private fun WhiplashApp() {
     // prominent (mini-player appears), rather than at app launch, so the
     // request is contextual (section 14: proper media notification while
     // playing). No-op below API 33 where the permission doesn't exist.
-    LaunchedEffect(playbackState.currentItem != null) {
-        if (playbackState.currentItem == null) return@LaunchedEffect
+    // Waits for actual playback: a queue restored from the last launch shows
+    // the mini-player paused, and that alone shouldn't prompt.
+    LaunchedEffect(playbackState.currentItem != null && playbackState.isPlaying) {
+        if (playbackState.currentItem == null || !playbackState.isPlaying) return@LaunchedEffect
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return@LaunchedEffect
         val granted = ContextCompat.checkSelfPermission(
             context, Manifest.permission.POST_NOTIFICATIONS

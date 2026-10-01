@@ -32,7 +32,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
@@ -67,6 +69,8 @@ class PlaybackController(
     private val musicSources: com.whiplash.music.recommend.MusicSources = com.whiplash.music.recommend.MusicSources(
         null, null, { id, cursor -> newPipePlaybackProvider.getRadioPage(id, cursor) }, { id -> newPipePlaybackProvider.getRelatedTracks(id) },
     ),
+    /** Keeps the queue between launches; null (tests) keeps it in memory only. */
+    private val queueStore: QueueStore? = null,
 ) {
 
     // ── Recommendations ─────────────────────────────────────────────────
@@ -129,6 +133,12 @@ class PlaybackController(
 
     /** Domain-level queue, source of truth for section 21 queue features. */
     private var queue: MutableList<PlayableItem> = mutableListOf()
+
+    /**
+     * Set when the queue was restored from the last launch: the song shown
+     * isn't loaded in the player yet, and the first Play starts it here.
+     */
+    private var restoredResume: Pair<String, Long>? = null
 
     /*
      * Shuffle state. Shuffle used to pick a fresh random index on every
@@ -442,6 +452,69 @@ class PlaybackController(
         withContext(radioDispatcher) { radioEngine.reset() }
     }
 
+    /**
+     * Puts back the queue from the last launch (paused, at the saved
+     * position), then keeps the saved copy current: right away when the
+     * queue itself changes, and every [QUEUE_POSITION_SAVE_MS] of playback
+     * for the position. Saving starts only after the restore, so an empty
+     * queue at startup never overwrites the saved one.
+     */
+    private fun restoreQueueAndKeepSaving() {
+        val store = queueStore ?: return
+        scope.launch {
+            val saved = runCatching { store.read() }.getOrNull()
+            if (saved != null && saved.isUsable && queue.isEmpty()) {
+                queue = saved.items.toMutableList()
+                currentIndex = saved.currentIndex
+                autoplayIds.clear()
+                autoplayIds += saved.autoplayIds
+                preparedIndices.clear()
+                resetShuffleState()
+                val item = queue[currentIndex]
+                restoredResume = item.id to saved.positionMs
+                _state.update {
+                    it.copy(
+                        queue = queue.toList(),
+                        currentIndex = currentIndex,
+                        currentItem = item,
+                        positionMs = saved.positionMs,
+                        durationMs = item.durationMs,
+                        isPlaying = false,
+                        autoplayIds = autoplayIds.toSet(),
+                        shuffleEnabled = saved.shuffleEnabled,
+                        repeatMode = saved.repeatMode,
+                    )
+                }
+            }
+            @OptIn(kotlinx.coroutines.FlowPreview::class)
+            _state
+                .map { s ->
+                    SavedQueueKey(s.queue, s.currentIndex, s.autoplayIds, s.shuffleEnabled, s.repeatMode, s.isPlaying, s.positionMs / QUEUE_POSITION_SAVE_MS)
+                }
+                .distinctUntilChanged()
+                .drop(1)
+                .debounce(QUEUE_SAVE_DEBOUNCE_MS)
+                .collect {
+                    val s = _state.value
+                    runCatching {
+                        store.write(
+                            QueueSnapshot(s.queue, s.currentIndex, s.positionMs, s.autoplayIds, s.shuffleEnabled, s.repeatMode),
+                        )
+                    }
+                }
+        }
+    }
+
+    private data class SavedQueueKey(
+        val queue: List<PlayableItem>,
+        val index: Int,
+        val autoplay: Set<String>,
+        val shuffle: Boolean,
+        val repeat: RepeatMode,
+        val playing: Boolean,
+        val positionBucket: Long,
+    )
+
     fun connect(onReady: () -> Unit = {}) {
         if (controller != null || connectionFuture != null) return
         scope.launch(Dispatchers.IO) {
@@ -450,6 +523,7 @@ class PlaybackController(
                 playEventDao?.keepNewest(PLAY_EVENT_MAX_ROWS)
             }
         }
+        restoreQueueAndKeepSaving()
         val sessionToken = SessionToken(context, ComponentName(context, WhiplashPlaybackService::class.java))
         val future = MediaController.Builder(context, sessionToken).buildAsync()
         connectionFuture = future
@@ -1315,6 +1389,10 @@ class PlaybackController(
         streamBitrateBps: Int? = null,
     ) {
         handledEnded = false
+        // The first play after a restored queue picks up where it left off.
+        val restored = restoredResume
+        restoredResume = null
+        val startAtMs = if (resumeAtMs == 0L && restored?.first == item.id) restored.second else resumeAtMs
         // Where this audio comes from and the bitrate the provider reported,
         // for Stats for nerds. The container's own track format is read later
         // in onTracksChanged; the provider bitrate fills the gap for formats
@@ -1333,7 +1411,7 @@ class PlaybackController(
         if (!isErrorRecovery) errorRecoveryAttemptedForItemId = null
         val mediaItem = PlayableItemMediaItemMapper.toMediaItem(item, resolvedStreamUrl)
         controller?.apply {
-            if (resumeAtMs > 0L) setMediaItem(mediaItem, resumeAtMs) else setMediaItem(mediaItem)
+            if (startAtMs > 0L) setMediaItem(mediaItem, startAtMs) else setMediaItem(mediaItem)
             prepare()
             play()
         }
@@ -1430,7 +1508,10 @@ class PlaybackController(
         }
     }
 
-    fun play() = controller?.play()
+    fun play() {
+        // A queue restored from the last launch isn't in the player yet.
+        if (restoredResume != null && currentIndex in queue.indices) playIndex(currentIndex) else controller?.play()
+    }
 
     fun pause() = controller?.pause()
 
@@ -1444,7 +1525,7 @@ class PlaybackController(
         // same "couldn't play"/"no internet" feedback the initial tap-to-
         // play gave. Retry the resolve instead, so this button always
         // either plays or gives the same real feedback, never nothing.
-        if (_state.value.playbackError != null && currentIndex in queue.indices) {
+        if ((_state.value.playbackError != null || restoredResume != null) && currentIndex in queue.indices) {
             playIndex(currentIndex)
             return
         }
@@ -1465,6 +1546,13 @@ class PlaybackController(
      * the second, authoritative layer against the live player state.
      */
     fun seekTo(positionMs: Long) {
+        restoredResume?.let { (id, _) ->
+            // Nothing loaded yet: seeking just moves where Play will start.
+            val target = positionMs.coerceAtLeast(0L)
+            restoredResume = id to target
+            _state.update { it.copy(positionMs = target) }
+            return
+        }
         val c = controller ?: return
         val liveDuration = c.duration
         val safeTarget = if (liveDuration > 0) {
@@ -1723,6 +1811,9 @@ class PlaybackController(
             // appear to "wait" before resetting instead of resetting
             // instantly when the track changed.
             val controllerMediaId = c.currentMediaItem?.mediaId
+            // A restored queue shows its song and position before the player
+            // has loaded anything; the empty player mustn't zero them.
+            if (controllerMediaId == null && restoredResume != null) return@update current
             val expectedMediaId = current.currentItem?.let { PlayableItemMediaItemMapper.mediaIdOf(it) }
             if (controllerMediaId != null && expectedMediaId != null && controllerMediaId != expectedMediaId) {
                 return@update current
@@ -1781,6 +1872,14 @@ class PlaybackController(
      * observe the same STATE_ENDED and both try to advance the queue.
      */
     private fun handleTrackEnded() {
+        // A Play from the notification, headset or Bluetooth reaches the
+        // player before a restored queue's song is loaded; the empty player
+        // reports "ended" at once. That means "play the restored song", not
+        // "skip it".
+        if (restoredResume != null && controller?.mediaItemCount == 0 && currentIndex in queue.indices) {
+            playIndex(currentIndex)
+            return
+        }
         if (handledEnded) return
         handledEnded = true
         pendingEndReason = END_COMPLETED
@@ -1881,6 +1980,10 @@ class PlaybackController(
     }
 
     private companion object {
+        /** How often the saved queue's position is refreshed while playing. */
+        const val QUEUE_POSITION_SAVE_MS = 10_000L
+        const val QUEUE_SAVE_DEBOUNCE_MS = 600L
+
         /** Replay listening time is written to the database this often while playing. */
         private const val LISTEN_FLUSH_MS = 30_000L
 
