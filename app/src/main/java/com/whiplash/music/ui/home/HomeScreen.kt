@@ -136,6 +136,18 @@ fun HomeScreen(
     val quickPicks by viewModel.quickPicks.collectAsState()
     val isLoadingQuickPicks by viewModel.isLoadingQuickPicks.collectAsState()
     val quickPicksSettled by viewModel.quickPicksSettled.collectAsState()
+    // The songs most likely to be tapped next get their streams looked up
+    // in the background (Wi-Fi only), so tapping one starts it at once.
+    // Waits for the finished Quick Picks, not the saved list shown first.
+    val warmUpKey = if (quickPicksSettled && !isLoadingQuickPicks && isSpeedDialLoaded) {
+        (speedDial.take(2) + quickPicks.take(2)).map { it.id }
+    } else {
+        emptyList()
+    }
+    androidx.compose.runtime.LaunchedEffect(warmUpKey) {
+        if (warmUpKey.isEmpty()) return@LaunchedEffect
+        app.playbackController.warmUpStreams(speedDial.take(2) + quickPicks.take(2))
+    }
     val online by remember { app.cloudSyncManager.onlineChanges() }.collectAsState(initial = true)
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val pullState = rememberPullToRefreshState()

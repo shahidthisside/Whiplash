@@ -452,6 +452,61 @@ class PlaybackController(
         withContext(radioDispatcher) { radioEngine.reset() }
     }
 
+    // Songs being looked up ahead of a tap (see warmUpStreams), by id.
+    private val warmUps = HashMap<String, kotlinx.coroutines.Deferred<FallbackResult<com.whiplash.music.playback.provider.ResolvedStream>>>()
+    private var warmUpJob: Job? = null
+    private val warmUpQueue = ArrayDeque<Pair<PlayableItem.YoutubeTrack, Boolean>>()
+
+    /**
+     * Looks up the streams of a few songs the listener is likely to tap
+     * next (Home's first Speed dial and Quick Picks, a restored queue's
+     * song), one at a time in the background, so the tap starts playing
+     * straight away instead of after a 2-4 s lookup. The result is the same
+     * one a tap would get, remembered by [PlaybackManager] for as long as
+     * the URL stays valid. Songs already on disk are skipped, nothing runs
+     * while a song is being started, and [unmeteredOnly] lookups are
+     * skipped on mobile data. Calls queue up; at most a few are kept.
+     */
+    fun warmUpStreams(items: List<PlayableItem>, unmeteredOnly: Boolean = true) {
+        items.filterIsInstance<PlayableItem.YoutubeTrack>()
+            .distinctBy { it.id }
+            .take(MAX_WARM_UPS)
+            .forEach { track -> if (warmUpQueue.none { it.first.id == track.id }) warmUpQueue.addLast(track to unmeteredOnly) }
+        while (warmUpQueue.size > MAX_WARM_UPS * 2) warmUpQueue.removeFirst()
+        if (warmUpJob?.isActive == true || warmUpQueue.isEmpty()) return
+        warmUpJob = scope.launch {
+            delay(WARM_UP_DELAY_MS)
+            val quality = settingsRepository.effectiveAudioQuality()
+            while (warmUpQueue.isNotEmpty()) {
+                val (track, onlyUnmetered) = warmUpQueue.removeFirst()
+                if (onlyUnmetered && settingsRepository.isActiveNetworkMetered()) continue
+                // A song being started gets the connection to itself.
+                while (_state.value.isResolvingStream) delay(300)
+                // Already playing (and not just restored): nothing to gain.
+                if (_state.value.currentItem?.id == track.id && restoredResume == null) continue
+                val cached = withContext(Dispatchers.IO) {
+                    audioCacheManager.isFullyCached(PlayableItemMediaItemMapper.mediaIdOf(track))
+                }
+                if (cached) continue
+                val lookup = scope.async(Dispatchers.IO) {
+                    runCatching {
+                        kotlinx.coroutines.withTimeout(RESOLVE_STREAM_TIMEOUT_MS) {
+                            playbackManager.resolveStream(track, quality)
+                        }
+                    }.getOrElse {
+                        FallbackResult.Failure(
+                            com.whiplash.music.playback.provider.ProviderFailure.NetworkFailure("Warm-up failed for ${track.id}"),
+                            attempts = emptyList(),
+                        )
+                    }
+                }
+                warmUps[track.id] = lookup
+                lookup.join()
+                warmUps.remove(track.id)
+            }
+        }
+    }
+
     /**
      * Puts back the queue from the last launch (paused, at the saved
      * position), then keeps the saved copy current: right away when the
@@ -472,6 +527,8 @@ class PlaybackController(
                 resetShuffleState()
                 val item = queue[currentIndex]
                 restoredResume = item.id to saved.positionMs
+                // One lookup, so Play after a relaunch starts at once.
+                warmUpStreams(listOf(item), unmeteredOnly = false)
                 _state.update {
                     it.copy(
                         queue = queue.toList(),
@@ -972,7 +1029,11 @@ class PlaybackController(
                         // loading indicator.
                         val result = try {
                             kotlinx.coroutines.withTimeout(RESOLVE_STREAM_TIMEOUT_MS) {
-                                playbackManager.resolveStream(item, quality)
+                                // Already being looked up in the background
+                                // (see warmUpStreams): wait for that instead
+                                // of starting the same lookup again.
+                                val warm = warmUps[item.id]?.takeIf { it.isActive }?.await()
+                                warm?.takeIf { it is FallbackResult.Success } ?: playbackManager.resolveStream(item, quality)
                             }
                         } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
                             FallbackResult.Failure(
@@ -1984,6 +2045,9 @@ class PlaybackController(
         const val QUEUE_POSITION_SAVE_MS = 10_000L
         const val QUEUE_SAVE_DEBOUNCE_MS = 600L
 
+        /** Songs looked up ahead of a tap per call, and how long after the call. */
+        const val MAX_WARM_UPS = 4
+        const val WARM_UP_DELAY_MS = 2_500L
         /** Replay listening time is written to the database this often while playing. */
         private const val LISTEN_FLUSH_MS = 30_000L
 
