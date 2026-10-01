@@ -2036,37 +2036,42 @@ class PlaybackController(
  * github.com/shahidthisside)
  */
 internal fun normalizeSongTitle(title: String): String {
-    // Bracketed/parenthesized "upload type" tags - e.g. "(Official Video)",
-    // "(Lyrics)", "[CHOREOGRAPHY]". Broadened from only-matching-if-a-
-    // specific-keyword-is-inside (which missed "[CHOREOGRAPHY]" - a real,
-    // on-device-confirmed case with no keyword match inside its own
-    // brackets) to strip ANY short bracketed/parenthesized tag, since a
-    // real song title practically never uses brackets for its own name.
-    val bracketTagPattern = Regex("""[\[(][^\])]{1,40}[\])]""")
-    // Trailing "upload type" phrases that describe the VIDEO, not the song,
-    // and are often NOT bracketed at all - e.g. "... Special Performance
-    // Video", "... Official MV", "... Dance Practice", "... Live
-    // Performance". Real, on-device-confirmed gap: two uploads of BTS'
-    // "Butter" - one titled "...Special Performance Video" (choreography),
-    // the other "...Official MV" - didn't normalize to the same string
-    // without this, since neither phrase was inside brackets.
-    val trailingVideoTypePattern = Regex(
-        """\b(special performance video|dance practice|live performance|performance video|choreography|dance video|behind the scenes|teaser|trailer)\b""",
-        RegexOption.IGNORE_CASE,
-    )
-    val noisePattern = Regex(
-        """[\[(].*?(official|lyric|lyrics|audio|video|visualiser|visualizer|mv|hd|hq|4k|remaster(?:ed)?|explicit|clean|radio edit)[^\])]*[\])]""",
-        RegexOption.IGNORE_CASE,
-    )
     return title
         .lowercase()
-        .replace(noisePattern, " ")
-        .replace(bracketTagPattern, " ")
-        .replace(trailingVideoTypePattern, " ")
-        .replace(Regex("""feat\.?|ft\.?"""), " ")
-        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .replace(SONG_TITLE_NOISE, " ")
+        .replace(SONG_TITLE_BRACKET_TAG, " ")
+        .replace(SONG_TITLE_VIDEO_TYPE, " ")
+        .replace(SONG_TITLE_FEAT, " ")
+        .replace(SONG_TITLE_NON_ALNUM, " ")
         .trim()
 }
+
+// Compiled once rather than on every call: titles are normalised for every
+// candidate the radio and Home compare.
+// Bracketed/parenthesized "upload type" tags - e.g. "(Official Video)",
+// "(Lyrics)", "[CHOREOGRAPHY]". Broadened from only-matching-if-a-
+// specific-keyword-is-inside (which missed "[CHOREOGRAPHY]" - a real,
+// on-device-confirmed case with no keyword match inside its own
+// brackets) to strip ANY short bracketed/parenthesized tag, since a
+// real song title practically never uses brackets for its own name.
+private val SONG_TITLE_BRACKET_TAG = Regex("""[\[(][^\])]{1,40}[\])]""")
+// Trailing "upload type" phrases that describe the VIDEO, not the song,
+// and are often NOT bracketed at all - e.g. "... Special Performance
+// Video", "... Official MV", "... Dance Practice", "... Live
+// Performance". Real, on-device-confirmed gap: two uploads of BTS'
+// "Butter" - one titled "...Special Performance Video" (choreography),
+// the other "...Official MV" - didn't normalize to the same string
+// without this, since neither phrase was inside brackets.
+private val SONG_TITLE_VIDEO_TYPE = Regex(
+    """\b(special performance video|dance practice|live performance|performance video|choreography|dance video|behind the scenes|teaser|trailer)\b""",
+    RegexOption.IGNORE_CASE,
+)
+private val SONG_TITLE_NOISE = Regex(
+    """[\[(].*?(official|lyric|lyrics|audio|video|visualiser|visualizer|mv|hd|hq|4k|remaster(?:ed)?|explicit|clean|radio edit)[^\])]*[\])]""",
+    RegexOption.IGNORE_CASE,
+)
+private val SONG_TITLE_FEAT = Regex("""feat\.?|ft\.?""")
+private val SONG_TITLE_NON_ALNUM = Regex("""[^a-z0-9]+""")
 
 /** See [normalizeSongTitle]'s doc comment for why title containment is gated on duration proximity AND a mashup/medley exclusion. */
 internal fun isSameSong(

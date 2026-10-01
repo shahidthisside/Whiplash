@@ -17,9 +17,13 @@ data class ShelfSpec(val kind: ShelfKind, val title: String, val query: String) 
 fun primaryArtistName(raw: String): String = raw
     .split(',', '&', '/', ';')
     .first()
-    .replace(Regex("""\s+(feat\.?|ft\.?|featuring)\s+.*$""", RegexOption.IGNORE_CASE), "")
-    .replace(Regex("""\s+-\s+Topic$""", RegexOption.IGNORE_CASE), "")
+    .replace(FEATURING_TAIL, "")
+    .replace(TOPIC_SUFFIX, "")
     .trim()
+
+// Compiled once: this runs for every played song on Home and in Replay.
+private val FEATURING_TAIL = Regex("""\s+(feat\.?|ft\.?|featuring)\s+.*$""", RegexOption.IGNORE_CASE)
+private val TOPIC_SUFFIX = Regex("""\s+-\s+Topic$""", RegexOption.IGNORE_CASE)
 
 /**
  * Artists ranked by how often they appear in [playedArtists] (most-recent

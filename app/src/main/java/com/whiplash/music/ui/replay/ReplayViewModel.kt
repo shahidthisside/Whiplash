@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 
 /**
@@ -74,7 +75,13 @@ class ReplayViewModel(
     val currentMonthKey: StateFlow<String> = currentMonth
 
     private fun summaryOf(month: String?) =
-        if (month == null) flowOf(null) else library.observeReplayMonth(month).map { buildReplaySummary(month, it) }
+        if (month == null) {
+            flowOf(null)
+        } else {
+            // Built off the main thread: Home asks for it while it's starting up.
+            library.observeReplayMonth(month).map { buildReplaySummary(month, it) }
+                .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        }
 
     fun refreshMonth() {
         currentMonth.value = replayMonthKey(System.currentTimeMillis())
