@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.androidx.baselineprofile)
 }
 
 // Release signing (keystore.properties is git-ignored — see .gitignore's
@@ -128,6 +129,10 @@ dependencies {
     implementation(libs.newpipe.extractor)
     implementation(libs.okhttp)
     implementation(libs.play.services.auth)
+    // Installs the bundled baseline profile, so startup and scrolling are
+    // precompiled from the first launch instead of after days of use.
+    implementation(libs.androidx.profileinstaller)
+    baselineProfile(project(":baselineprofile"))
     coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
 
     testImplementation(libs.junit)

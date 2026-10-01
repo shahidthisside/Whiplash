@@ -18,3 +18,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Whiplash"
 include(":app")
+include(":baselineprofile")
