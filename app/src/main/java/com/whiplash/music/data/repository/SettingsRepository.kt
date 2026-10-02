@@ -553,19 +553,56 @@ class SettingsRepository(context: Context) {
      * connectivity check.
      */
     suspend fun effectiveAudioQuality(): AudioQuality {
-        if (!perNetworkQualityEnabled.first()) return audioQuality.first()
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
-        val capabilities = cm?.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+        val capabilities = runCatching { cm?.activeNetwork?.let { cm.getNetworkCapabilities(it) } }.getOrNull()
+        val chosen = if (!perNetworkQualityEnabled.first()) {
+            audioQuality.first()
+        } else {
+            when {
+                capabilities == null -> audioQuality.first()
+                capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) ||
+                    capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET) -> audioQualityWifi.first()
+                capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> audioQualityCellular.first()
+                else -> audioQuality.first()
+            }
+        }
+        // Auto picks the best stream, except on a slow connection, where a
+        // lighter one starts sooner and doesn't stall. A quality the listener
+        // picked themselves is always kept.
+        return if (chosen == AudioQuality.AUTO) slowConnectionQuality(capabilities) ?: chosen else chosen
+    }
+
+    /**
+     * A lighter quality for a slow connection, or null when it's fast enough.
+     * Speed is the player's own measured download rate of songs, which
+     * starts from Media3's estimate for the network type and country and
+     * learns from every song played. On mobile data the system's link
+     * estimate counts too, if lower (on Wi-Fi that figure is the speed to
+     * the router, not to the internet).
+     */
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    private fun slowConnectionQuality(capabilities: android.net.NetworkCapabilities?): AudioQuality? {
+        if (capabilities == null) return null
+        val measured = runCatching {
+            androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.getSingletonInstance(appContext).bitrateEstimate
+        }.getOrNull()?.takeIf { it > 0 }
+        val link = if (capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) {
+            capabilities.linkDownstreamBandwidthKbps.toLong().takeIf { it > 0 }?.times(1000)
+        } else {
+            null
+        }
+        val bps = listOfNotNull(measured, link).minOrNull() ?: return null
         return when {
-            capabilities == null -> audioQuality.first()
-            capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) ||
-                capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET) -> audioQualityWifi.first()
-            capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> audioQualityCellular.first()
-            else -> audioQuality.first()
+            bps < SLOW_LINK_LOW_BPS -> AudioQuality.LOW
+            bps < SLOW_LINK_MEDIUM_BPS -> AudioQuality.MEDIUM
+            else -> null
         }
     }
 
     private companion object {
+        /** Below these speeds Auto streams at Low / Medium. */
+        const val SLOW_LINK_LOW_BPS = 300_000L
+        const val SLOW_LINK_MEDIUM_BPS = 700_000L
         val AUDIO_QUALITY_KEY: Preferences.Key<String> = stringPreferencesKey("audio_quality")
         val DOWNLOAD_QUALITY_KEY: Preferences.Key<String> = stringPreferencesKey("download_quality")
         val AUTOPLAY_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("autoplay_enabled")
