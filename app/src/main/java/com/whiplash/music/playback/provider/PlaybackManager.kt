@@ -23,6 +23,8 @@ class PlaybackManager(
     private val providers: List<PlaybackProvider>,
     /** 5.2: pinned formats and still-valid URLs. Null disables both (plain resolve every time). */
     private val streamChoices: StreamChoiceStore? = null,
+    /** Which of [providers] to use for a lookup, in order (Settings → Stream source). All of them by default. */
+    private val chooseProviders: suspend (List<PlaybackProvider>) -> List<PlaybackProvider> = { it },
     /**
      * Called before a stream is returned whose format might not match the
      * song's cached bytes: [knownChange] true when it differs from the pinned
@@ -33,6 +35,13 @@ class PlaybackManager(
      */
     private val onFormatChanged: (videoId: String, knownChange: Boolean) -> Unit = { _, _ -> },
 ) {
+
+    /** The source that served the last stream lookup (provider id), for Settings to show. */
+    val lastStreamSource: kotlinx.coroutines.flow.StateFlow<String?> get() = _lastStreamSource
+    private val _lastStreamSource = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+    private suspend fun ordered(): List<PlaybackProvider> =
+        runCatching { chooseProviders(providers) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: providers
 
     init {
         require(providers.isNotEmpty()) { "PlaybackManager requires at least one provider" }
@@ -70,7 +79,7 @@ class PlaybackManager(
         }
         val pin = store?.pin(item.id)
         val preferredItag = if (keepAnyPinnedFormat) pin?.itag else store?.pinnedItag(item.id, quality)
-        val candidates = providers.filter { it.supports(item) }
+        val candidates = ordered().filter { it.supports(item) }
         if (candidates.isEmpty()) {
             return FallbackResult.Failure(
                 ProviderFailure.UnknownPlaybackFailure("No provider supports ${item.source} items"),
@@ -90,6 +99,7 @@ class PlaybackManager(
             try {
                 val stream = provider.getStream(item.id, quality, preferredItag)
                 attempts += ProviderAttempt(provider.id, skipped = false, failure = null)
+                _lastStreamSource.value = provider.id
                 if (store != null) {
                     if (pin == null) {
                         runCatching { onFormatChanged(item.id, false) }
@@ -125,7 +135,7 @@ class PlaybackManager(
 
     /** Same fallback algorithm, for metadata resolution. */
     suspend fun resolvePlayerInfo(item: PlayableItem): FallbackResult<ProviderPlayerInfo> {
-        val candidates = providers.filter { it.supports(item) }
+        val candidates = ordered().filter { it.supports(item) }
         if (candidates.isEmpty()) {
             return FallbackResult.Failure(
                 ProviderFailure.UnknownPlaybackFailure("No provider supports ${item.source} items"),

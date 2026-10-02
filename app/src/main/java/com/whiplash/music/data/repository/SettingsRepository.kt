@@ -476,6 +476,16 @@ class SettingsRepository(context: Context) {
         dataStore.edit { prefs -> prefs[LYRICS_SOURCE_KEY] = source.name }
     }
 
+    /** Where song streams are looked up; see [com.whiplash.music.playback.provider.StreamSourcePreference]. Automatic by default. */
+    val streamSource: Flow<com.whiplash.music.playback.provider.StreamSourcePreference> = dataStore.data.map { prefs ->
+        prefs[STREAM_SOURCE_KEY]?.let { runCatching { com.whiplash.music.playback.provider.StreamSourcePreference.valueOf(it) }.getOrNull() }
+            ?: com.whiplash.music.playback.provider.StreamSourcePreference.AUTO
+    }
+
+    suspend fun setStreamSource(source: com.whiplash.music.playback.provider.StreamSourcePreference) {
+        dataStore.edit { prefs -> prefs[STREAM_SOURCE_KEY] = source.name }
+    }
+
     /** Full-bleed "hero" artwork across the top of the full player. Off by default. */
     val playerHeroArtwork: Flow<Boolean> = dataStore.data.map { prefs -> prefs[PLAYER_HERO_ARTWORK_KEY] ?: false }
 
@@ -650,6 +660,7 @@ class SettingsRepository(context: Context) {
         val QUICK_PICKS_PEEK_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("quick_picks_peek")
         val LYRICS_BLUR_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("lyrics_blur_unfocused")
         val LYRICS_SOURCE_KEY: Preferences.Key<String> = stringPreferencesKey("lyrics_source")
+        val STREAM_SOURCE_KEY: Preferences.Key<String> = stringPreferencesKey("stream_source")
         val PLAYER_HERO_ARTWORK_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("player_hero_artwork")
         val STATS_FOR_NERDS_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("stats_for_nerds_enabled")
         val AUDIO_QUALITY_WIFI_KEY: Preferences.Key<String> = stringPreferencesKey("audio_quality_wifi")

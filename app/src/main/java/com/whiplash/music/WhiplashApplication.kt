@@ -14,6 +14,7 @@ import com.whiplash.music.playback.provider.newpipe.YoutubeSearchProvider
 import com.whiplash.music.playback.provider.lrclib.LrcLibProvider
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import kotlinx.coroutines.flow.first
 import org.schabi.newpipe.extractor.NewPipe
 import java.util.concurrent.TimeUnit
 
@@ -164,14 +165,17 @@ class WhiplashApplication : Application() {
     }
 
     /**
-     * Provider priority list for automatic fallback (section 7/8). Provider
-     * A (NewPipeExtractor) is the only entry today; a future RustyPipe-based
-     * Provider B slots in here as a second list element with no other
-     * call-site changes required.
+     * Stream sources for automatic fallback (section 7/8): NewPipe, then
+     * YouTube direct. Settings → Stream source can narrow this to one.
      */
+    /** Second stream source: YouTube's player API asked directly (see YoutubeDirectProvider). */
+    val youtubeDirectProvider: com.whiplash.music.playback.provider.direct.YoutubeDirectProvider by lazy {
+        com.whiplash.music.playback.provider.direct.YoutubeDirectProvider(okHttpClient, providerHealthTracker)
+    }
+
     val playbackManager: PlaybackManager by lazy {
         PlaybackManager(
-            providers = listOf(newPipePlaybackProvider),
+            providers = listOf(newPipePlaybackProvider, youtubeDirectProvider),
             streamChoices = com.whiplash.music.playback.provider.StreamChoiceStore.sharedPrefs(this),
             // Same key as PlayableItemMediaItemMapper.mediaIdOf for a YouTube track.
             onFormatChanged = { videoId, knownChange ->
@@ -180,6 +184,7 @@ class WhiplashApplication : Application() {
                 // unless the format is known to have changed.
                 if (knownChange || !audioCacheManager.isFullyCached(key)) audioCacheManager.removeResource(key)
             },
+            chooseProviders = { all -> settingsRepository.streamSource.first().order(all) },
         )
     }
 
