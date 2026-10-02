@@ -202,9 +202,23 @@ class PlaybackController(
 
     /** Pre-resolved stream for the upcoming track, filled in shortly before the current track ends (section 18: gapless). */
     private var prefetched: PrefetchedStream? = null
+
+    // Queue index whose neighbours are prefetched once its song plays (see playIndex).
+    private var neighborPrefetchOnReady: Int? = null
     private var prefetchJob: Job? = null
 
-    private data class PrefetchedStream(val forItemId: String, val streamUrl: String, val artworkUrl: String?, val bitrateBps: Int? = null)
+    private data class PrefetchedStream(
+        val forItemId: String,
+        val streamUrl: String,
+        val artworkUrl: String?,
+        val bitrateBps: Int? = null,
+        val expiresAtEpochMs: Long? = null,
+    ) {
+        /** Whether the link stays valid for a whole play of a [durationMs] song (it's fetched minutes ahead). */
+        fun validFor(durationMs: Long, nowMs: Long = System.currentTimeMillis()): Boolean =
+            expiresAtEpochMs == null ||
+                expiresAtEpochMs - nowMs > durationMs.coerceAtLeast(0L) + com.whiplash.music.playback.provider.StreamChoiceStore.SAFETY_MARGIN_MS
+    }
 
     private var sleepTimerJob: Job? = null
 
@@ -273,6 +287,11 @@ class PlaybackController(
             // error surfaced for a previous attempt at this same track.
             if (playbackState == Player.STATE_READY) {
                 errorRecoveryAttemptedForItemId = null
+                networkRetries = 0
+                neighborPrefetchOnReady?.let { i ->
+                    neighborPrefetchOnReady = null
+                    if (i == currentIndex) prefetchNeighborStreamsAndArtwork(i)
+                }
                 if (_state.value.playbackError != null) {
                     _state.update { it.copy(playbackError = null) }
                 }
@@ -376,17 +395,73 @@ class PlaybackController(
      */
     private var errorRecoveryAttemptedForItemId: String? = null
 
+    // Retries of the same stream after a lost connection, for the current
+    // track; back to 0 once it plays again (STATE_READY).
+    private var networkRetries = 0
+
+    // The URL the player was last given, so a lost connection can be retried
+    // on the same stream without another lookup.
+    private var currentStreamUrl: String? = null
+
     private fun handlePlayerError(error: PlaybackException) {
         val current = _state.value.currentItem
+        val c = controller
+        // The song just left failed after a skip: the new one is loading and
+        // must not inherit that failure (or its position).
+        val failedId = c?.currentMediaItem?.mediaId
+        if (current != null && failedId != null && failedId != PlayableItemMediaItemMapper.mediaIdOf(current)) {
+            android.util.Log.i("PlaybackController", "Ignoring an error from the previous song ($failedId)")
+            return
+        }
         // Clamped against the track's own duration: the raw currentPosition is
         // read at error time, and if the error for an outgoing track lands just
         // after the user already skipped, an unclamped value could seek the new
         // track past its end. A position at or beyond the end is treated as
         // "restart from the beginning" rather than an invalid seek.
-        val rawPositionMs = (controller?.currentPosition ?: 0L).coerceAtLeast(0L)
-        val durationMs = current?.durationMs ?: 0L
+        val rawPositionMs = (c?.currentPosition ?: 0L).coerceAtLeast(0L)
+        val durationMs = current?.durationMs?.takeIf { it > 0L } ?: _state.value.durationMs
         val failedPositionMs = if (durationMs > 0L && rawPositionMs >= durationMs) 0L else rawPositionMs
         val track = current as? PlayableItem.YoutubeTrack
+
+        // Failed while paused, e.g. the connection dropped while another app
+        // had the audio. Nothing was playing, so nothing is retried and no
+        // error is shown now; the next Play (in the app, the notification, a
+        // headset) loads the song again from this spot (see playFromSession).
+        if (c?.playWhenReady != true && current != null) {
+            // A link that stopped working (rather than a lost connection) is
+            // looked up afresh then, instead of being reused.
+            if (track != null && error.errorCode !in CONNECTION_ERROR_CODES) playbackManager.invalidateStream(track.id)
+            rememberResumePoint(current, failedPositionMs)
+            _state.update { it.copy(isBuffering = false, isResolvingStream = false) }
+            return
+        }
+
+        // A lost connection: the stream's URL is still good, so it is opened
+        // again where it stopped after a short wait (the player itself has
+        // already retried a few times, see StreamLoadErrorPolicy).
+        val url = currentStreamUrl
+        if (error.errorCode in CONNECTION_ERROR_CODES && current != null && url != null &&
+            !url.startsWith("$PENDING_SCHEME://") && networkRetries < MAX_NETWORK_RETRIES
+        ) {
+            networkRetries++
+            val wait = NETWORK_RETRY_BASE_MS shl (networkRetries - 1)
+            android.util.Log.i("PlaybackController", "Connection lost on ${current.id}, retry $networkRetries in ${wait}ms")
+            // Shown as loading; a Play pressed meanwhile just waits for it.
+            _state.update { it.copy(isResolvingStream = true) }
+            scope.launch {
+                delay(wait)
+                if (_state.value.currentItem?.id != current.id || currentStreamUrl != url) return@launch
+                _state.update { it.copy(isResolvingStream = false) }
+                val p = controller ?: return@launch
+                if (p.playbackState != Player.STATE_IDLE) return@launch
+                if (!p.playWhenReady) {
+                    rememberResumePoint(current, failedPositionMs) // paused meanwhile
+                    return@launch
+                }
+                startMediaItem(current, resolvedStreamUrl = url, resumeAtMs = failedPositionMs, isErrorRecovery = true, streamBitrateBps = currentStreamBitrateBps)
+            }
+            return
+        }
 
         // Not recoverable by re-resolving: local files and downloaded files
         // point at real paths on disk, so an error there means the file is
@@ -394,10 +469,12 @@ class PlaybackController(
         // user asked to play anyway. A repeat failure for the same track is
         // also treated as genuinely broken.
         if (track == null || errorRecoveryAttemptedForItemId == track.id) {
-            surfacePlayerError(current, error)
+            surfacePlayerError(current, error, failedPositionMs)
             return
         }
 
+        // Most often an expired link (HTTP 403): one fresh lookup, then carry
+        // on where it failed.
         errorRecoveryAttemptedForItemId = track.id
         // A stale prefetched URL for this same item would just fail again,
         // and so would the one remembered for reuse (5.2).
@@ -419,15 +496,26 @@ class PlaybackController(
             if (_state.value.currentItem?.id != track.id) return@launch
             val fresh = (result as? FallbackResult.Success)?.value
             if (fresh == null) {
-                surfacePlayerError(track, error)
+                surfacePlayerError(track, error, failedPositionMs)
                 return@launch
             }
-            startMediaItem(track, resolvedStreamUrl = fresh.streamUrl, resumeAtMs = failedPositionMs, isErrorRecovery = true, streamBitrateBps = fresh.bitrateBps)
+            // Paused meanwhile: load it at the spot, but don't start it.
+            val play = controller?.playWhenReady != false
+            startMediaItem(track, resolvedStreamUrl = fresh.streamUrl, resumeAtMs = failedPositionMs, isErrorRecovery = true, streamBitrateBps = fresh.bitrateBps, play = play)
         }
     }
 
-    private fun surfacePlayerError(item: PlayableItem?, error: PlaybackException) {
+    /** The next Play loads [item] again and starts it at [positionMs]. */
+    private fun rememberResumePoint(item: PlayableItem, positionMs: Long) {
+        if (queue.getOrNull(currentIndex)?.id != item.id) return
+        restoredResume = item.id to positionMs
+        _state.update { it.copy(positionMs = positionMs, isPlaying = false) }
+    }
+
+    private fun surfacePlayerError(item: PlayableItem?, error: PlaybackException, positionMs: Long = 0L) {
         val isNetwork = error.errorCode in NETWORK_ERROR_CODES
+        // Play (anywhere) tries again from where it stopped, not from 0:00.
+        if (item != null) rememberResumePoint(item, positionMs)
         _state.update {
             it.copy(
                 isResolvingStream = false,
@@ -515,7 +603,7 @@ class PlaybackController(
      * queue at startup never overwrites the saved one.
      */
     private fun restoreQueueAndKeepSaving() {
-        val store = queueStore ?: return
+        val store = queueStore ?: run { restoreFinished.complete(Unit); return }
         scope.launch {
             val saved = runCatching { store.read() }.getOrNull()
             if (saved != null && saved.isUsable && queue.isEmpty()) {
@@ -543,6 +631,7 @@ class PlaybackController(
                     )
                 }
             }
+            restoreFinished.complete(Unit)
             @OptIn(kotlinx.coroutines.FlowPreview::class)
             _state
                 .map { s ->
@@ -587,6 +676,7 @@ class PlaybackController(
         future.addListener(
             {
                 controller = future.get().also { it.addListener(playerListener) }
+                controllerReady.complete(Unit)
                 refreshPositionAndDuration()
                 onReady()
             },
@@ -812,12 +902,21 @@ class PlaybackController(
     private fun playIndex(index: Int) {
         if (index !in queue.indices) return
         val item = queue[index]
-        finishPlayEvent()
-        beginPlayEvent(item)
+        // A link prefetched long ago may expire mid-song: look it up afresh.
+        prefetched?.let { if (it.forItemId == item.id && !it.validFor(item.durationMs)) prefetched = null }
+        // The same song loaded again to carry on (after an error, or a Play
+        // from the notification) is still the same listen: one play event,
+        // so recommendations learn exactly what they did before.
+        val resumingSameListen = index == currentIndex && restoredResume?.first == item.id && eventItem?.id == item.id
+        if (!resumingSameListen) {
+            finishPlayEvent()
+            beginPlayEvent(item)
+        }
         currentIndex = index
         shufflePlayed.add(item)
         if (shuffleForward.lastOrNull() === item) shuffleForward.removeLast()
         val generation = ++resolveGeneration
+        pausedWhileLoading = false
         prefetchJob?.cancel()
 
         // Stop the previous track's audio immediately (not just update the
@@ -828,7 +927,10 @@ class PlaybackController(
         // Local tracks resolve synchronously right after this anyway, so
         // this only causes a brief, expected silence for YouTube tracks
         // (filled by isResolvingStream's buffering indicator in the UI).
-        controller?.pause()
+        controller?.let {
+            ownPausesInFlight++
+            it.pause()
+        }
         controller?.volume = 1f // undo any in-progress fade from the track this interrupted
 
         // If we already have this track's high-res artwork cached (from a
@@ -894,7 +996,15 @@ class PlaybackController(
         // "next song artwork still blinks" report kept recurring). This
         // makes the high-res artwork resolve start immediately in the
         // background regardless of when the user actually navigates.
-        prefetchNeighborStreamsAndArtwork(index)
+        // A song that still has to be looked up goes first, though: on a slow
+        // connection the neighbours' lookups (a full watch page each) were
+        // competing with it, so they start once it plays.
+        if (_state.value.isResolvingStream) {
+            neighborPrefetchOnReady = index
+        } else {
+            neighborPrefetchOnReady = null
+            prefetchNeighborStreamsAndArtwork(index)
+        }
 
         when (item) {
             is PlayableItem.LocalTrack -> startMediaItem(item, resolvedStreamUrl = null)
@@ -1027,21 +1137,21 @@ class PlaybackController(
                         // always gets a real, actionable error within a
                         // reasonable window instead of an indefinitely stuck
                         // loading indicator.
-                        val result = try {
-                            kotlinx.coroutines.withTimeout(RESOLVE_STREAM_TIMEOUT_MS) {
-                                // Already being looked up in the background
-                                // (see warmUpStreams): wait for that instead
-                                // of starting the same lookup again.
-                                val warm = warmUps[item.id]?.takeIf { it.isActive }?.await()
-                                warm?.takeIf { it is FallbackResult.Success } ?: playbackManager.resolveStream(item, quality)
-                            }
-                        } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-                            FallbackResult.Failure(
-                                com.whiplash.music.playback.provider.ProviderFailure.NetworkFailure(
-                                    "Timed out resolving ${item.title}",
-                                ),
-                                attempts = emptyList(),
-                            )
+                        val startedAt = android.os.SystemClock.elapsedRealtime()
+                        var result = resolveForPlay(item, quality)
+                        // A quick network failure (a connection reset, a moment
+                        // without network while switching between Wi-Fi and
+                        // mobile data) usually works the second time, so it is
+                        // tried once more before showing an error.
+                        if (result is FallbackResult.Failure &&
+                            result.failure is com.whiplash.music.playback.provider.ProviderFailure.NetworkFailure &&
+                            generation == resolveGeneration &&
+                            android.os.SystemClock.elapsedRealtime() - startedAt < RESOLVE_RETRY_WITHIN_MS
+                        ) {
+                            android.util.Log.i("PlaybackController", "Lookup of ${item.id} failed (${result.failure.message}), trying again")
+                            delay(RESOLVE_RETRY_DELAY_MS)
+                            if (generation != resolveGeneration) return@launch
+                            result = resolveForPlay(item, quality)
                         }
                         if (generation != resolveGeneration) return@launch // superseded by a newer playIndex call
 
@@ -1129,7 +1239,7 @@ class PlaybackController(
                     }
                     if (result is FallbackResult.Success) {
                         val art = firstLoadableArtwork(result.value.resolvedArtworkCandidates)
-                        prefetched = PrefetchedStream(nextItem.id, result.value.streamUrl, art, result.value.bitrateBps)
+                        prefetched = PrefetchedStream(nextItem.id, result.value.streamUrl, art, result.value.bitrateBps, result.value.expiresAtEpochMs)
                         // firstLoadableArtwork already loaded it into Coil's cache.
                         art?.let { url -> artworkPreloadCache[PlayableItemMediaItemMapper.mediaIdOf(nextItem)] = url }
                     }
@@ -1233,6 +1343,23 @@ class PlaybackController(
         }
     }
 
+    /** One bounded stream lookup for a song being started; a timeout comes back as a network failure. */
+    private suspend fun resolveForPlay(item: PlayableItem.YoutubeTrack, quality: com.whiplash.music.domain.model.AudioQuality): FallbackResult<com.whiplash.music.playback.provider.ResolvedStream> =
+        try {
+            kotlinx.coroutines.withTimeout(RESOLVE_STREAM_TIMEOUT_MS) {
+                // Already being looked up in the background (see
+                // warmUpStreams): wait for that instead of starting the same
+                // lookup again.
+                val warm = warmUps[item.id]?.takeIf { it.isActive }?.await()
+                warm?.takeIf { it is FallbackResult.Success } ?: playbackManager.resolveStream(item, quality)
+            }
+        } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+            FallbackResult.Failure(
+                com.whiplash.music.playback.provider.ProviderFailure.NetworkFailure("Timed out resolving ${item.title}"),
+                attempts = emptyList(),
+            )
+        }
+
     /** Starts recording how [item] is listened to (see [finishPlayEvent]). */
     private fun beginPlayEvent(item: PlayableItem) {
         eventItem = item
@@ -1320,6 +1447,14 @@ class PlaybackController(
     private fun applyBestArtwork(item: PlayableItem, candidates: List<String>, generation: Int) {
         if (item !is PlayableItem.YoutubeTrack || candidates.isEmpty()) return
         scope.launch {
+            // The sharper cover (often 100 KB or more) waits until the song
+            // plays, so on a slow connection it doesn't share the link with
+            // the song's first seconds of audio. On a normal connection that
+            // is a fraction of a second.
+            kotlinx.coroutines.withTimeoutOrNull(ARTWORK_WAIT_FOR_AUDIO_MS) {
+                _state.first { generation != resolveGeneration || (it.isPlaying && !it.isBuffering) || it.playbackError != null }
+            }
+            if (generation != resolveGeneration) return@launch
             val best = firstLoadableArtwork(candidates) ?: return@launch
             if (generation != resolveGeneration || best == _state.value.currentItem?.artworkUri) return@launch
             val upgraded = upgradeArtworkIfCurrent(item, best)
@@ -1448,8 +1583,10 @@ class PlaybackController(
         resumeAtMs: Long = 0L,
         isErrorRecovery: Boolean = false,
         streamBitrateBps: Int? = null,
+        play: Boolean = true,
     ) {
         handledEnded = false
+        currentStreamUrl = resolvedStreamUrl
         // The first play after a restored queue picks up where it left off.
         val restored = restoredResume
         restoredResume = null
@@ -1469,13 +1606,17 @@ class PlaybackController(
         // Any genuinely new playback attempt re-arms the single automatic
         // error re-resolve (see [handlePlayerError]); a recovery restart
         // deliberately does not, so one bad track can't retry forever.
-        if (!isErrorRecovery) errorRecoveryAttemptedForItemId = null
+        if (!isErrorRecovery) {
+            errorRecoveryAttemptedForItemId = null
+            networkRetries = 0
+        }
         val mediaItem = PlayableItemMediaItemMapper.toMediaItem(item, resolvedStreamUrl)
         controller?.apply {
             if (startAtMs > 0L) setMediaItem(mediaItem, startAtMs) else setMediaItem(mediaItem)
             prepare()
-            play()
+            if (play && !pausedWhileLoading) play()
         }
+        pausedWhileLoading = false
 
         // Two real, separately-reported bugs are fixed by recording the play
         // HERE, sequentially, rather than at the top of [playIndex]:
@@ -1543,18 +1684,21 @@ class PlaybackController(
     }
 
     private suspend fun maybeFadeIn() {
+        // A song started meanwhile owns the volume now (playIndex set it to 1).
+        val generation = resolveGeneration
         if (settingsRepository.crossfadeDurationMs.first() <= 0) {
-            controller?.volume = 1f
+            if (generation == resolveGeneration) controller?.volume = 1f
             return
         }
         val c = controller ?: return
         val steps = 12
         val stepDelay = FADE_STEP_MS
         for (i in 0..steps) {
+            if (generation != resolveGeneration) return
             c.volume = i / steps.toFloat()
             delay(stepDelay)
         }
-        c.volume = 1f
+        if (generation == resolveGeneration) c.volume = 1f
     }
 
     private suspend fun fadeOutBeforeTransition() {
@@ -1574,6 +1718,118 @@ class PlaybackController(
         if (restoredResume != null && currentIndex in queue.indices) playIndex(currentIndex) else controller?.play()
     }
 
+    // ── Play from the notification, lock screen, headset, Bluetooth ──────
+
+    // Pause pressed (anywhere) while the song was still being looked up: it
+    // loads, but doesn't start.
+    private var pausedWhileLoading = false
+
+    // Pauses playIndex sent that haven't reached the session yet.
+    private var ownPausesInFlight = 0
+
+    /** Pause reached the session; remembered if the song is still loading (see [pausedWhileLoading]). */
+    fun pauseFromSession() {
+        // The pause playIndex itself sends to stop the previous song.
+        if (ownPausesInFlight > 0) {
+            ownPausesInFlight--
+            return
+        }
+        if (_state.value.isResolvingStream) {
+            pausedWhileLoading = true
+            _state.update { it.copy(isPlaying = false) }
+        }
+    }
+
+    /** Whether [item] is the "loading" placeholder [publishPendingMetadata] puts in the player. */
+    fun isPendingPlaceholder(item: androidx.media3.common.MediaItem): Boolean =
+        item.localConfiguration?.uri?.scheme == PENDING_SCHEME
+
+    /**
+     * True when a plain play() can't work because the player doesn't hold
+     * the current song in a playable state: a queue restored from the last
+     * launch (nothing loaded yet), a song still being looked up, an empty
+     * player, or an idle one (stopped on an error, or still holding the
+     * loading placeholder). [playFromSession] loads the song in those cases.
+     */
+    fun needsReloadToPlay(player: Player): Boolean {
+        if (currentIndex !in queue.indices) return false
+        if (restoredResume != null || _state.value.isResolvingStream) return true
+        val held = player.currentMediaItem ?: return true
+        // Idle on the real song is fine: prepare() opens it again, and if its
+        // link has expired the error handling looks up a new one.
+        return player.playbackState == Player.STATE_IDLE && isPendingPlaceholder(held)
+    }
+
+    /**
+     * Play reached the session: from the notification, lock screen, Control
+     * Center, a headset, Bluetooth, or this app's own controller. Returns
+     * true when it was handled here and the player must not just play.
+     * Before this, only the in-app Play button could bring back a song the
+     * player had dropped (after a lost connection while paused, say), so
+     * the notification's Play did nothing until the app was opened.
+     */
+    fun playFromSession(player: Player): Boolean {
+        pausedWhileLoading = false
+        if (!needsReloadToPlay(player)) return false
+        when {
+            // Already being looked up: it starts on its own when found.
+            _state.value.isResolvingStream -> Unit
+            restoredResume != null -> playIndex(currentIndex)
+            else -> reloadCurrent()
+        }
+        return true
+    }
+
+    /**
+     * Loads the current song again and carries on from where it was (the
+     * player lost it: an error, or it was stopped). Used by every Play
+     * button so a retry never restarts the song from 0:00.
+     */
+    private fun reloadCurrent() {
+        if (currentIndex !in queue.indices) return
+        val item = queue[currentIndex]
+        val s = _state.value
+        val at = restoredResume?.takeIf { it.first == item.id }?.second
+            ?: s.positionMs.takeIf { s.currentItem?.id == item.id && (s.durationMs <= 0L || it < s.durationMs - 1_000L) }
+            ?: 0L
+        restoredResume = if (at > 0L) item.id to at else null
+        playIndex(currentIndex)
+    }
+
+    private val restoreFinished = kotlinx.coroutines.CompletableDeferred<Unit>()
+    private val controllerReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+    /**
+     * The song a Play should resume when the player is empty, typically the
+     * first press after Android stopped the app: a headset, Bluetooth or the
+     * system media controls start the service again with nothing loaded.
+     * Waits (briefly) for the saved queue and the player connection.
+     *
+     * Returned straight away as the song with a "loading" link, so the
+     * session can show its notification at once: Android stops a media
+     * service started by a button press that doesn't show one within a few
+     * seconds, and the stream lookup can take longer than that. The Play
+     * that follows reaches [playFromSession], which loads the real stream
+     * and starts at the saved position. Null when there is no saved song.
+     */
+    suspend fun sessionResumeItem(): androidx.media3.common.MediaItem? {
+        kotlinx.coroutines.withTimeoutOrNull(RESUME_WAIT_MS) {
+            restoreFinished.await()
+            controllerReady.await()
+        } ?: return null
+        val item = queue.getOrNull(currentIndex) ?: return null
+        // The player had lost the song (not a fresh restore): resume from where it was.
+        if (restoredResume == null) {
+            val s = _state.value
+            val at = s.positionMs.takeIf { s.currentItem?.id == item.id && (s.durationMs <= 0L || it < s.durationMs - 1_000L) } ?: 0L
+            restoredResume = item.id to at
+        }
+        return PlayableItemMediaItemMapper.toMediaItem(
+            item,
+            resolvedStreamUrl = "$PENDING_SCHEME://${PlayableItemMediaItemMapper.mediaIdOf(item)}",
+        )
+    }
+
     fun pause() = controller?.pause()
 
     fun togglePlayPause() {
@@ -1586,8 +1842,12 @@ class PlaybackController(
         // same "couldn't play"/"no internet" feedback the initial tap-to-
         // play gave. Retry the resolve instead, so this button always
         // either plays or gives the same real feedback, never nothing.
-        if ((_state.value.playbackError != null || restoredResume != null) && currentIndex in queue.indices) {
+        if (restoredResume != null && currentIndex in queue.indices) {
             playIndex(currentIndex)
+            return
+        }
+        if (_state.value.playbackError != null && currentIndex in queue.indices) {
+            reloadCurrent()
             return
         }
         if (c.isPlaying) c.pause() else c.play()
@@ -1873,8 +2133,10 @@ class PlaybackController(
             // instantly when the track changed.
             val controllerMediaId = c.currentMediaItem?.mediaId
             // A restored queue shows its song and position before the player
-            // has loaded anything; the empty player mustn't zero them.
-            if (controllerMediaId == null && restoredResume != null) return@update current
+            // has loaded anything; the empty player mustn't zero them. Same
+            // for a song the player gave up on (idle): Play resumes it from
+            // the saved spot, which a seek may have moved.
+            if (restoredResume != null && (controllerMediaId == null || c.playbackState == Player.STATE_IDLE)) return@update current
             val expectedMediaId = current.currentItem?.let { PlayableItemMediaItemMapper.mediaIdOf(it) }
             if (controllerMediaId != null && expectedMediaId != null && controllerMediaId != expectedMediaId) {
                 return@update current
@@ -2066,6 +2328,25 @@ class PlaybackController(
          * never prepared.
          */
         const val PENDING_SCHEME = "pending"
+
+        /** Player errors that mean the connection dropped; the stream itself is fine. */
+        val CONNECTION_ERROR_CODES = setOf(
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+            PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+        )
+        const val MAX_NETWORK_RETRIES = 3
+
+        /** Longest the sharper cover waits for the song to start (see applyBestArtwork). */
+        const val ARTWORK_WAIT_FOR_AUDIO_MS = 15_000L
+
+        /** A lookup that failed within this long is tried once more (see playIndex). */
+        const val RESOLVE_RETRY_WITHIN_MS = 15_000L
+        const val RESOLVE_RETRY_DELAY_MS = 1_000L
+        const val NETWORK_RETRY_BASE_MS = 2_000L
+
+        /** How long a Play after a restart waits for the saved queue and the player connection. */
+        const val RESUME_WAIT_MS = 3_000L
 
         /**
          * [PlaybackException] error codes that mean "the network/stream was

@@ -56,6 +56,16 @@
             </intent-filter>
         </service>
 
+        <!-- A headset/Bluetooth Play after Android stopped the app restarts the
+             service, which resumes the saved queue (onPlaybackResumption). -->
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
         <!-- 4.7: shares the Replay poster image (cache/replay only). -->
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -162,8 +162,13 @@ class WhiplashPlaybackService : MediaSessionService() {
         val forwardingPlayer = QueueAwareForwardingPlayer(player, playbackController)
 
         mediaSession = MediaSession.Builder(this, forwardingPlayer)
-            .setCallback(WhiplashSessionCallback())
+            .setCallback(WhiplashSessionCallback(playbackController, serviceScope))
             .build()
+
+        // Show the notification while a resumed song is still loading (the
+        // player is idle then), so a Play that restarted the service always
+        // gets its notification in time; see PlaybackController.sessionResumeItem.
+        setShowNotificationForIdlePlayer(SHOW_NOTIFICATION_FOR_IDLE_PLAYER_ALWAYS)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession

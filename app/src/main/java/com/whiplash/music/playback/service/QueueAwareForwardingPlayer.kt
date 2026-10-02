@@ -81,6 +81,30 @@ class QueueAwareForwardingPlayer(
         }
     }
 
+    /**
+     * The notification, lock screen, Control Center, headset and Bluetooth
+     * all press Play by calling prepare() (when the player is idle) and then
+     * play() on this player. Neither can bring back a song the player no
+     * longer holds, so those cases are handed to [PlaybackController], which
+     * does what the in-app Play button does: load the song again and carry
+     * on where it was.
+     */
+    override fun prepare() {
+        // A song play() is about to load again (or nothing to prepare).
+        if (mediaItemCount == 0 || controller.needsReloadToPlay(this)) return
+        super.prepare()
+    }
+
+    override fun play() {
+        if (controller.playFromSession(this)) return
+        super.play()
+    }
+
+    override fun pause() {
+        controller.pauseFromSession()
+        super.pause()
+    }
+
     override fun hasNextMediaItem(): Boolean = controller.hasNext()
 
     override fun hasPreviousMediaItem(): Boolean = controller.hasPreviousItem()
