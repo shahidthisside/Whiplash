@@ -22,6 +22,8 @@ class SettingsViewModel(
     private val lyricsCache: com.whiplash.music.data.lyrics.LyricsCache,
     private val lyricsProviderChain: com.whiplash.music.data.lyrics.LyricsProviderChain,
     private val downloadManager: com.whiplash.music.data.download.DownloadManager,
+    /** Provider id that served the last stream lookup (see PlaybackManager.lastStreamSource). */
+    val lastStreamSource: StateFlow<String?> = kotlinx.coroutines.flow.MutableStateFlow(null),
 ) : ViewModel() {
 
     /**
@@ -177,6 +179,13 @@ class SettingsViewModel(
 
     fun setLyricsSource(source: com.whiplash.music.data.lyrics.LyricsSourcePreference) {
         viewModelScope.launch { repository.setLyricsSource(source) }
+    }
+
+    val streamSource: StateFlow<com.whiplash.music.playback.provider.StreamSourcePreference?> = repository.streamSource
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun setStreamSource(source: com.whiplash.music.playback.provider.StreamSourcePreference) {
+        viewModelScope.launch { repository.setStreamSource(source) }
     }
 
     /** Live health of each lyrics provider this session (keyed by provider id). */

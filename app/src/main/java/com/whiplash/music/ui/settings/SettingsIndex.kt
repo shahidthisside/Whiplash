@@ -8,6 +8,7 @@ package com.whiplash.music.ui.settings
  */
 enum class SettingsSection(val label: String) {
     AUDIO_QUALITY("Audio quality"),
+    STREAM_SOURCE("Stream source"),
     PLAYBACK("Playback"),
     DOWNLOADS("Downloads"),
     NOW_PLAYING("Now Playing"),
@@ -23,7 +24,7 @@ enum class SettingsSection(val label: String) {
  * Every section appears in exactly one group.
  */
 enum class SettingsGroup(val label: String, val sections: List<SettingsSection>) {
-    LISTENING("Listening", listOf(SettingsSection.AUDIO_QUALITY, SettingsSection.PLAYBACK, SettingsSection.DOWNLOADS)),
+    LISTENING("Listening", listOf(SettingsSection.AUDIO_QUALITY, SettingsSection.STREAM_SOURCE, SettingsSection.PLAYBACK, SettingsSection.DOWNLOADS)),
     LOOK_AND_FEEL("Look & feel", listOf(SettingsSection.NOW_PLAYING, SettingsSection.LYRICS, SettingsSection.APPEARANCE)),
     YOUR_DATA("Your data", listOf(SettingsSection.ACCOUNT, SettingsSection.STORAGE, SettingsSection.BACKUP)),
 }
@@ -31,6 +32,7 @@ enum class SettingsGroup(val label: String, val sections: List<SettingsSection>)
 enum class SettingEntry(val section: SettingsSection, val title: String, val keywords: String) {
     AUDIO_QUALITY(SettingsSection.AUDIO_QUALITY, "Audio Quality", "streaming bitrate sound"),
     PER_NETWORK(SettingsSection.AUDIO_QUALITY, "Per-Network Audio Quality", "wifi wi-fi cellular mobile data plan"),
+    STREAM_SOURCE(SettingsSection.STREAM_SOURCE, "Stream source", "newpipe youtube direct provider backend server switch"),
     AUTOPLAY(SettingsSection.PLAYBACK, "Autoplay", "radio related queue continue"),
     RESET_RECOMMENDATIONS(SettingsSection.PLAYBACK, "Reset recommendations", "radio autoplay quick picks learned taste skips forget"),
     GAPLESS(SettingsSection.PLAYBACK, "Gapless Playback", "pause between songs preload"),

@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.GraphicEq
@@ -129,7 +130,7 @@ private const val EQUALIZER_REQUEST_CODE = 4242
 fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val context = LocalContext.current
     val app = context.applicationContext as WhiplashApplication
-    val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository, app.audioCacheManager, app.backupManager, app.lyricsCache, app.lyricsProviderChain, app.downloadManager))
+    val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(app.settingsRepository, app.audioCacheManager, app.backupManager, app.lyricsCache, app.lyricsProviderChain, app.downloadManager, app.playbackManager.lastStreamSource))
 
     val audioQuality by viewModel.audioQuality.collectAsState()
     val downloadQuality by viewModel.downloadQuality.collectAsState()
@@ -152,6 +153,8 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     val playerLyricStrip by viewModel.playerLyricStrip.collectAsState()
     val swipeUpForLyrics by viewModel.swipeUpForLyrics.collectAsState()
     val lyricsSource by viewModel.lyricsSource.collectAsState()
+    val streamSource by viewModel.streamSource.collectAsState()
+    val lastStreamSource by viewModel.lastStreamSource.collectAsState()
     val lyricsBlurUnfocused by viewModel.lyricsBlurUnfocused.collectAsState()
     val homeShelvesEnabled by viewModel.homeShelvesEnabled.collectAsState()
     val exploreEnabled by viewModel.exploreEnabled.collectAsState()
@@ -616,6 +619,52 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                         onSelect = viewModel::setAudioQualityCellular,
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (SettingsSection.STREAM_SOURCE in sections) {
+                item(key = "section:STREAM_SOURCE") {
+                    if (flat) {
+                        SectionLabel(SettingsSection.STREAM_SOURCE.label)
+                        Spacer(Modifier.height(GlassTokens.spaceSm))
+                    }
+                    SettingsCardColumn(SettingsSection.STREAM_SOURCE) {
+                        val rows = SettingsRowCounter()
+                        if (shown(SettingEntry.STREAM_SOURCE)) {
+                            SettingItem(divider = rows.next()) {
+                                SettingRow(
+                                    title = "Stream source",
+                                    icon = Icons.Filled.Hub,
+                                    subtitle = when (streamSource) {
+                                        com.whiplash.music.playback.provider.StreamSourcePreference.NEWPIPE ->
+                                            "Songs are looked up with NewPipe only."
+                                        com.whiplash.music.playback.provider.StreamSourcePreference.YOUTUBE_DIRECT ->
+                                            "Songs are looked up by asking YouTube directly. Faster, with no NewPipe backup."
+                                        else -> "Automatic uses NewPipe and asks YouTube directly if a song won't play."
+                                    },
+                                )
+                                // Shown once the saved choice is read, like Audio Quality above.
+                                streamSource?.let { source ->
+                                    SegmentedChoice(
+                                        options = com.whiplash.music.playback.provider.StreamSourcePreference.entries,
+                                        selected = source,
+                                        label = { it.label },
+                                        onSelect = viewModel::setStreamSource,
+                                    )
+                                }
+                                Text(
+                                    text = "Last song: " + when (lastStreamSource) {
+                                        com.whiplash.music.playback.provider.StreamSourcePreference.NEWPIPE_ID -> "NewPipe"
+                                        com.whiplash.music.playback.provider.StreamSourcePreference.DIRECT_ID -> "YouTube direct"
+                                        else -> "not looked up yet"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = WhiplashColors.textSecondary,
+                                    modifier = Modifier.padding(start = GlassTokens.spaceSm),
+                                )
                             }
                         }
                     }
@@ -1639,6 +1688,11 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                                 } else {
                                     "Streaming ${audioQuality?.shortLabel() ?: "Auto"}"
                                 }
+                                SettingsSection.STREAM_SOURCE -> (streamSource?.label ?: "Automatic") + when (lastStreamSource) {
+                                    com.whiplash.music.playback.provider.StreamSourcePreference.NEWPIPE_ID -> " · Last song: NewPipe"
+                                    com.whiplash.music.playback.provider.StreamSourcePreference.DIRECT_ID -> " · Last song: YouTube direct"
+                                    else -> ""
+                                }
                                 SettingsSection.PLAYBACK -> listOf(
                                     if (autoplayEnabled) "Autoplay on" else "Autoplay off",
                                     if (crossfadeDurationMs > 0) "Crossfade ${crossfadeDurationMs / 1000}s" else "No crossfade",
@@ -2215,7 +2269,22 @@ private fun CountSelector(
 private fun LyricsSourceSelector(
     selected: com.whiplash.music.data.lyrics.LyricsSourcePreference,
     onSelect: (com.whiplash.music.data.lyrics.LyricsSourcePreference) -> Unit,
+) = SegmentedChoice(
+    options = com.whiplash.music.data.lyrics.LyricsSourcePreference.entries,
+    selected = selected,
+    label = { it.label },
+    onSelect = onSelect,
+)
+
+/** A pill row of equal-width choices, one selected (lyrics source, stream source). */
+@Composable
+private fun <T> SegmentedChoice(
+    options: List<T>,
+    selected: T,
+    label: (T) -> String,
+    onSelect: (T) -> Unit,
 ) {
+    val haptic = LocalHapticFeedback.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2223,15 +2292,15 @@ private fun LyricsSourceSelector(
             .background(WhiplashColors.surfaceGlass)
             .padding(3.dp),
     ) {
-        com.whiplash.music.data.lyrics.LyricsSourcePreference.entries.forEach { option ->
+        options.forEach { option ->
             val isSelected = option == selected
             val bg by androidx.compose.animation.animateColorAsState(
                 targetValue = if (isSelected) WhiplashColors.accent else Color.Transparent,
-                label = "lyricsSourceBg",
+                label = "segmentBg",
             )
             val fg by androidx.compose.animation.animateColorAsState(
                 targetValue = if (isSelected) WhiplashColors.onAccent else WhiplashColors.textSecondary,
-                label = "lyricsSourceFg",
+                label = "segmentFg",
             )
             Row(
                 modifier = Modifier
@@ -2239,11 +2308,14 @@ private fun LyricsSourceSelector(
                     .clip(RoundedCornerShape(WhiplashRadius.pill))
                     .background(bg)
                     .semantics { this.selected = isSelected }
-                    .clickable(role = androidx.compose.ui.semantics.Role.Button) { onSelect(option) }
+                    .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                        if (!isSelected) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSelect(option)
+                    }
                     .padding(vertical = GlassTokens.spaceSm),
                 horizontalArrangement = Arrangement.Center,
             ) {
-                Text(text = option.label, style = MaterialTheme.typography.labelMedium, color = fg, maxLines = 1)
+                Text(text = label(option), style = MaterialTheme.typography.labelMedium, color = fg, maxLines = 1)
             }
         }
     }
@@ -2371,6 +2443,7 @@ private fun formatSpeed(speed: Float): String {
 /** Icon and tile colour for each section's folder row. */
 private fun SettingsSection.folderIcon(): ImageVector = when (this) {
     SettingsSection.AUDIO_QUALITY -> Icons.Filled.GraphicEq
+    SettingsSection.STREAM_SOURCE -> Icons.Filled.Hub
     SettingsSection.PLAYBACK -> Icons.Filled.PlayCircle
     SettingsSection.DOWNLOADS -> Icons.Filled.Download
     SettingsSection.NOW_PLAYING -> Icons.Filled.Album
@@ -2384,6 +2457,7 @@ private fun SettingsSection.folderIcon(): ImageVector = when (this) {
 private fun SettingsSection.folderTint(): androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color(
     when (this) {
         SettingsSection.AUDIO_QUALITY -> 0xFF8FA8FF
+        SettingsSection.STREAM_SOURCE -> 0xFFB7D46E
         SettingsSection.PLAYBACK -> 0xFF6FD6A8
         SettingsSection.DOWNLOADS -> 0xFF6CC8F0
         SettingsSection.NOW_PLAYING -> 0xFFFF9A76

@@ -14,9 +14,10 @@ class SettingsViewModelFactory(
     private val lyricsCache: com.whiplash.music.data.lyrics.LyricsCache,
     private val lyricsProviderChain: com.whiplash.music.data.lyrics.LyricsProviderChain,
     private val downloadManager: com.whiplash.music.data.download.DownloadManager,
+    private val lastStreamSource: kotlinx.coroutines.flow.StateFlow<String?> = kotlinx.coroutines.flow.MutableStateFlow(null),
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
         @Suppress("UNCHECKED_CAST")
-        return SettingsViewModel(repository, cacheManager, backupManager, lyricsCache, lyricsProviderChain, downloadManager) as T
+        return SettingsViewModel(repository, cacheManager, backupManager, lyricsCache, lyricsProviderChain, downloadManager, lastStreamSource) as T
     }
 }
