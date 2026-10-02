@@ -107,7 +107,24 @@ class WhiplashPlaybackService : MediaSessionService() {
             // caches provide. Toggle lives in Settings and is respected
             // live via the collector below, not just at player-construction
             // time.
-            .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(cachingFactory))
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(this)
+                    .setDataSourceFactory(cachingFactory)
+                    .setLoadErrorHandlingPolicy(StreamLoadErrorPolicy()),
+            )
+            // Keeps up to 90 s of audio ahead (default 50 s) once loading is
+            // going well, so a short drop in a weak signal plays from the
+            // buffer instead of stopping. Starting still needs only 1 s.
+            .setLoadControl(
+                androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        /* minBufferMs = */ 50_000,
+                        /* maxBufferMs = */ 90_000,
+                        /* bufferForPlaybackMs = */ 1_000,
+                        /* bufferForPlaybackAfterRebufferMs = */ 2_000,
+                    )
+                    .build(),
+            )
             .build()
 
         app.settingsRepository.audioCacheEnabled
