@@ -123,6 +123,7 @@ fun HomeScreen(
                 (related.take(12) + radio).distinctBy { it.id }
             },
             app.quickPicksSnapshot,
+            app.speedDialSnapshot,
         ),
     )
     val songActionsViewModel: SongActionsViewModel = viewModel(

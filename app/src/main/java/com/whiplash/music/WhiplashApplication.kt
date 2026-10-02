@@ -97,6 +97,7 @@ class WhiplashApplication : Application() {
             forgetRadioLearning = {
                 radioLearnedStore.clear()
                 quickPicksSnapshot.clear()
+                speedDialSnapshot.clear()
             },
         )
     }
@@ -109,6 +110,11 @@ class WhiplashApplication : Application() {
     val radioLearnedStore by lazy { com.whiplash.music.recommend.FileLearnedStore(java.io.File(filesDir, "radio_learned.json")) }
 
     /** The last Quick Picks, shown instantly on the next launch; wiped with history. */
+    /** The last Speed dial, shown instantly on the next launch; wiped with history. */
+    val speedDialSnapshot by lazy {
+        com.whiplash.music.data.repository.SpeedDialSnapshot(java.io.File(filesDir, "speed_dial.json"))
+    }
+
     val quickPicksSnapshot by lazy {
         com.whiplash.music.data.repository.QuickPicksSnapshot(java.io.File(filesDir, "quick_picks.json"))
     }
@@ -226,6 +232,8 @@ class WhiplashApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         NewPipe.init(OkHttpNewPipeDownloader(okHttpClient))
+        // A small file; read now so Home opens with Speed dial already filled in.
+        speedDialSnapshot.warm(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO), this)
         // YouTube asks for cookie consent before serving radio (Mix)
         // playlists in some regions; accepting it is what NewPipe's own
         // "accept YouTube cookies" setting does. Needed for song radio.

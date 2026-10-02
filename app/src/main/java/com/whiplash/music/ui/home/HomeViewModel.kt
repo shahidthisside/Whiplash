@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.drop
@@ -55,7 +56,14 @@ class HomeViewModel(
     private val radioSource: QuickPicksRadio? = null,
     /** The last full Quick Picks, shown at once while a fresh list loads. */
     private val snapshot: com.whiplash.music.data.repository.QuickPicksSnapshot? = null,
+    /** The last Speed dial, shown at once while history is read. */
+    private val speedDialSnapshot: com.whiplash.music.data.repository.SpeedDialSnapshot? = null,
 ) : ViewModel() {
+
+    // The saved Speed dial, until the live one from history arrives.
+    private val savedSpeedDial = MutableStateFlow(speedDialSnapshot?.peek()?.takeIf { it.isNotEmpty() })
+    private var liveSpeedDialSeen = false
+
 
     // Layout settings held here (not collected fresh in the screen) so their
     // real values are already known when Home comes back from an album or
@@ -64,7 +72,9 @@ class HomeViewModel(
     // scroll position (landing on Quick Picks instead of the shelf you left).
     // null = not read from disk yet.
     val speedDialListView: StateFlow<Boolean?> = settingsRepository.speedDialListView
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+        // Remembered next to the saved dial, so it isn't drawn as a grid first and then a list.
+        .onEach { list -> if (list != speedDialSnapshot?.peekListView()) speedDialSnapshot?.writeListView(list) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, speedDialSnapshot?.peekListView())
     val quickPicksGridView: StateFlow<Boolean?> = settingsRepository.quickPicksGridView
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val quickPicksGridCount: StateFlow<Int?> = settingsRepository.quickPicksGridCount
@@ -127,7 +137,7 @@ class HomeViewModel(
      * its cached value, whereas re-subscribing to a Room Flow re-runs the
      * SQL.
      */
-    val speedDial: StateFlow<List<PlayableItem>> = speedDialRefreshTrigger
+    private val liveSpeedDial: kotlinx.coroutines.flow.Flow<List<PlayableItem>> = speedDialRefreshTrigger
         .flatMapLatest {
             kotlinx.coroutines.flow.combine(
                 libraryRepository.observePinned(),
@@ -159,11 +169,44 @@ class HomeViewModel(
             }
         }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
-        .onEach { _isSpeedDialLoaded.value = true }
+        .onEach { live ->
+            liveSpeedDialSeen = true
+            savedSpeedDial.value = null
+            _isSpeedDialLoaded.value = true
+            // Kept for the next launch (only when it changed, so plays don't rewrite it needlessly).
+            if (live != lastSavedSpeedDial) {
+                lastSavedSpeedDial = live
+                speedDialSnapshot?.let { store -> viewModelScope.launch { store.write(live) } }
+            }
+        }
+
+    private var lastSavedSpeedDial: List<PlayableItem>? = null
+
+    /** The live Speed dial, or the saved one from the last launch until the live one is read. */
+    val speedDial: StateFlow<List<PlayableItem>> = kotlinx.coroutines.flow.combine(
+        liveSpeedDial.map<List<PlayableItem>, List<PlayableItem>?> { it }.onStart { emit(null) },
+        savedSpeedDial,
+    ) { live, saved -> live ?: saved ?: emptyList() }
+        .distinctUntilChanged()
         // Eagerly (a cheap local query), so Speed dial is already filled in when
         // Home returns after more than a few seconds away — otherwise it came back
         // empty for a frame and shifted everything below it.
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // Declared after everything it touches, so they exist when it runs.
+    init {
+        // Already read at app start: shown from the first frame, no placeholder.
+        if (savedSpeedDial.value != null && !liveSpeedDialSeen) _isSpeedDialLoaded.value = true
+        if (savedSpeedDial.value == null) speedDialSnapshot?.let { store ->
+            viewModelScope.launch {
+                val saved = store.read()
+                if (!liveSpeedDialSeen && saved.isNotEmpty()) {
+                    savedSpeedDial.value = saved
+                    _isSpeedDialLoaded.value = true
+                }
+            }
+        }
+    }
 
     private val _quickPicks = MutableStateFlow<List<PlayableItem.YoutubeTrack>>(emptyList())
     val quickPicks: StateFlow<List<PlayableItem.YoutubeTrack>> = _quickPicks

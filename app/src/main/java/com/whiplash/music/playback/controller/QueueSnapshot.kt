@@ -61,6 +61,15 @@ data class QueueSnapshot(
             )
         }.getOrNull()
 
+        /** A plain list of songs of any kind, in the same form as the queue (used by Speed dial's saved copy). */
+        fun encodeItems(items: List<PlayableItem>): String =
+            org.json.JSONArray().apply { items.forEach { put(encodeItem(it)) } }.toString()
+
+        fun decodeItems(json: String): List<PlayableItem> = runCatching {
+            val a = org.json.JSONArray(json)
+            (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let(::decodeItem) }
+        }.getOrDefault(emptyList())
+
         private fun encodeItem(item: PlayableItem): JSONObject {
             val o = JSONObject()
                 .put("id", item.id)
