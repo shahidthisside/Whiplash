@@ -486,6 +486,17 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
     }
 
     var settingsQuery by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    // A section page's Search button: back to the start page with the cursor in the search field.
+    val settingsSearchFocus = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
+    var focusSearchRequest by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0) }
+    val settingsKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    androidx.compose.runtime.LaunchedEffect(focusSearchRequest) {
+        if (focusSearchRequest > 0) {
+            // The start page is already composed underneath the section page.
+            runCatching { settingsSearchFocus.requestFocus() }
+            settingsKeyboard?.show()
+        }
+    }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val settingsScope = androidx.compose.runtime.rememberCoroutineScope()
     // Folder mode: the section page that's open (null = the start page).
@@ -1611,6 +1622,7 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
                     query = settingsQuery,
                     onQueryChange = { settingsQuery = it },
                     placeholder = "Search settings",
+                    focusRequester = settingsSearchFocus,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = GlassTokens.spaceMd)
@@ -1691,7 +1703,14 @@ fun SettingsScreen(resetKey: Int = 0, backEnabled: Boolean = true) {
             ) {
                 val section = shownSection
                 if (section != null) {
-                    SettingsSectionPage(section = section, onBack = { openSection = null }) {
+                    SettingsSectionPage(
+                        section = section,
+                        onBack = { openSection = null },
+                        onSearch = {
+                            openSection = null
+                            focusSearchRequest++
+                        },
+                    ) {
                         androidx.compose.runtime.key(section) {
                             val pageState = androidx.compose.foundation.lazy.rememberLazyListState()
                             SettingsList(pageState, listOf(section), "", flat = false, topPadding = GlassTokens.spaceSm) {}
@@ -2503,7 +2522,7 @@ private fun SettingsFolderRow(section: SettingsSection, summary: String, onClick
 
 /** A section's own page: a back row naming the section, then its settings. */
 @Composable
-private fun SettingsSectionPage(section: SettingsSection, onBack: () -> Unit, content: @Composable () -> Unit) {
+private fun SettingsSectionPage(section: SettingsSection, onBack: () -> Unit, onSearch: () -> Unit, content: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -2526,8 +2545,18 @@ private fun SettingsSectionPage(section: SettingsSection, onBack: () -> Unit, co
                 text = section.label,
                 style = MaterialTheme.typography.titleLarge,
                 color = WhiplashColors.textPrimary,
-                modifier = Modifier.semantics { heading() },
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).semantics { heading() },
             )
+            // Jumps to any other option without stepping back first.
+            androidx.compose.material3.IconButton(onClick = onSearch) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = "Search settings",
+                    tint = WhiplashColors.textPrimary,
+                )
+            }
         }
         Box(modifier = Modifier.weight(1f)) { content() }
     }

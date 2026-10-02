@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -66,6 +67,8 @@ fun GlassSearchField(
     modifier: Modifier = Modifier,
     placeholder: String = "Search",
     onSearchAction: () -> Unit = {},
+    /** Lets a caller move the cursor into the field (e.g. from a search button elsewhere). */
+    focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
 ) {
     val shape = RoundedCornerShape(WhiplashRadius.pill)
     val interactionSource = remember { MutableInteractionSource() }
@@ -126,6 +129,7 @@ fun GlassSearchField(
                 interactionSource = interactionSource,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                     .padding(vertical = GlassTokens.spaceMd),
             )
         }
