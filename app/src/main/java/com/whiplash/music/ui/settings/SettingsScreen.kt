@@ -107,6 +107,7 @@ import com.whiplash.music.ui.theme.WhiplashRadius
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.layout.layout
 
 /**
  * Settings screen (section 59). Two real, fully-implemented sections:
@@ -2043,10 +2044,12 @@ private fun SettingActionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .settingRowBleed()
             .clickable(role = androidx.compose.ui.semantics.Role.Button) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
             }
+            .padding(horizontal = SETTING_ITEM_PAD_H, vertical = SETTING_ITEM_PAD_V)
             .padding(vertical = GlassTokens.spaceSm),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -2074,6 +2077,7 @@ private fun SettingToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .settingRowBleed()
             .toggleable(
                 value = checked,
                 role = androidx.compose.ui.semantics.Role.Switch,
@@ -2081,7 +2085,8 @@ private fun SettingToggleRow(
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onCheckedChange(newValue)
                 },
-            ),
+            )
+            .padding(horizontal = SETTING_ITEM_PAD_H, vertical = SETTING_ITEM_PAD_V),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -2580,7 +2585,9 @@ private fun SettingsCardColumn(section: SettingsSection, content: @Composable ()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .glassFill(androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.large), settingsCardColor()),
+                .glassFill(androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.large), settingsCardColor())
+                // Rows' press highlights reach the card's edges; keep them inside its corners.
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(com.whiplash.music.ui.theme.WhiplashRadius.large)),
         ) {
             content()
         }
@@ -2613,11 +2620,38 @@ private fun SettingItem(divider: Boolean, content: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = SETTING_ITEM_PAD_H, vertical = SETTING_ITEM_PAD_V),
         verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceMd),
     ) {
         content()
     }
+}
+
+/** A setting's inner margin inside its card (see [SettingItem]). */
+private val SETTING_ITEM_PAD_H = 16.dp
+private val SETTING_ITEM_PAD_V = 14.dp
+
+/**
+ * Lets a tappable row's press highlight cover its whole slot in the card,
+ * edge to edge and up to the dividers, instead of a box inset by
+ * [SettingItem]'s margin. The row draws [SETTING_ITEM_PAD_H] /
+ * [SETTING_ITEM_PAD_V] past its slot on every side (and pads its content
+ * back by the same amount), while taking exactly the slot's space in the
+ * layout. The card clips it to its rounded corners.
+ */
+private fun Modifier.settingRowBleed(): Modifier = this.layout { measurable, constraints ->
+    val h = SETTING_ITEM_PAD_H.roundToPx()
+    val v = SETTING_ITEM_PAD_V.roundToPx()
+    val widened = constraints.copy(
+        minWidth = constraints.minWidth + 2 * h,
+        maxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth + 2 * h else constraints.maxWidth,
+        minHeight = constraints.minHeight,
+        maxHeight = if (constraints.hasBoundedHeight) constraints.maxHeight + 2 * v else constraints.maxHeight,
+    )
+    val placeable = measurable.measure(widened)
+    val width = (placeable.width - 2 * h).coerceAtLeast(0)
+    val height = (placeable.height - 2 * v).coerceAtLeast(0)
+    layout(width, height) { placeable.place(-h, -v) }
 }
 
 private fun formatBytes(bytes: Long): String {
