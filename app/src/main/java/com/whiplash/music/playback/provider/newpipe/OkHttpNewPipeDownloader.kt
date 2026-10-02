@@ -20,7 +20,7 @@ class OkHttpNewPipeDownloader(private val client: OkHttpClient) : Downloader() {
     @Throws(IOException::class, ReCaptchaException::class)
     override fun execute(request: Request): Response {
         val httpMethod = request.httpMethod()
-        val url = request.url()
+        val url = leanUrl(request.url())
         val headers = request.headers()
         val dataToSend = request.dataToSend()
 
@@ -64,6 +64,36 @@ class OkHttpNewPipeDownloader(private val client: OkHttpClient) : Downloader() {
     }
 
     companion object {
+        private val lean = ThreadLocal<Boolean>()
+
+        /**
+         * Runs [block] (a stream lookup made on this thread) with the watch
+         * page's `next` response cut down to the part the lookup reads:
+         * about 5 KB instead of 50 KB, most of it the related-videos list.
+         * YouTube's own `$fields` filter does the cutting, the same way
+         * NewPipe already trims its metadata request. Playing needs nothing
+         * else from it; related songs are fetched in full when asked for.
+         */
+        fun <T> leanLookup(block: () -> T): T {
+            val before = lean.get()
+            lean.set(true)
+            try {
+                return block()
+            } finally {
+                lean.set(before)
+            }
+        }
+
+        private fun leanUrl(url: String): String {
+            if (lean.get() != true || !url.startsWith(NEXT_URL) || "\$fields=" in url) return url
+            return url + (if ('?' in url) "&" else "?") + NEXT_FIELDS
+        }
+
+        private const val NEXT_URL = "https://www.youtube.com/youtubei/v1/next"
+        // Title, description and age rating (videoPrimaryInfoRenderer and
+        // videoSecondaryInfoRenderer); drops related videos and side panels.
+        private const val NEXT_FIELDS = "\$fields=contents.twoColumnWatchNextResults.results.results.contents"
+
         private const val DEFAULT_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
     }

@@ -11,6 +11,7 @@ import com.whiplash.music.playback.provider.ProviderHealthTracker
 import com.whiplash.music.playback.provider.ProviderPlayerInfo
 import com.whiplash.music.playback.provider.ResolvedStream
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.exceptions.AgeRestrictedContentException
@@ -46,8 +47,8 @@ class NewPipePlaybackProvider(
 
     override suspend fun getStream(songId: String, quality: AudioQuality, preferredItag: Int?): ResolvedStream = withContext(Dispatchers.IO) {
         runCatchingProviderFailure {
-            val youtube = NewPipe.getService(YOUTUBE_SERVICE_NAME)
-            val streamInfo = StreamInfo.getInfo(youtube, watchUrlFor(songId))
+            val streamInfo = fetchStreamInfo(songId, lean = true)
+            rememberFrom(songId, streamInfo, withRelated = false)
 
             val audioStreams = streamInfo.audioStreams
             if (audioStreams.isEmpty()) {
@@ -138,21 +139,95 @@ class NewPipePlaybackProvider(
         }
     }
 
+    /**
+     * Title, artwork, length and YouTube category of [songId]. Used for the
+     * autoplay music check and artwork, never for playing, so it reads the
+     * small metadata response the full lookup also uses for these fields
+     * (two requests, a few KB) rather than the whole watch page (seven
+     * requests, ~450 KB). Same data, so the same category and artwork; on a
+     * slow connection this kept ten autoplay checks from starving the song
+     * that was starting. Remembered per song, as none of it changes.
+     */
     override suspend fun getPlayerInfo(songId: String): ProviderPlayerInfo = withContext(Dispatchers.IO) {
+        synchronized(playerInfos) { playerInfos[songId] }?.let { return@withContext it }
         runCatchingProviderFailure {
-            val youtube = NewPipe.getService(YOUTUBE_SERVICE_NAME)
-            val streamInfo = StreamInfo.getInfo(youtube, watchUrlFor(songId))
-            ProviderPlayerInfo(
-                songId = songId,
-                title = streamInfo.name.orEmpty(),
-                artist = streamInfo.uploaderName,
-                album = null,
-                artworkUrl = streamInfo.thumbnails.maxByOrNull { it.height }?.url,
-                artworkCandidates = streamInfo.thumbnails.sortedByDescending { it.height }.mapNotNull { it.url }.distinct(),
-                durationMs = streamInfo.duration.takeIf { it >= 0 }?.times(1000),
-                category = streamInfo.category,
-            )
+            val info = runInterruptible { lightPlayerInfo(songId) }
+                ?: playerInfoOf(songId, fetchStreamInfo(songId))
+            synchronized(playerInfos) { playerInfos[songId] = info }
+            info
         }
+    }
+
+    /** [getPlayerInfo] from the WEB metadata response; null when it lacks the metadata. */
+    private fun lightPlayerInfo(songId: String): ProviderPlayerInfo? {
+        val json = org.schabi.newpipe.extractor.services.youtube.YoutubeStreamHelper.getWebMetadataPlayerResponse(
+            NewPipe.getPreferredLocalization(),
+            NewPipe.getPreferredContentCountry(),
+            songId,
+        )
+        val micro = json.getObject("microformat").getObject("playerMicroformatRenderer")
+        if (micro.isEmpty()) return null
+        // The same thumbnails the full lookup picks (web videoDetails first).
+        val thumbs = json.getObject("videoDetails").getObject("thumbnail").getArray("thumbnails")
+            .takeIf { it.isNotEmpty() }
+            ?: micro.getObject("thumbnail").getArray("thumbnails")
+        val images = runCatching {
+            org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper.getImagesFromThumbnailsArray(thumbs)
+        }.getOrDefault(emptyList())
+        return ProviderPlayerInfo(
+            songId = songId,
+            title = micro.getObject("title").getString("simpleText").orEmpty(),
+            artist = micro.getString("ownerChannelName"),
+            album = null,
+            artworkUrl = images.maxByOrNull { it.height }?.url,
+            artworkCandidates = images.sortedByDescending { it.height }.mapNotNull { it.url }.distinct(),
+            durationMs = micro.getString("lengthSeconds")?.toLongOrNull()?.times(1000),
+            category = micro.getString("category", ""),
+        )
+    }
+
+    private fun playerInfoOf(songId: String, streamInfo: StreamInfo) = ProviderPlayerInfo(
+        songId = songId,
+        title = streamInfo.name.orEmpty(),
+        artist = streamInfo.uploaderName,
+        album = null,
+        artworkUrl = streamInfo.thumbnails.maxByOrNull { it.height }?.url,
+        artworkCandidates = streamInfo.thumbnails.sortedByDescending { it.height }.mapNotNull { it.url }.distinct(),
+        durationMs = streamInfo.duration.takeIf { it >= 0 }?.times(1000),
+        category = streamInfo.category,
+    )
+
+    /**
+     * The watch-page lookup. Interruptible, so a timed-out caller really
+     * stops it. [lean] skips the related videos (see
+     * [OkHttpNewPipeDownloader.leanLookup]), for lookups that only play.
+     */
+    private suspend fun fetchStreamInfo(songId: String, lean: Boolean = false): StreamInfo = runInterruptible {
+        val lookup = { StreamInfo.getInfo(NewPipe.getService(YOUTUBE_SERVICE_NAME), watchUrlFor(songId)) }
+        if (lean) OkHttpNewPipeDownloader.leanLookup(lookup) else lookup()
+    }
+
+    /** Keeps what a lookup also returned (metadata, related songs) for the calls that need only that. */
+    private fun rememberFrom(songId: String, streamInfo: StreamInfo, withRelated: Boolean = true) {
+        runCatching {
+            val info = playerInfoOf(songId, streamInfo)
+            synchronized(playerInfos) { playerInfos[songId] = info }
+            if (withRelated) {
+                val related = relatedOf(streamInfo)
+                synchronized(relatedBySong) { relatedBySong[songId] = System.currentTimeMillis() to related }
+            }
+        }
+    }
+
+    private fun relatedOf(streamInfo: StreamInfo) = streamInfo.relatedItems
+        .filterIsInstance<org.schabi.newpipe.extractor.stream.StreamInfoItem>()
+        .mapNotNull { it.toPlayableItemOrNull() }
+
+    private val playerInfos = object : LinkedHashMap<String, ProviderPlayerInfo>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ProviderPlayerInfo>?) = size > MAX_PLAYER_INFOS
+    }
+    private val relatedBySong = object : LinkedHashMap<String, Pair<Long, List<PlayableItem.YoutubeTrack>>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, List<PlayableItem.YoutubeTrack>>>?) = size > MAX_RELATED
     }
 
     /**
@@ -166,12 +241,14 @@ class NewPipePlaybackProvider(
      * github.com/shahidthisside — SA)
      */
     suspend fun getRelatedTracks(songId: String): List<PlayableItem.YoutubeTrack> = withContext(Dispatchers.IO) {
+        // The song's own stream lookup a moment ago already returned these.
+        synchronized(relatedBySong) { relatedBySong[songId] }
+            ?.takeIf { System.currentTimeMillis() - it.first < RELATED_TTL_MS }
+            ?.let { return@withContext it.second }
         runCatchingProviderFailure {
-            val youtube = NewPipe.getService(YOUTUBE_SERVICE_NAME)
-            val streamInfo = StreamInfo.getInfo(youtube, watchUrlFor(songId))
-            streamInfo.relatedItems
-                .filterIsInstance<org.schabi.newpipe.extractor.stream.StreamInfoItem>()
-                .mapNotNull { it.toPlayableItemOrNull() }
+            val streamInfo = fetchStreamInfo(songId)
+            rememberFrom(songId, streamInfo)
+            relatedOf(streamInfo)
         }
     }
 
@@ -186,12 +263,14 @@ class NewPipePlaybackProvider(
         runCatchingProviderFailure {
             val youtube = NewPipe.getService(YOUTUBE_SERVICE_NAME)
             val url = "https://www.youtube.com/watch?v=$seedId&list=RDAMVM$seedId"
-            val (items, next) = if (cursor is org.schabi.newpipe.extractor.Page) {
-                val more = org.schabi.newpipe.extractor.playlist.PlaylistInfo.getMoreItems(youtube, url, cursor)
-                more.items to more.nextPage
-            } else {
-                val info = org.schabi.newpipe.extractor.playlist.PlaylistInfo.getInfo(youtube, url)
-                info.relatedItems to info.nextPage
+            val (items, next) = runInterruptible {
+                if (cursor is org.schabi.newpipe.extractor.Page) {
+                    val more = org.schabi.newpipe.extractor.playlist.PlaylistInfo.getMoreItems(youtube, url, cursor)
+                    more.items to more.nextPage
+                } else {
+                    val info = org.schabi.newpipe.extractor.playlist.PlaylistInfo.getInfo(youtube, url)
+                    info.relatedItems to info.nextPage
+                }
             }
             com.whiplash.music.recommend.RadioPage(
                 items.filterIsInstance<org.schabi.newpipe.extractor.stream.StreamInfoItem>().mapNotNull { it.toPlayableItemOrNull() },
@@ -246,6 +325,8 @@ class NewPipePlaybackProvider(
             val result = block()
             healthTracker.recordSuccess(id)
             return result
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e // the caller gave up (timeout, skipped song): not a provider failure
         } catch (e: ProviderFailure) {
             if (e !is ProviderFailure.NetworkFailure) healthTracker.recordFailure(id)
             throw e
@@ -297,5 +378,8 @@ class NewPipePlaybackProvider(
         private const val TAG = "NewPipePlaybackProvider"
         private const val YOUTUBE_SERVICE_NAME = "YouTube"
         private const val STREAM_ASSUMED_TTL_MS = 5 * 60_000L
+        private const val MAX_PLAYER_INFOS = 500
+        private const val MAX_RELATED = 20
+        private const val RELATED_TTL_MS = 30 * 60_000L
     }
 }

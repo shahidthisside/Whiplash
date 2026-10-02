@@ -13,6 +13,8 @@ coroutines = "1.9.0"
 coil = "2.7.0"
 datastore = "1.1.1"
 newpipeExtractor = "v0.26.5"
+# The JSON library NewPipeExtractor itself uses (same version it ships with).
+nanojson = "e9d656ddb49a412a5a0a5d5ef20ca7ef09549996"
 desugarJdkLibsNio = "2.1.5"
 okhttp = "5.3.2"
 playServicesAuth = "22.0.0"
@@ -61,6 +63,7 @@ coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coi
 datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 
 newpipe-extractor = { group = "com.github.teamnewpipe", name = "NewPipeExtractor", version.ref = "newpipeExtractor" }
+nanojson = { group = "com.github.TeamNewPipe", name = "nanojson", version.ref = "nanojson" }
 desugar-jdk-libs-nio = { group = "com.android.tools", name = "desugar_jdk_libs_nio", version.ref = "desugarJdkLibsNio" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 # Google sign-in + Drive authorization for optional cloud sync (Settings > Account & sync).

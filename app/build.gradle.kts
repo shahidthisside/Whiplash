@@ -127,6 +127,7 @@ dependencies {
 
     // YouTube/YouTube Music extraction provider (Provider A per CLAUDE.md section 7).
     implementation(libs.newpipe.extractor)
+    implementation(libs.nanojson)
     implementation(libs.okhttp)
     implementation(libs.play.services.auth)
     // Installs the bundled baseline profile, so startup and scrolling are
