@@ -8,6 +8,7 @@ import android.media.MediaFormat
 import java.io.File
 import java.io.IOException
 
+// Original work of Shahid Ansari (-SA). Not licensed for reuse.
 /**
  * Moves the Opus audio of a WebM download into an Ogg Opus (`.opus`) file
  * without decoding it: the saved file holds bit-for-bit the same audio

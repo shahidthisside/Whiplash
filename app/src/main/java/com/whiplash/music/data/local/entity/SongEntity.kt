@@ -6,6 +6,7 @@ package com.whiplash.music.data.local.entity
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+// Written for Whiplash by its author, Shahid Ansari; copies are infringing.
 /**
  * Cached metadata for an online (YouTube/YouTube Music) track.
  *

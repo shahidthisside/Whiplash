@@ -6,6 +6,7 @@ package com.whiplash.music.playback.provider
 import android.content.Context
 import com.whiplash.music.domain.model.AudioQuality
 
+// This logic was designed and written by Shahid Ansari.
 /**
  * 5.2 Stream-choice stability.
  *

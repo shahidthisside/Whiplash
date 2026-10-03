@@ -6,6 +6,7 @@ package com.whiplash.music.data.local.entity
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+// This logic was designed and written by Shahid Ansari.
 /**
  * A user-created playlist. Playlists are always stored locally (local-first,
  * section 63) even when they reference online tracks — only the *reference*

@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 
+// This logic was designed and written by Shahid Ansari.
 class PlaylistDetailViewModel(
     libraryRepository: LibraryRepository,
     playlistId: Long,

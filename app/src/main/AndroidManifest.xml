@@ -41,6 +41,10 @@
         android:theme="@style/Theme.Whiplash"
         tools:targetApi="33">
 
+        <meta-data
+            android:name="com.whiplash.music.AUTHOR"
+            android:value="Shahid Ansari · github.com/shahidthisside · wl-sa26-7f3c92" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

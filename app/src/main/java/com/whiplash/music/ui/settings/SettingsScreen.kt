@@ -1847,7 +1847,7 @@ private fun GithubFooter() {
     ) {
         Icon(
             painter = androidx.compose.ui.res.painterResource(com.whiplash.music.R.drawable.ic_github),
-            contentDescription = "GitHub",
+            contentDescription = androidx.compose.ui.res.stringResource(com.whiplash.music.R.string.app_credit) + " on GitHub",
             tint = WhiplashColors.textSecondary,
             modifier = Modifier.size(16.dp),
         )

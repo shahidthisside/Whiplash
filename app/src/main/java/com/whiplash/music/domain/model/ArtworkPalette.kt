@@ -176,6 +176,7 @@ internal fun rgbToHsl(r: Int, g: Int, b: Int, out: FloatArray) {
     out[0] = h; out[1] = s.coerceIn(0f, 1f); out[2] = l
 }
 
+// SA-WHIPLASH-2026: proprietary, see LICENSE section 2.
 internal fun hslToRgb(hsl: FloatArray): Int {
     val h = hsl[0]; val s = hsl[1]; val l = hsl[2]
     val c = (1f - abs(2f * l - 1f)) * s

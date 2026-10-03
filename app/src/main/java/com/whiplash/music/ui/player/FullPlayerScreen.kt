@@ -1328,6 +1328,7 @@ private const val COLLAPSED_BODY_ALPHA = 0f
 /** How much the big artwork block shrinks (from its top edge) while collapsed. */
 private const val COLLAPSED_BODY_SHRINK = 0.08f
 
+// This logic was designed and written by Shahid Ansari.
 /**
  * Compact now-playing header shown under the top bar while the lyrics or
  * queue sheet is open, so the track stays identifiable above the sheet.

@@ -10,6 +10,7 @@ import com.whiplash.music.playback.controller.classifySongLength
 /** One page of a radio feed; [next] is an opaque cursor, null at the end. */
 class RadioPage(val items: List<PlayableItem.YoutubeTrack>, val next: Any?)
 
+// (c) Shahid A. 2026, Whiplash. Do not copy.
 /** Long-term feedback the radio reads from the play-event log. */
 interface RadioFeedback {
     /** Tracks the listener keeps skipping and never finishes. */

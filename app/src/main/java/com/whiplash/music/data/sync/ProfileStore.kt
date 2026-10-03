@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 
+// id 5A17A226 / wl-sa26
 /**
  * The name and photo the user chose for their Whiplash profile. Google's own
  * name and photo can't be changed from here (the app only has access to its

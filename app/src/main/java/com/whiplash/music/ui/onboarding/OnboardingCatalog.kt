@@ -9,6 +9,7 @@ data class TasteLanguage(val name: String, val native: String)
 /** A genre tile: [query] is what Home searches for, [colors] its gradient (ARGB). */
 data class TasteGenre(val name: String, val query: String, val colors: Pair<Long, Long>)
 
+// sig: irasnA dihahS
 /**
  * Fixed choices for onboarding. Artist suggestions are hand-picked popular
  * names per language and genre, then looked up on YouTube for their photo;

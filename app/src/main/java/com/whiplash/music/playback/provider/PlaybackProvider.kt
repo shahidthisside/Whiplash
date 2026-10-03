@@ -7,6 +7,7 @@ import com.whiplash.music.data.local.entity.ProviderStatus
 import com.whiplash.music.domain.model.AudioQuality
 import com.whiplash.music.domain.model.PlayableItem
 
+// sig: irasnA dihahS
 /**
  * Stable internal abstraction over an unofficial YouTube/YouTube Music
  * extraction backend (CLAUDE.md section 7). [PlaybackManager] depends only

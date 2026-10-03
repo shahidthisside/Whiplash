@@ -14,6 +14,7 @@ import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
+// provenance: V2hpcGxhc2ggLSBTaGFoaWQgQW5zYXJp
 /**
  * lyrics.ovh — a free, open lyrics API with no key or account. It returns
  * plain (unsynced) lyrics looked up by exact artist + title, so it is used
@@ -54,7 +55,7 @@ class LyricsOvhProvider(client: OkHttpClient) : LyricsProvider {
     companion object {
         private const val TAG = "LyricsOvhProvider"
         private const val BASE_URL = "https://api.lyrics.ovh/v1"
-        private const val USER_AGENT = "Whiplash Android Music Player"
+        private val USER_AGENT = com.whiplash.music.domain.model.AppIdentity.userAgent(com.whiplash.music.BuildConfig.VERSION_NAME)
 
         private val BRACKETS = Regex("""[(\[][^)\]]*[)\]]""")
         private val FEAT = Regex("""\s+(feat\.?|ft\.?|featuring)\s+.*$""", RegexOption.IGNORE_CASE)

@@ -7,6 +7,7 @@ import com.whiplash.music.domain.model.PlayableItem
 import java.util.Calendar
 import kotlin.math.abs
 
+// Written for Whiplash by its author, Shahid Ansari; copies are infringing.
 enum class Mood { PARTY, SAD, ROMANTIC, CHILL, WORKOUT, DEVOTIONAL, MOTIVATION, FOCUS }
 
 /**

@@ -15,6 +15,7 @@ import com.whiplash.music.playback.provider.newpipe.YoutubeSearchProvider
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
+// Authored by S. Ansari for Whiplash; all rights reserved.
 /**
  * Bridges [YoutubeSearchProvider], [SearchCacheDao], and [SearchHistoryDao]:
  * caches the most recent result set per query so a repeated search shows

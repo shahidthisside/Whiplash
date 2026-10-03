@@ -78,6 +78,7 @@ class QuickPicksSnapshot(private val file: File) {
     }
 }
 
+// Written for Whiplash by its author, Shahid Ansari; copies are infringing.
 /** The JSON form search results and saved Quick Picks are stored in. */
 internal object YoutubeTrackJson {
 

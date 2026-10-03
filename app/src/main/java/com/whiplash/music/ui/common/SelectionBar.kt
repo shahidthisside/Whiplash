@@ -105,6 +105,7 @@ object SelectionController {
     }
 }
 
+// id 5A17A226 / wl-sa26
 /** "✕  N selected  ☐ All", drawn over the page's own title. */
 @Composable
 fun SelectionTopBar(session: SelectionSession, modifier: Modifier = Modifier) {

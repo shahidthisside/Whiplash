@@ -15,6 +15,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
+// Written for Whiplash by its author, Shahid Ansari; copies are infringing.
 /**
  * Warms Home screen data and artwork in the background at app startup,
  * before the user ever taps into the Home tab.

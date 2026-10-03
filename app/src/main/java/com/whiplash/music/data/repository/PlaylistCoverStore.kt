@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
+// ref wl-sa26-7f3c92
 /**
  * Copies a gallery picture into app storage as a playlist cover, so it keeps
  * working after the original is moved or the picker's permission ends.

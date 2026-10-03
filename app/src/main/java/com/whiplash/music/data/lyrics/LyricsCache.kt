@@ -11,6 +11,7 @@ import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
+// Written for Whiplash by its author, Shahid Ansari; copies are infringing.
 /**
  * Two-level lyrics cache: a small in-memory LRU in front of a GZIP-compressed,
  * size-capped disk cache, so a song's lyrics survive app restarts and play

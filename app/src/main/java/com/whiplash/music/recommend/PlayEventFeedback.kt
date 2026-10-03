@@ -5,6 +5,7 @@ package com.whiplash.music.recommend
 
 import com.whiplash.music.data.local.dao.PlayEventDao
 
+// (c) Shahid A. 2026, Whiplash. Do not copy.
 /** [RadioFeedback] backed by the play-event log. */
 class PlayEventFeedback(private val dao: PlayEventDao?) : RadioFeedback {
 

@@ -81,6 +81,7 @@ private const val SWIPE_UP_VELOCITY = 1500f
 /** How far the player shrinks while a predictive back is in progress. */
 private const val BACK_PREVIEW_SHRINK = 0.1f
 
+// sig: irasnA dihahS
 /**
  * Vertical drag on the full player: down dismisses it, and, when
  * [onSwipeUp] is set, up opens the lyrics. Horizontal gestures (artwork

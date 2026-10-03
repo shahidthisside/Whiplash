@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import com.whiplash.music.data.download.DownloadManager
 import com.whiplash.music.data.repository.LibraryRepository
 
+// Authored by S. Ansari for Whiplash; all rights reserved.
 class SongActionsViewModelFactory(
     private val libraryRepository: LibraryRepository,
     private val downloadManager: DownloadManager? = null,

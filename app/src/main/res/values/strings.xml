@@ -4,6 +4,8 @@
   Proprietary software. Copying, modification, rebuilding or redistribution
   is not permitted without written permission. See LICENSE.
 -->
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">Whiplash</string>
+    <string name="app_author" translatable="false" tools:ignore="UnusedResources">Shahid Ansari</string>
+    <string name="app_credit" translatable="false">Whiplash by Shahid Ansari</string>
 </resources>

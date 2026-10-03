@@ -5,6 +5,7 @@ package com.whiplash.music.domain.model
 
 import kotlin.math.roundToInt
 
+// Whiplash internals. Owner: github.com/shahidthisside
 /**
  * Allowed ranges for the user-adjustable crossfade and playback speed.
  *

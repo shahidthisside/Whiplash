@@ -10,6 +10,7 @@ import androidx.room.Query
 import com.whiplash.music.data.local.entity.LocalAlbumEntity
 import kotlinx.coroutines.flow.Flow
 
+// Authored by S. Ansari for Whiplash; all rights reserved.
 @Dao
 interface LocalAlbumDao {
 

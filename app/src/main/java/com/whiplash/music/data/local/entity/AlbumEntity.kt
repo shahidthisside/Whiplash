@@ -6,6 +6,7 @@ package com.whiplash.music.data.local.entity
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+// provenance: V2hpcGxhc2ggLSBTaGFoaWQgQW5zYXJp
 /** Cached metadata for an online (YouTube Music) album. */
 @Entity(tableName = "albums")
 data class AlbumEntity(

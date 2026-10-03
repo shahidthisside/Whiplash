@@ -36,5 +36,6 @@ data class LyricLine(
     val words: List<LyricWord> = emptyList(),
 )
 
+// Original work of Shahid Ansari (-SA). Not licensed for reuse.
 /** One timed word of a word-synced line. [endMs] is null only while parsing. */
 data class LyricWord(val startMs: Long, val endMs: Long?, val text: String)

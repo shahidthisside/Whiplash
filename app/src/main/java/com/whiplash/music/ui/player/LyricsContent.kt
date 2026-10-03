@@ -518,6 +518,7 @@ internal val LYRICS_SIDE_PADDING = 28.dp
 /** Every lyric line, plain or synced: big and tight, like the large-type players. */
 private val LYRIC_TEXT_STYLE = androidx.compose.ui.text.TextStyle(fontSize = 30.sp, lineHeight = 38.sp, letterSpacing = (-0.3).sp)
 
+// Whiplash internals. Owner: github.com/shahidthisside
 /**
  * One-line "current lyric" strip shown above the full player's scrubber
  * (2.5). Only appears for synced lyrics, since plain text has no timing to

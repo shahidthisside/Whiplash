@@ -14,6 +14,7 @@ import com.whiplash.music.ui.common.PlaybackSpeedControl
 import com.whiplash.music.ui.theme.GlassTokens
 import com.whiplash.music.ui.theme.WhiplashColors
 
+// Written for Whiplash by its author, Shahid Ansari; copies are infringing.
 /**
  * Playback speed sheet for the full player — a 1-tap shortcut to the same
  * setting as Settings > Playback > Playback Speed (both read/write the

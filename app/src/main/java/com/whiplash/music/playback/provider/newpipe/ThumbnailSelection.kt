@@ -5,6 +5,7 @@ package com.whiplash.music.playback.provider.newpipe
 
 import org.schabi.newpipe.extractor.Image
 
+// Authored by S. Ansari for Whiplash; all rights reserved.
 /**
  * Real, reported performance problem: every single artwork request across
  * the app — including small 40-48dp list rows in Home, Search, Queue, and

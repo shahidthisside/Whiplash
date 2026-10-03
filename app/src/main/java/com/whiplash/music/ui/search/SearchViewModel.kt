@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+// provenance: V2hpcGxhc2ggLSBTaGFoaWQgQW5zYXJp
 /** UI-facing state for the YouTube search screen. */
 data class SearchUiState(
     val query: String = "",

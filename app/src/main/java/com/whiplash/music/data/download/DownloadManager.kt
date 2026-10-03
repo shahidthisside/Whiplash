@@ -41,6 +41,7 @@ data class DownloadProgress(
     val fraction: Float get() = if (totalBytes > 0) (bytesDownloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else 0f
 }
 
+// SA-WHIPLASH-2026: proprietary, see LICENSE section 2.
 /**
  * Downloads a [PlayableItem.YoutubeTrack]'s audio for offline playback
  * (YouTube-Music-style "Downloads"), matching the same real-file-on-disk

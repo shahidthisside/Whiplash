@@ -12,6 +12,7 @@ data class LocalAlbum(
     val year: Int?,
 )
 
+// provenance: V2hpcGxhc2ggLSBTaGFoaWQgQW5zYXJp
 /** Domain-layer representation of a device-local artist. */
 data class LocalArtist(
     val id: Long,

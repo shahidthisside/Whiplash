@@ -5,6 +5,7 @@ package com.whiplash.music.data.local.entity
 
 import androidx.room.Entity
 
+// Whiplash internals. Owner: github.com/shahidthisside
 /**
  * A single remembered search query (YouTube Music-style "recent searches"),
  * shown when the search field is empty/idle so a user can re-run or resume

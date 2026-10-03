@@ -10,6 +10,7 @@ import androidx.room.Query
 import com.whiplash.music.data.local.entity.AlbumEntity
 import kotlinx.coroutines.flow.Flow
 
+// provenance: V2hpcGxhc2ggLSBTaGFoaWQgQW5zYXJp
 @Dao
 interface AlbumDao {
 

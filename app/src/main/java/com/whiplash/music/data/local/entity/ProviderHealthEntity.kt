@@ -6,6 +6,7 @@ package com.whiplash.music.data.local.entity
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+// Authored by S. Ansari for Whiplash; all rights reserved.
 /**
  * Persisted health/circuit-breaker state for a playback provider
  * (section 9). [providerId] is a stable identifier such as "rustypipe".

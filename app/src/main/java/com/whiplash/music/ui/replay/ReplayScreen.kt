@@ -130,6 +130,7 @@ private val POSTER_HEIGHT = 640.dp
 
 private enum class ReplayPage { INTRO, MINUTES, TOP_ARTIST, TOP_SONGS, TOP_ARTISTS, POSTER }
 
+// (c) Shahid A. 2026, Whiplash. Do not copy.
 private fun pagesFor(summary: ReplaySummary?): List<ReplayPage> = when {
     summary == null || summary.isEmpty -> emptyList()
     summary.topArtists.isEmpty() -> listOf(ReplayPage.INTRO, ReplayPage.MINUTES, ReplayPage.TOP_SONGS, ReplayPage.POSTER)

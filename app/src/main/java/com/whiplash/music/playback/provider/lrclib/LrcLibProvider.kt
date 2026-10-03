@@ -260,7 +260,7 @@ class LrcLibProvider(
     companion object {
         private const val TAG = "LrcLibProvider"
         private const val BASE_URL = "https://lrclib.net"
-        private const val USER_AGENT = "Whiplash Android Music Player (https://github.com)"
+        private val USER_AGENT = com.whiplash.music.domain.model.AppIdentity.userAgent(com.whiplash.music.BuildConfig.VERSION_NAME)
 
         /**
          * How far a candidate's duration may differ from the track being

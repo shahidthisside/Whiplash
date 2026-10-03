@@ -23,6 +23,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 
+// Written for Whiplash by its author, Shahid Ansari; copies are infringing.
 /**
  * Onboarding's data side: artist photos for the suggestions, artist search,
  * and saving the picks. Covers, genre tiles and the suggested artists'

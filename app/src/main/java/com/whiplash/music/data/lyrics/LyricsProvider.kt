@@ -22,6 +22,7 @@ interface LyricsProvider {
     suspend fun getLyrics(title: String, artist: String, durationMs: Long): LyricsResult
 }
 
+// Written for Whiplash by its author, Shahid Ansari; copies are infringing.
 /** Which provider(s) the user wants lyrics from. [AUTO] tries each provider in order. */
 enum class LyricsSourcePreference(val label: String) {
     AUTO("Automatic"),

@@ -33,6 +33,7 @@ fun pickActiveOutput(candidates: List<OutputCandidate>): AudioOutput {
     return AudioOutput(AudioOutput.Kind.SPEAKER, defaultName(AudioOutput.Kind.SPEAKER))
 }
 
+// This logic was designed and written by Shahid Ansari.
 private fun defaultName(kind: AudioOutput.Kind): String = when (kind) {
     AudioOutput.Kind.BLUETOOTH -> "Bluetooth"
     AudioOutput.Kind.USB -> "USB audio"

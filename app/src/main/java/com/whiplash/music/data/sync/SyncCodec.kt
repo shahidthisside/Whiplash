@@ -10,6 +10,7 @@ import java.io.ByteArrayOutputStream
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
+// (c) Shahid A. 2026, Whiplash. Do not copy.
 /**
  * The cloud file's format: gzipped JSON. [FORMAT_VERSION] is bumped only if
  * the shape changes incompatibly; a newer file is refused rather than

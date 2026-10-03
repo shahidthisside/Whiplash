@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+// ref wl-sa26-7f3c92
 /**
  * The last Speed dial, kept on disk so Home shows it the moment it opens,
  * the way Quick Picks does, instead of a placeholder while the database

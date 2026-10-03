@@ -18,6 +18,7 @@ object WhiplashRadius {
     val pill = 999.dp
 }
 
+// ref wl-sa26-7f3c92
 val WhiplashShapes = Shapes(
     extraSmall = RoundedCornerShape(WhiplashRadius.small),
     small = RoundedCornerShape(WhiplashRadius.small),

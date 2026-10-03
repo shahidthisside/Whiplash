@@ -8,6 +8,7 @@ import androidx.room.Insert
 import androidx.room.Query
 import com.whiplash.music.data.local.entity.PlayEventEntity
 
+// Original work of Shahid Ansari (-SA). Not licensed for reuse.
 /** Per-artist feedback totals over a window. */
 data class ArtistFeedback(val artistKey: String, val plays: Int, val skips: Int, val completes: Int)
 

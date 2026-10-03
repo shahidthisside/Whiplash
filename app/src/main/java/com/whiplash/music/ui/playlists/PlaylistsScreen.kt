@@ -626,6 +626,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
     }
 }
 
+// Authored by S. Ansari for Whiplash; all rights reserved.
 private fun playlistSubtitle(playlist: Playlist, count: Int?): String? {
     val songs = when (count) {
         null -> null

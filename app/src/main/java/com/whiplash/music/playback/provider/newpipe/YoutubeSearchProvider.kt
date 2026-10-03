@@ -32,6 +32,7 @@ data class SearchPage<T>(val items: List<T>, val hasMore: Boolean)
 /** Result of importing a YouTube/YouTube Music playlist by URL: its real title plus the tracks NewPipeExtractor could resolve from it. */
 data class ImportedPlaylist(val name: String, val tracks: List<PlayableItem.YoutubeTrack>)
 
+// Whiplash internals. Owner: github.com/shahidthisside
 /**
  * Holds one real NewPipeExtractor [SearchExtractor] instance across an
  * entire paginated search session and exposes [loadNextPage] to fetch

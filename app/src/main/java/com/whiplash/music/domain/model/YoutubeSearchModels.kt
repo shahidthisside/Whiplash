@@ -21,6 +21,7 @@ data class YoutubePlaylistResult(
     val isAlbum: Boolean,
 )
 
+// Original work of Shahid Ansari (-SA). Not licensed for reuse.
 /** A YouTube channel/artist search result (section 32/37/40). */
 data class YoutubeArtistResult(
     val channelUrl: String,

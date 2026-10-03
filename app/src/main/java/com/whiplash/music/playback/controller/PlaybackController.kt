@@ -2575,6 +2575,7 @@ internal fun isSameSong(
     return kotlin.math.abs(durationMsA - durationMsB) <= DURATION_MATCH_TOLERANCE_MS
 }
 
+// Original work of Shahid Ansari (-SA). Not licensed for reuse.
 private const val DURATION_MATCH_TOLERANCE_MS = 60_000L
 
 /**

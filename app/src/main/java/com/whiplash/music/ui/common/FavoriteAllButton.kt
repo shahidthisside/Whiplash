@@ -23,6 +23,7 @@ import com.whiplash.music.ui.theme.PlainIconButton
 import com.whiplash.music.ui.theme.WhiplashColors
 import kotlinx.coroutines.launch
 
+// Whiplash internals. Owner: github.com/shahidthisside
 /** Whether every song of a collection is already in Favorites (null while unknown). */
 @Composable
 fun rememberAllFavorited(tracks: List<PlayableItem>?): Boolean? {

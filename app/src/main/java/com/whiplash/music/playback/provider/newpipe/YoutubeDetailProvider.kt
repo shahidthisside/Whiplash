@@ -29,6 +29,7 @@ import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.UnknownHostException
 
+// Written for Whiplash by its author, Shahid Ansari; copies are infringing.
 /**
  * Resolves full detail pages (album/playlist track listings, artist/channel
  * info + real popular-songs/albums tabs) for the results returned by

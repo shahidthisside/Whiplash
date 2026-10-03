@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.whiplash.music.data.repository.YoutubeSearchRepository
 
+// (c) Shahid A. 2026, Whiplash. Do not copy.
 class SearchViewModelFactory(private val repository: YoutubeSearchRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
         @Suppress("UNCHECKED_CAST")

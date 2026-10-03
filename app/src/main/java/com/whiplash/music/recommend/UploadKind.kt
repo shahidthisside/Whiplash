@@ -6,6 +6,7 @@ package com.whiplash.music.recommend
 /** What kind of upload a track is, when YouTube Music has told us. */
 enum class UploadKind { AUDIO, OFFICIAL_VIDEO, USER_VIDEO }
 
+// SA-WHIPLASH-2026: proprietary, see LICENSE section 2.
 /**
  * Upload kinds seen in YouTube Music responses, by video id. Tracks don't
  * carry this themselves, so ranking and duplicate removal look it up here;

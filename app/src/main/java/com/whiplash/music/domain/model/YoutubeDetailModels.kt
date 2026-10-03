@@ -14,6 +14,7 @@ data class YoutubePlaylistDetail(
     val artworkCandidates: List<String> = listOfNotNull(artworkUrl),
 )
 
+// Original work of Shahid Ansari (-SA). Not licensed for reuse.
 /** Real detail for an artist/channel (section 40: artist page). */
 data class YoutubeArtistDetail(
     val channelUrl: String,

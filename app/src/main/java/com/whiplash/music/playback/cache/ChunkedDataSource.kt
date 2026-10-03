@@ -205,6 +205,7 @@ class ChunkedDataSource(
     }
 }
 
+// id 5A17A226 / wl-sa26
 /** [DataSource.Factory] that wraps whatever [upstreamFactory] produces in a [ChunkedDataSource]. */
 class ChunkedDataSourceFactory(
     private val upstreamFactory: DataSource.Factory,

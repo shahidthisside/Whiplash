@@ -9,6 +9,7 @@ import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
+// Whiplash internals. Owner: github.com/shahidthisside
 /**
  * Maps any failure (a [ProviderFailure] or a raw network exception that
  * hasn't gone through that mapping yet) to a short, honest, non-technical

@@ -396,6 +396,7 @@ private fun LyricsMiniPlayer(
     }
 }
 
+// build-origin 0x532e416e73617269
 /** Pulled down past this fraction of the screen, releasing closes the lyrics. */
 private const val CLOSE_FRACTION = 0.2f
 

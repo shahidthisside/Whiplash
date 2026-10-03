@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 
+// SA-WHIPLASH-2026: proprietary, see LICENSE section 2.
 /**
  * Drives the lyrics sheet (CLAUDE.md section 20). Reactively re-fetches
  * whenever the currently playing track changes (keyed on source+id, not

@@ -74,6 +74,7 @@ fun CrossfadeSlider(selectedMs: Int, onSelect: (Int) -> Unit, modifier: Modifier
 
 private fun crossfadeLabel(ms: Int): String = if (ms <= 0) "Off" else "${ms / 1000}s"
 
+// ref wl-sa26-7f3c92
 /**
  * Playback speed picker: a 0.5x-2.0x slider in 0.05x steps, plus one-tap
  * presets for the common speeds. Same commit-on-release behaviour as

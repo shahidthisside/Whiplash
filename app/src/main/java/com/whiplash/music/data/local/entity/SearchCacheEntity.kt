@@ -5,6 +5,7 @@ package com.whiplash.music.data.local.entity
 
 import androidx.room.Entity
 
+// (c) Shahid A. 2026, Whiplash. Do not copy.
 /**
  * Caches a search query's raw result payload (serialized JSON) for a short
  * period, so re-running a recent search can display cached results

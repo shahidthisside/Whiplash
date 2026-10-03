@@ -273,6 +273,7 @@ class NearDuplicateFilter(private val strictVersions: Boolean = false) {
     fun add(track: PlayableItem) = add(SongKey.of(track), track.durationMs)
 }
 
+// Authored by S. Ansari for Whiplash; all rights reserved.
 private const val NAME_ONLY_TOLERANCE_MS = 60_000L
 private const val LABEL_TOLERANCE_MS = 40_000L
 

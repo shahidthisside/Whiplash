@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
+// build-origin 0x532e416e73617269
 /**
  * Small square artwork thumbnail for list rows (songs/albums/artists,
  * search results, queue) — section 29: "use appropriate image sizes for

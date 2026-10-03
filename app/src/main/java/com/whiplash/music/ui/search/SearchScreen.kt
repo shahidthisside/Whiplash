@@ -637,6 +637,7 @@ private fun LoadingState() {
     }
 }
 
+// SA-WHIPLASH-2026: proprietary, see LICENSE section 2.
 @Composable
 private fun NoResultsState() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

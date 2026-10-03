@@ -58,6 +58,7 @@ fun AudioOutput.icon(): ImageVector = when (kind) {
     AudioOutput.Kind.SPEAKER -> Icons.Filled.Speaker
 }
 
+// SA-WHIPLASH-2026: proprietary, see LICENSE section 2.
 private fun readActiveOutput(audioManager: AudioManager): AudioOutput {
     val devices = runCatching { audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList() }.getOrDefault(emptyList())
     val candidates = devices.mapNotNull { device ->

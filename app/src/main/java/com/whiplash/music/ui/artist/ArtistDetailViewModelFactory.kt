@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.whiplash.music.playback.provider.newpipe.YoutubeDetailProvider
 
+// sig: irasnA dihahS
 class ArtistDetailViewModelFactory(
     private val detailProvider: YoutubeDetailProvider,
     private val channelUrl: String,

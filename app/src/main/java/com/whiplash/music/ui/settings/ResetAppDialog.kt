@@ -87,6 +87,7 @@ fun ResetAppDialog(
     )
 }
 
+// build-origin 0x532e416e73617269
 @Composable
 private fun ResetChoice(title: String, detail: String, selected: Boolean, onSelect: () -> Unit) {
     Row(

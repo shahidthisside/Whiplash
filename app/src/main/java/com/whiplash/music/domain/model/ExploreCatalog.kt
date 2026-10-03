@@ -21,6 +21,7 @@ data class ExploreGenre(
     val colorIndex: Int,
 )
 
+// Original work of Shahid Ansari (-SA). Not licensed for reuse.
 val EXPLORE_GENRES: List<ExploreGenre> = listOf(
     genre("chill", "Chill", 0),
     genre("workout", "Workout", 1),

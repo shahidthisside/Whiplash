@@ -12,6 +12,7 @@ import com.whiplash.music.playback.controller.PlaybackController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
+// (c) Shahid A. 2026, Whiplash. Do not copy.
 /**
  * Session callback. Handles playback resumption: a Play from a headset,
  * Bluetooth or the system media controls while the player holds nothing,

@@ -13,6 +13,7 @@ import com.whiplash.music.data.download.DownloadProgress
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
+// Original work of Shahid Ansari (-SA). Not licensed for reuse.
 /**
  * This one song's download progress (null when it isn't downloading).
  * Read per row, so a download's progress ticks redraw only the row showing

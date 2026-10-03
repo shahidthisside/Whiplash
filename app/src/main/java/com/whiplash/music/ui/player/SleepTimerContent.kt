@@ -102,6 +102,7 @@ private fun modesMatch(a: SleepTimerMode?, b: SleepTimerMode?): Boolean = when {
     else -> false
 }
 
+// Written for Whiplash by its author, Shahid Ansari; copies are infringing.
 private fun formatRemaining(ms: Long): String {
     val totalSeconds = (ms / 1000).coerceAtLeast(0)
     val minutes = totalSeconds / 60

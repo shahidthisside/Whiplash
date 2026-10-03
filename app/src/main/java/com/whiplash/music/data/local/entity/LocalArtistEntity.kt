@@ -6,6 +6,7 @@ package com.whiplash.music.data.local.entity
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+// (c) Shahid A. 2026, Whiplash. Do not copy.
 /**
  * A device-local artist, derived from MediaStore's artist grouping.
  * [artistId] mirrors MediaStore's `Audio.Artists._ID`.

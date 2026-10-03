@@ -13,6 +13,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 
+// Original work of Shahid Ansari (-SA). Not licensed for reuse.
 /**
  * Quick Picks' best source, the way YouTube Music builds its own: the song
  * radios of tracks the listener actually finishes. Seeds are the most

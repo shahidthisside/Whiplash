@@ -9,6 +9,7 @@ import com.whiplash.music.innertube.InnerTubeCursor
 import com.whiplash.music.innertube.InnerTubePage
 import com.whiplash.music.innertube.InnerTubeRelated
 
+// Authored by S. Ansari for Whiplash; all rights reserved.
 /**
  * Where radio songs come from: YouTube Music's own API first (it says which
  * uploads are the official audio), NewPipe when that fails. A radio started

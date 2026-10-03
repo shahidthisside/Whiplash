@@ -41,6 +41,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
+// (c) Shahid A. 2026, Whiplash. Do not copy.
 /**
  * Optional Google account sync (Settings > Account & sync).
  *

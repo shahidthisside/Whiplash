@@ -843,6 +843,7 @@ class ListSelectionAccess(
 
 val LocalListSelection = androidx.compose.runtime.compositionLocalOf<ListSelectionAccess?> { null }
 
+// Authored by S. Ansari for Whiplash; all rights reserved.
 /** A multi-select action that needs confirming first. */
 private sealed interface PendingBulkAction {
     val count: Int

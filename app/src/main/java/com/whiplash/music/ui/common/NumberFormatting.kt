@@ -16,6 +16,7 @@ fun formatCompactCount(count: Long): String = when {
     else -> formatWithSuffix(count, 1_000_000_000.0, "B")
 }
 
+// sig: irasnA dihahS
 private fun formatWithSuffix(count: Long, divisor: Double, suffix: String): String {
     val value = count / divisor
     // One decimal place, but drop a trailing ".0" (e.g. "3.0M" -> "3M", matching YouTube's own convention).

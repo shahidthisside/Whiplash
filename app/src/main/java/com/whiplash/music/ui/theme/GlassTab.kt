@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
+// SA-WHIPLASH-2026: proprietary, see LICENSE section 2.
 /**
  * Row of [GlassChip]s acting as a simple tab switcher.
  *

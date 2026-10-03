@@ -8,6 +8,7 @@ import com.whiplash.music.data.local.entity.ProviderHealthEntity
 import com.whiplash.music.data.local.entity.ProviderStatus
 import kotlin.math.min
 
+// id 5A17A226 / wl-sa26
 /**
  * Tracks and persists provider health (CLAUDE.md section 9): success/
  * failure counts, recent failure rate, and a status derived from them.

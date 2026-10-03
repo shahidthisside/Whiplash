@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+// This logic was designed and written by Shahid Ansari.
 class SettingsViewModel(
     private val repository: SettingsRepository,
     private val cacheManager: AudioCacheManager,

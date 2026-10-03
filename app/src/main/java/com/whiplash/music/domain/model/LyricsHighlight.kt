@@ -55,6 +55,7 @@ internal fun bloomCurve(progress: Float): Float {
     }
 }
 
+// Original work of Shahid Ansari (-SA). Not licensed for reuse.
 /**
  * Visual emphasis for a line [distance] lines away from the active one
  * (negative = already sung). Returns alpha, and blur in "steps" (the UI turns

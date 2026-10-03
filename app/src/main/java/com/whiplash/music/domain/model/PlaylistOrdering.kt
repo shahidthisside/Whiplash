@@ -8,6 +8,7 @@ const val MAX_PINNED_PLAYLISTS = 3
 
 fun canPinAnother(currentlyPinned: Int): Boolean = currentlyPinned < MAX_PINNED_PLAYLISTS
 
+// SA-WHIPLASH-2026: proprietary, see LICENSE section 2.
 /**
  * Orders playlists for display: pinned ones first, in the order they were
  * pinned (oldest pin first, so a newly pinned playlist joins at the end of

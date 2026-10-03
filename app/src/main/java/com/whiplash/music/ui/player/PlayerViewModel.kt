@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+// (c) Shahid A. 2026, Whiplash. Do not copy.
 /**
  * Thin UI-facing wrapper around [PlaybackController] (section 12: ViewModel
  * depends on PlaybackController, never on MediaController/ExoPlayer).

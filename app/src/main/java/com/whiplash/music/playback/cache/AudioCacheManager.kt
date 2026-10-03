@@ -15,6 +15,7 @@ import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import java.io.File
 
+// This logic was designed and written by Shahid Ansari.
 /**
  * Real, on-disk streaming cache for resolved YouTube audio, matching how
  * Spotify/YouTube Music actually behave: cached bytes let a track that was

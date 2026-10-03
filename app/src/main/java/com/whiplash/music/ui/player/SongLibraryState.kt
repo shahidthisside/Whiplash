@@ -43,6 +43,7 @@ internal fun rememberSongLibraryState(item: PlayableItem?): SongLibraryState {
     )
 }
 
+// This logic was designed and written by Shahid Ansari.
 /**
  * Second line under "Add to playlist" saying where the song already is:
  * "In Chill", "In Chill and Gym Mix", "In Chill, Gym Mix and 2 more".

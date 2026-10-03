@@ -148,6 +148,7 @@ interface VersionStore {
     fun write(value: StoredVersion)
 }
 
+// SA-WHIPLASH-2026: proprietary, see LICENSE section 2.
 class SharedPrefsVersionStore(private val prefs: android.content.SharedPreferences) : VersionStore {
     override fun read(): StoredVersion? {
         val v = prefs.getString(KEY_VERSION, null) ?: return null

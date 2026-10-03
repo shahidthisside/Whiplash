@@ -234,6 +234,7 @@ class WhiplashApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        android.util.Log.i("Whiplash", com.whiplash.music.domain.model.AppIdentity.credit() + " " + BuildConfig.VERSION_NAME)
         NewPipe.init(OkHttpNewPipeDownloader(okHttpClient))
         // A small file; read now so Home opens with Speed dial already filled in.
         speedDialSnapshot.warm(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO), this)

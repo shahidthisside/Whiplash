@@ -12,6 +12,7 @@ import com.whiplash.music.data.local.entity.FavoriteEntity
 import com.whiplash.music.data.local.entity.MediaSource
 import kotlinx.coroutines.flow.Flow
 
+// Whiplash internals. Owner: github.com/shahidthisside
 @Dao
 interface FavoriteDao {
 

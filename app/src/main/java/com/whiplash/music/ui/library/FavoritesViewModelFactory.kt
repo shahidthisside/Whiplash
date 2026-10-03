@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.whiplash.music.data.repository.LibraryRepository
 
+// This logic was designed and written by Shahid Ansari.
 class FavoritesViewModelFactory(private val libraryRepository: LibraryRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
         @Suppress("UNCHECKED_CAST")

@@ -71,5 +71,6 @@ fun planHomeShelves(rankedArtists: List<String>): List<ShelfSpec> {
     return (personal + STARTER_SHELVES).distinctBy { it.key }
 }
 
+// sig: irasnA dihahS
 /** How many shelves one "load more" fetches. */
 const val SHELVES_PER_PAGE = 2

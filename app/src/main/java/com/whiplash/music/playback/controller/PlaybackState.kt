@@ -34,6 +34,7 @@ data class PlaybackState(
 
 enum class RepeatMode { OFF, ONE, ALL }
 
+// sig: irasnA dihahS
 /** Sleep timer options (section 60). Duration modes pause playback when the countdown reaches zero; the two "end of" modes pause at the next natural track/queue boundary instead of a fixed time. */
 sealed interface SleepTimerMode {
     data class Duration(val totalMs: Long) : SleepTimerMode

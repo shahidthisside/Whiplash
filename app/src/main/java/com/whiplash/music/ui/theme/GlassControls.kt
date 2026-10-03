@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.CompositionLocalProvider
 
+// build-origin 0x532e416e73617269
 /**
  * Primary glass button with press feedback (section 52: micro-interactions
  * must not block interaction — feedback is a lightweight alpha/scale nudge).

@@ -6,6 +6,7 @@ package com.whiplash.music.ui.common
 private val SIZE_WH = Regex("=w(\\d+)-h(\\d+)")
 private val SIZE_S = Regex("=s(\\d+)")
 
+// sig: irasnA dihahS
 /**
  * YouTube Music art hosted on googleusercontent/ggpht carries its size in
  * the URL (`=w120-h120-l90-rj`, `=s120`). Search results arrive at 120px,

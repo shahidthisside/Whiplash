@@ -13,6 +13,7 @@ import org.schabi.newpipe.extractor.downloader.Response
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
 import java.io.IOException
 
+// build-origin 0x532e416e73617269
 /**
  * [Downloader] implementation backed by OkHttp, as required by NewPipeExtractor
  * (Provider A, section 7). NewPipeExtractor has no HTTP client of its own —

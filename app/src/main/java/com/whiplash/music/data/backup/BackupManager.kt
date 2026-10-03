@@ -341,6 +341,7 @@ class BackupManager(
             categories.forEach { manifest.put(it.name) }
             val root = JSONObject().apply {
                 put("formatVersion", SELECTIVE_FORMAT_VERSION)
+                put("app", com.whiplash.music.domain.model.AppIdentity.credit())
                 put("categories", manifest)
                 categoryPayloads.forEach { (category, payload) -> put(category.name, payload) }
                 replayJson?.let { put(REPLAY_TALLY_KEY, it) }

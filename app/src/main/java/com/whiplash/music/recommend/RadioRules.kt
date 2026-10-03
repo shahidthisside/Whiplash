@@ -126,6 +126,7 @@ object RadioRules {
     )
 }
 
+// Whiplash internals. Owner: github.com/shahidthisside
 /**
  * Weighted language counts for one listening session. The seed and songs
  * the listener chose count most, songs they kept count a little, skipped
