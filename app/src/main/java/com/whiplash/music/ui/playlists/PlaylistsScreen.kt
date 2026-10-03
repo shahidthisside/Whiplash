@@ -219,7 +219,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = GlassTokens.miniPlayerReservedHeight),
             ) {
                 items(playlists, key = { it.id }) { playlist ->
-                    val tracks by app.libraryRepository.observePlaylistTracks(playlist.id).collectAsState(initial = null)
+                    val tracks by remember(playlist.id) { app.libraryRepository.observePlaylistTracks(playlist.id) }.collectAsState(initial = null)
                     GlassListItem(
                         title = playlist.name,
                         subtitle = playlistSubtitle(playlist, tracks?.size),
@@ -303,7 +303,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
         // download-confirm dialog below already makes for the same
         // playlist — cheap, and only evaluated for the single playlist
         // currently long-pressed, not for every row in the list.
-        val tracksForSheet by app.libraryRepository.observePlaylistTracks(toDelete.id).collectAsState(initial = null)
+        val tracksForSheet by remember(toDelete.id) { app.libraryRepository.observePlaylistTracks(toDelete.id) }.collectAsState(initial = null)
         val hasTracks = tracksForSheet?.isNotEmpty() ?: true // null = still loading; assume non-empty so the row doesn't flash in/out
         val menuTracks by remember(toDelete.id) { app.libraryRepository.observePlaylistTracks(toDelete.id) }.collectAsState(initial = null)
         val menuAllFavorited = com.whiplash.music.ui.common.rememberAllFavorited(menuTracks) == true
@@ -523,7 +523,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
     // Look the playlist up again so the sheets show a cover change straight away.
     val coverFor = coverTarget?.let { t -> playlists.firstOrNull { it.id == t.id } ?: t }
     if (coverFor != null) {
-        val coverTracks by app.libraryRepository.observePlaylistTracks(coverFor.id).collectAsState(initial = null)
+        val coverTracks by remember(coverFor.id) { app.libraryRepository.observePlaylistTracks(coverFor.id) }.collectAsState(initial = null)
         PlaylistCoverOptionsSheet(
             playlist = coverFor,
             tracks = coverTracks,
@@ -550,7 +550,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
 
     val songsFor = coverSongsTarget?.let { t -> playlists.firstOrNull { it.id == t.id } ?: t }
     if (songsFor != null) {
-        val pickTracks by app.libraryRepository.observePlaylistTracks(songsFor.id).collectAsState(initial = null)
+        val pickTracks by remember(songsFor.id) { app.libraryRepository.observePlaylistTracks(songsFor.id) }.collectAsState(initial = null)
         pickTracks?.let { list ->
             PlaylistCoverSongPicker(
                 playlist = songsFor,
@@ -599,7 +599,7 @@ fun PlaylistsScreen(onOpenPlaylist: (Playlist) -> Unit) {
         // LocalTrack is already on-device and a DownloadedTrack already
         // in this playlist is already downloaded (same reasoning as
         // PlaylistDetailScreen's own "Download playlist" button).
-        val tracks by app.libraryRepository.observePlaylistTracks(toDownload.id).collectAsState(initial = null)
+        val tracks by remember(toDownload.id) { app.libraryRepository.observePlaylistTracks(toDownload.id) }.collectAsState(initial = null)
         when (val current = tracks) {
             null -> Unit // still loading; avoid showing a confirm dialog with a wrong/empty count
             else -> {
@@ -647,7 +647,7 @@ private fun PlaylistGridTile(
     modifier: Modifier = Modifier,
 ) {
     val app = LocalContext.current.applicationContext as WhiplashApplication
-    val tracks by app.libraryRepository.observePlaylistTracks(playlist.id).collectAsState(initial = null)
+    val tracks by remember(playlist.id) { app.libraryRepository.observePlaylistTracks(playlist.id) }.collectAsState(initial = null)
     val subtitle = playlistSubtitle(playlist, tracks?.size)
     Column(
         modifier = modifier
