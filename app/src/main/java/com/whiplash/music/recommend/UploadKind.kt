@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Shahid Ansari. All rights reserved.
+// Proprietary software. Copying, modification, rebuilding or redistribution
+// is not permitted without written permission. See LICENSE.
 package com.whiplash.music.recommend
 
 /** What kind of upload a track is, when YouTube Music has told us. */

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Shahid Ansari. All rights reserved.
+// Proprietary software. Copying, modification, rebuilding or redistribution
+// is not permitted without written permission. See LICENSE.
 package com.whiplash.music.domain.model
 
 /** How many playlists can be pinned to the top of the Playlists screen at once. */

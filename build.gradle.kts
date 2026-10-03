@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Shahid Ansari. All rights reserved.
+// Proprietary software. Copying, modification, rebuilding or redistribution
+// is not permitted without written permission. See LICENSE.
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 plugins {
     alias(libs.plugins.android.application) apply false

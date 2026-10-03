@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Shahid Ansari. All rights reserved.
+// Proprietary software. Copying, modification, rebuilding or redistribution
+// is not permitted without written permission. See LICENSE.
 @file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 
 package com.whiplash.music.playback.service

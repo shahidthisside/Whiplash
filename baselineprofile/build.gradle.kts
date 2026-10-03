@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Shahid Ansari. All rights reserved.
+// Proprietary software. Copying, modification, rebuilding or redistribution
+// is not permitted without written permission. See LICENSE.
 plugins {
     alias(libs.plugins.android.test)
     alias(libs.plugins.kotlin.android)
