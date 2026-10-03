@@ -4,9 +4,66 @@ All notable changes to Whiplash are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.1.0] - 2026-10-04
+
+The biggest update so far. Whiplash is now proprietary software (see License below).
+
+### Highlights
+- **Redesigned app:** new Now Playing screen with artwork colours, a modern navigation bar and mini player, and new Home, Search, Library, Favorites, Playlists and Settings pages.
+- **Eight themes:** Dark, OLED Black, Light, Liquid Glass, Catppuccin Mocha, Nord, Rosé Pine Dawn and Custom, with accent colours and a colour picker.
+- **Smarter autoplay:** YouTube Music radio for the song you play, ranked on the device by mood, genre, energy, era and language, learning from what you finish and skip.
+- **Quick Picks** built from the radios of songs you finish; they show instantly and refresh only when needed.
+- **Full-screen synced lyrics** with word-by-word highlighting, opened by swiping up on the player.
+- **Monthly Replay**, **optional Google Drive sync**, **first-run onboarding**, and a **second stream source**.
+- **A much more reliable playback engine**, built for slow and dropped connections.
 
 ### Added
+- Now Playing: colours from the album art with a drifting backdrop, optional full-bleed cover, swipe the artwork to skip, drag down to close, Hairline seek bar style, audio output row, Stats for nerds.
+- Lyrics: word-level timing, full-screen view, optional blur of other lines, per-song timing offset, the current line above the seek bar, lyrics.ovh as a fallback to LRCLIB, and a lyrics cache for offline use.
+- Home: Speed dial in pages with grid or list view and page settings; Quick Picks grid with Play all; optional album and playlist shelves.
+- Explore in Search: new releases, charts, and mood and genre pages; modern album, artist and playlist pages.
+- Library start page with Downloads, Songs, Albums, Artists, History and Shuffle all; History as its own page.
+- Playlists: custom covers with photo crop, pinning, grid or list view.
+- Favorites: add or remove a whole album or playlist.
+- Multi-select across song, album and playlist lists.
+- Queue sheet with sections (played, now playing, from autoplay), drag to reorder, swipe to remove with undo, and shuffle up next.
+- Monthly Replay: top songs, artists and listening time as a story, with a shareable poster.
+- Themes, including Liquid Glass with adjustable tint and lens strength, a glass player and glass tab bar.
+- First-run onboarding: pick languages, genres and artists so Home is personal from the start.
+- Optional Google Drive sync of playlists, favorites, history, Speed dial and settings, with an account profile, per-category sync, and Privacy and Terms pages.
+- Searchable Settings organised into sections, with a search button on each section page.
+- Autoplay that learns: which artists go together, what energy you play at each time of day, skip and completion rates; Settings › Reset recommendations.
+- Duplicate-upload detection: re-uploads, lyric videos and music videos of the same song are dropped, and the official audio is preferred.
+- Second stream source: YouTube direct as an automatic fallback to NewPipe, chosen in Settings › Stream source.
+- Save downloads to device, Download album/playlist, Reset app and Quit Whiplash.
+- Fade between tracks, finer playback speed control, and Previous restarts the song after 3 seconds.
+
+### Changed
+- The queue, and where you were in the song, are kept after the app closes.
+- Speed dial and Quick Picks appear instantly on launch from their last saved copy.
+- Quick Picks refresh only when the list is a few hours old, on a new day, or when your listening has moved, and never change while you're using them.
+- Song lookups are lighter, the likely next songs are looked up in advance, and a lighter stream is picked on a slow connection.
+- Startup work moved off the main thread, plus a baseline profile, for a faster first screen.
+- The app is portrait only.
+
+### Fixed
+- Play from the notification, lock screen or a headset always resumes, even after the app was closed or a connection dropped.
+- A dropped connection is retried while the song keeps playing, instead of the song stopping.
+- A song that failed to load could end up paused after it finally loaded.
+- Removing the playing song while paused no longer starts the next one, and a skip during a fade no longer leaves the next song quiet.
+- Synced lyrics keep pace at playback speeds other than 1x.
+- An open playlist or Search page is kept when Android closes the app in the background.
+- One "Don't allow" no longer stops the music-access prompt from appearing again.
+- A failed lyrics lookup shows a plain message instead of a network error.
+- Shuffle order, ranged downloads, queue removal, list keys, SQLite limits and settings corruption issues found in an audit.
+
+### License
+- **Whiplash is now proprietary software under the [Whiplash Proprietary License](LICENSE).** All rights reserved: the code may be read, but not copied, modified, rebuilt, renamed, redistributed or used for AI training. Versions before 1.1.0 were released under the MIT License, and copies obtained under it stay under it.
+
+### Also in this release
+The changes below were made on `main` after 0.4.0 and ship for the first time in 1.1.0.
+
+#### Added
 - Pull Home down to refresh it. Both Speed dial and Quick Picks are refreshed together, and the spinner is held until the work genuinely finishes rather than released on a timer. The refresh button in the Quick Picks header is unchanged and still refreshes only Quick Picks, since that's the section it sits in — so a pull spins both the pull indicator and that button, while tapping the button spins only itself.
 - The Queue sheet now opens scrolled to the track that's playing instead of back at the top. Once autoplay has extended a queue to a few hundred entries, the current song was far below the fold and had to be hunted for, even though the sheet already highlighted it.
 - A one-tap Play all in the Quick Picks header, next to Refresh. Quick Picks rows could only be played one at a time — the shortcut Favorites and Playlists already had.
@@ -15,11 +72,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A Skip Silence toggle that removes silent stretches from playback, applied to the running player rather than only from the next track onward.
 - Downloaded files now carry embedded title, artist, album and cover art in the file itself, so a downloaded track shows up correctly in other music players and file managers rather than as an untitled audio file.
 
-### Changed
+#### Changed
 - **Settings has been rebuilt to look like the rest of the app.** It was the only screen using grouping cards and divider lines, and had more borders than any other screen — Home draws none at all. The cards and all eleven dividers are gone, every setting now carries a leading icon in the same position other list rows put artwork, and sections are separated by clear space instead of boxes. The backup category chips now use the same chip component as the Search and Library tabs, rather than a private copy that made a multi-select filter look identical to a primary button.
 - The Search and Library tab chips (Songs / Albums / Artists / Downloads) no longer fill and outline every chip. Only the selected one is filled, so there's an obvious answer to which tab you're on, and their tap targets went from roughly 28dp to a full 48dp.
 
-### Fixed
+#### Fixed
 - The app title was indented 8dp further than the content beneath it on every screen, so "Whiplash" didn't line up with "Quick Picks", nor "Settings" with "Playback".
 - The Wavy option in Progress Bar Style previewed as a flat line identical to Minimal. It was sampled at half-wavelength steps, which lands on a zero crossing every time, so the preview only ever showed the wave where it has no height. It now matches what the full player actually draws.
 - Opening a playlist no longer animates. The list-to-detail transition was visibly jumping: opening a large imported playlist costs one long frame for its first composition, and because animations run on a clock rather than per frame, that lost frame skipped the animation up to 70% of the way through in a single step. Every animated property showed it — a slide jumped sideways, a fade flashed the background through. An instant swap has nothing to interpolate.
