@@ -779,6 +779,8 @@ class PlaybackController(
     fun removeFromQueue(index: Int, announce: Boolean = true) {
         if (index !in queue.indices) return
         val wasCurrentIndex = index == currentIndex
+        // Playing, or still loading a song the listener asked to play.
+        val wantsToPlay = _state.value.isPlaying || (_state.value.isResolvingStream && !pausedWhileLoading)
         queue.removeAt(index)
         preparedIndices.remove(index)
         val shifted = preparedIndices.filter { it > index }.toSet()
@@ -808,7 +810,8 @@ class PlaybackController(
                 // Removed the now-playing track: play whatever now occupies this index (or stop if it was last).
                 _state.update { it.copy(queue = queue.toList()) }
                 if (currentIndex > queue.lastIndex) currentIndex = queue.lastIndex
-                if (currentIndex >= 0) playIndex(currentIndex) else {
+                // Paused stays paused: the next song is loaded, not started.
+                if (currentIndex >= 0) playIndex(currentIndex, startPaused = !wantsToPlay) else {
                     controller?.stop()
                     controller?.clearMediaItems()
                     _state.update { it.copy(currentItem = null, isPlaying = false) }
@@ -899,7 +902,7 @@ class PlaybackController(
      * section 8) — [PlaybackState.isResolvingStream]=true immediately so
      * there is no perceived dead air while that network round-trip happens.
      */
-    private fun playIndex(index: Int) {
+    private fun playIndex(index: Int, startPaused: Boolean = false) {
         if (index !in queue.indices) return
         val item = queue[index]
         // A link prefetched long ago may expire mid-song: look it up afresh.
@@ -916,7 +919,7 @@ class PlaybackController(
         shufflePlayed.add(item)
         if (shuffleForward.lastOrNull() === item) shuffleForward.removeLast()
         val generation = ++resolveGeneration
-        pausedWhileLoading = false
+        pausedWhileLoading = startPaused
         prefetchJob?.cancel()
 
         // Stop the previous track's audio immediately (not just update the
@@ -1705,9 +1708,13 @@ class PlaybackController(
         val fadeMs = settingsRepository.crossfadeDurationMs.first()
         if (fadeMs <= 0) return
         val c = controller ?: return
+        // A skip during the fade starts another song at full volume; stop
+        // fading so this doesn't keep turning the new one down.
+        val generation = resolveGeneration
         val steps = 12
         val stepDelay = (fadeMs / steps).coerceAtLeast(10).toLong()
         for (i in steps downTo 0) {
+            if (generation != resolveGeneration) return
             c.volume = i / steps.toFloat()
             delay(stepDelay)
         }
@@ -2208,6 +2215,9 @@ class PlaybackController(
         pendingEndReason = END_COMPLETED
 
         val c = controller ?: return
+        // The fade-out before the end left the volume down; the song is over,
+        // so restoring it is silent, and a later Play isn't quiet.
+        c.volume = 1f
         val timer = _state.value.sleepTimer
         val atLastQueueItem = nextIndex() == null
         when {
