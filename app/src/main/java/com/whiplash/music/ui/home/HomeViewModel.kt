@@ -58,6 +58,9 @@ class HomeViewModel(
     private val snapshot: com.whiplash.music.data.repository.QuickPicksSnapshot? = null,
     /** The last Speed dial, shown at once while history is read. */
     private val speedDialSnapshot: com.whiplash.music.data.repository.SpeedDialSnapshot? = null,
+    /** The connection right now, for deciding whether a launch refresh is worth it. */
+    private val network: () -> QuickPicksRefreshPolicy.Network = { QuickPicksRefreshPolicy.Network.UNMETERED },
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : ViewModel() {
 
     // The saved Speed dial, until the live one from history arrives.
@@ -230,6 +233,28 @@ class HomeViewModel(
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing
 
+    // False until the first Quick Picks load finishes (or fails), so Home
+    // shows the skeleton from the first frame instead of an empty gap.
+    private val _quickPicksSettled = MutableStateFlow(false)
+    val quickPicksSettled: StateFlow<Boolean> = _quickPicksSettled
+
+    private var autoJob: kotlinx.coroutines.Job? = null
+
+    /** Build info of the list on disk (the showing one, or [pendingQuickPicks]). */
+    private var savedMeta: com.whiplash.music.data.repository.QuickPicksSnapshot.Meta? = null
+    private var savedRead = false
+
+    /** A refresh was due while offline; the reconnect runs it. */
+    private var waitingForNetwork = false
+
+    /**
+     * Rule 5: a fresh list that arrived after the listener started using
+     * Quick Picks. Held instead of swapped under their finger, and shown
+     * the next time Home opens.
+     */
+    private var pendingQuickPicks: List<PlayableItem.YoutubeTrack>? = null
+    private var quickPicksTouched = false
+
     // --- 4.1: shelves feed -------------------------------------------------
 
     /** One card on a shelf: a song (plays on tap) or an album/playlist (opens on tap). */
@@ -333,12 +358,13 @@ class HomeViewModel(
 
     init {
         loadQuickPicks()
-        // Opened offline (e.g. finishing onboarding without a connection):
-        // load as soon as the phone is back online, with no pull needed.
+        // Opened offline (e.g. finishing onboarding without a connection), or a
+        // refresh was due while offline: do it as soon as the phone is back
+        // online, with no pull needed.
         onlineChanges?.let { changes ->
             viewModelScope.launch {
                 changes.drop(1).collect { online ->
-                    if (online && _quickPicks.value.isEmpty() && !_isLoadingQuickPicks.value) {
+                    if (online && (_quickPicks.value.isEmpty() || waitingForNetwork) && !_isLoadingQuickPicks.value) {
                         loadQuickPicks()
                         if (shelvesEnabled && _shelves.value.isEmpty() && !_isLoadingShelves.value) {
                             shelvesJob = viewModelScope.launch { fetchShelves(reset = true) }
@@ -356,16 +382,62 @@ class HomeViewModel(
             ) { l, g, a -> Triple(l, g, a) }
                 .distinctUntilChanged()
                 .drop(1)
-                .collect { loadQuickPicks() }
+                .collect { viewModelScope.launch { fetchQuickPicks(automatic = false) } }
         }
     }
 
     /**
-     * Background/automatic load (app start). Fire-and-forget: nothing is
-     * waiting on it and no user-visible refresh affordance is tied to it.
+     * Background/automatic load (app start, back online, Home shown again).
+     * Shows the saved list, then rebuilds only when [QuickPicksRefreshPolicy]
+     * says it's due. Fire-and-forget: nothing is waiting on it.
      */
     fun loadQuickPicks() {
-        viewModelScope.launch { fetchQuickPicks() }
+        if (autoJob?.isActive == true) return
+        autoJob = viewModelScope.launch { autoRefreshQuickPicks() }
+    }
+
+    /** The listener scrolled or tapped Quick Picks; an automatic refresh now waits. */
+    fun onQuickPicksTouched() {
+        if (_quickPicks.value.isNotEmpty()) quickPicksTouched = true
+    }
+
+    /** Home came back on screen: show a held list, and check whether the saved one went stale. */
+    fun onHomeShown() {
+        pendingQuickPicks?.let { _quickPicks.value = it }
+        pendingQuickPicks = null
+        quickPicksTouched = false
+        if (savedRead) loadQuickPicks()
+    }
+
+    private suspend fun showSavedQuickPicks() {
+        if (savedRead) return
+        val saved = snapshot?.readSaved()
+        savedRead = true
+        if (saved == null) return
+        if (_quickPicks.value.isEmpty() && saved.tracks.isNotEmpty()) _quickPicks.value = saved.tracks
+        if (savedMeta == null) savedMeta = saved.meta
+    }
+
+    private suspend fun autoRefreshQuickPicks() {
+        showSavedQuickPicks()
+        val meta = savedMeta
+        val decision = QuickPicksRefreshPolicy.decide(
+            QuickPicksRefreshPolicy.Inputs(
+                nowMs = clock(),
+                builtAtMs = meta?.builtAtMs,
+                hasList = _quickPicks.value.isNotEmpty(),
+                finishedSinceBuild = meta?.let { radioSource?.finishedSince(it.builtAtMs) } ?: 0,
+                topArtistsAtBuild = meta?.topArtists.orEmpty(),
+                topArtistsNow = if (meta != null) currentTopArtists() else emptyList(),
+                network = network(),
+            ),
+        )
+        waitingForNetwork = decision == QuickPicksRefreshPolicy.Decision.WAIT_FOR_NETWORK
+        when (decision) {
+            QuickPicksRefreshPolicy.Decision.REFRESH -> fetchQuickPicks(automatic = true)
+            // Nothing to fetch: the saved list is what Home shows.
+            else -> _quickPicksSettled.value = true
+        }
     }
 
     /**
@@ -378,7 +450,7 @@ class HomeViewModel(
      * section-scoped button should not drive the screen-wide pull indicator.
      */
     fun refreshQuickPicks() {
-        viewModelScope.launch { fetchQuickPicks() }
+        viewModelScope.launch { fetchQuickPicks(automatic = false) }
     }
 
     /**
@@ -407,7 +479,7 @@ class HomeViewModel(
             try {
                 coroutineScope {
                     launch { refreshSpeedDial() }
-                    launch { fetchQuickPicks() }
+                    launch { fetchQuickPicks(automatic = false) }
                     if (shelvesEnabled) launch {
                         shelvesJob?.cancelAndJoin()
                         _isLoadingShelves.value = false
@@ -440,20 +512,19 @@ class HomeViewModel(
         }
     }
 
-    // False until the first Quick Picks load finishes (or fails), so Home
-    // shows the skeleton from the first frame instead of an empty gap.
-    private val _quickPicksSettled = MutableStateFlow(false)
-    val quickPicksSettled: StateFlow<Boolean> = _quickPicksSettled
 
-    private suspend fun fetchQuickPicks() {
+    /**
+     * Builds a fresh Quick Picks list. [automatic] refreshes (launch, back
+     * online) don't swap a list the listener is already using; they hold
+     * it for the next time Home opens. Manual ones always show it.
+     */
+    private suspend fun fetchQuickPicks(automatic: Boolean) {
         // Opening Home: the last full list (radios included) shows at once,
         // like YouTube Music's own feed, and is replaced when the fresh one
         // is ready.
-        if (_quickPicks.value.isEmpty()) {
-            val saved = snapshot?.read().orEmpty()
-            if (saved.isNotEmpty()) _quickPicks.value = saved
-        }
-        val queries = personalizedQuickPicksQueries()
+        showSavedQuickPicks()
+        val topArtists = currentTopArtists()
+        val queries = personalizedQuickPicksQueries(topArtists)
 
         // Nothing saved yet: searches cached in the last few minutes stand in
         // while the real refresh runs. Never over a list already showing, so
@@ -505,8 +576,16 @@ class HomeViewModel(
             // behavior.
             if (blended.isNotEmpty()) {
                 val full = fillPages(blended)
-                _quickPicks.value = full
-                snapshot?.write(full)
+                val meta = com.whiplash.music.data.repository.QuickPicksSnapshot.Meta(clock(), topArtists)
+                if (automatic && quickPicksTouched && _quickPicks.value.isNotEmpty()) {
+                    pendingQuickPicks = full
+                } else {
+                    _quickPicks.value = full
+                    pendingQuickPicks = null
+                }
+                savedMeta = meta
+                waitingForNetwork = false
+                snapshot?.write(full, meta)
                 com.whiplash.music.ui.onboarding.OnboardingController.homeReady.value = true
             }
         } finally {
@@ -577,7 +656,18 @@ class HomeViewModel(
      * (a fresh install/new user) — an explicit, honest fallback rather
      * than pretending to personalize with no data to draw from.
      */
-    private suspend fun personalizedQuickPicksQueries(): List<String> {
+    private suspend fun personalizedQuickPicksQueries(topArtists: List<String>): List<String> {
+        // Onboarding picks fill whatever listening history doesn't cover yet, so
+        // Home is personal from the first launch and gradually becomes all
+        // history. Nothing picked and nothing played: the generic default.
+        val fromHistory = topArtists.map { "$it songs" }
+        val fromTaste = tasteQueries()
+        if (fromHistory.isEmpty() && fromTaste.isEmpty()) return listOf(QUICK_PICKS_QUERY)
+        return (fromHistory + fromTaste).distinct().take(MAX_BLEND_ARTISTS)
+    }
+
+    /** The listener's top artists from recent plays, most played first. */
+    private suspend fun currentTopArtists(): List<String> {
         // Reads a fresh, independent collection of the repository's own
         // Flow rather than this ViewModel's derived `recentlyPlayed`
         // StateFlow: that StateFlow is `SharingStarted.WhileSubscribed`,
@@ -606,14 +696,7 @@ class HomeViewModel(
         } ?: emptyList()
         // Counted by main artist, so "A" and "A & B" are one artist and the
         // search is "A songs" rather than the whole credit line.
-        val topArtists = com.whiplash.music.domain.model.rankArtists(history.map { it.artist }, MAX_BLEND_ARTISTS)
-        // Onboarding picks fill whatever listening history doesn't cover yet, so
-        // Home is personal from the first launch and gradually becomes all
-        // history. Nothing picked and nothing played: the generic default.
-        val fromHistory = topArtists.map { "$it songs" }
-        val fromTaste = tasteQueries()
-        if (fromHistory.isEmpty() && fromTaste.isEmpty()) return listOf(QUICK_PICKS_QUERY)
-        return (fromHistory + fromTaste).distinct().take(MAX_BLEND_ARTISTS)
+        return com.whiplash.music.domain.model.rankArtists(history.map { it.artist }, MAX_BLEND_ARTISTS)
     }
 
     /**
@@ -651,8 +734,10 @@ class HomeViewModel(
      */
     fun removeFromQuickPicks(item: PlayableItem.YoutubeTrack) {
         _quickPicks.value = _quickPicks.value.filter { it.id != item.id }
+        pendingQuickPicks = pendingQuickPicks?.filter { it.id != item.id }
         // So it doesn't come back with the saved list on the next launch.
-        viewModelScope.launch { snapshot?.write(_quickPicks.value) }
+        val onDisk = pendingQuickPicks ?: _quickPicks.value
+        viewModelScope.launch { snapshot?.write(onDisk, savedMeta) }
         ToastController.show("Removed from Quick Picks")
     }
 

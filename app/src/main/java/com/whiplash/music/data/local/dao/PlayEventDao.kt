@@ -74,6 +74,10 @@ interface PlayEventDao {
     @Query("DELETE FROM play_events WHERE id NOT IN (SELECT id FROM play_events ORDER BY startedAtEpochMs DESC LIMIT :limit)")
     suspend fun keepNewest(limit: Int)
 
+    /** Songs finished since [sinceMs]; Quick Picks refreshes after a few. */
+    @Query("SELECT COUNT(*) FROM play_events WHERE completed = 1 AND startedAtEpochMs >= :sinceMs")
+    suspend fun completedSince(sinceMs: Long): Int
+
     @Query("SELECT COUNT(*) FROM play_events")
     suspend fun count(): Int
 

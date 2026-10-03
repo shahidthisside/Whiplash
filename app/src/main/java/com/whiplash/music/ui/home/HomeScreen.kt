@@ -124,8 +124,30 @@ fun HomeScreen(
             },
             app.quickPicksSnapshot,
             app.speedDialSnapshot,
+            network = {
+                when {
+                    !app.cloudSyncManager.isOnline() -> QuickPicksRefreshPolicy.Network.OFFLINE
+                    app.cloudSyncManager.isMetered() -> QuickPicksRefreshPolicy.Network.METERED
+                    else -> QuickPicksRefreshPolicy.Network.UNMETERED
+                }
+            },
         ),
     )
+    // Home shown (opened again, or the app brought back): a fresh list held
+    // while Quick Picks was in use appears now, and a stale one is rebuilt.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_START) viewModel.onHomeShown()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    // Scrolling Home counts as using Quick Picks, so an automatic refresh won't move it.
+    androidx.compose.runtime.LaunchedEffect(listState) {
+        androidx.compose.runtime.snapshotFlow { listState.isScrollInProgress }
+            .collect { if (it) viewModel.onQuickPicksTouched() }
+    }
     val songActionsViewModel: SongActionsViewModel = viewModel(
         factory = SongActionsViewModelFactory(app.libraryRepository, app.downloadManager),
     )
@@ -202,7 +224,10 @@ fun HomeScreen(
             more = all.filter { it !in primary },
         )
     }
-    val qpClick: (PlayableItem) -> Unit = { track -> if (qpSelection.selecting) qpSelection.toggle(track) else onPlayTrack(track) }
+    val qpClick: (PlayableItem) -> Unit = { track ->
+        viewModel.onQuickPicksTouched()
+        if (qpSelection.selecting) qpSelection.toggle(track) else onPlayTrack(track)
+    }
     var addToPlaylistItem by remember { mutableStateOf<PlayableItem?>(null) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showClearSpeedDialConfirm by remember { mutableStateOf(false) }
@@ -386,6 +411,7 @@ fun HomeScreen(
                     )
                 }
                 val onLongPressQuickPick: (PlayableItem) -> Unit = { track ->
+                    viewModel.onQuickPicksTouched()
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     if (qpSelection.selecting) {
                         qpSelection.toggle(track)
@@ -436,7 +462,7 @@ fun HomeScreen(
                         // Pages of [perPage] songs; swipe sideways for the rest,
                         // with the next page peeking in at the edge.
                         item(key = "qpgrid-pager") {
-                            QuickPicksPager(quickPicks, perPage, qpClick, onLongPressQuickPick, qpSelected, peek = quickPicksPeek)
+                            QuickPicksPager(quickPicks, perPage, qpClick, onLongPressQuickPick, qpSelected, peek = quickPicksPeek, onSwipe = viewModel::onQuickPicksTouched)
                         }
                     }
                 }
@@ -1316,6 +1342,7 @@ private fun QuickPicksPager(
     isSelected: (PlayableItem) -> Boolean = { false },
     // Settings › Quick Picks: peek next page.
     peek: Boolean = true,
+    onSwipe: () -> Unit = {},
 ) {
     // A short last page (e.g. after removing songs) is dropped when there are
     // other pages, so every page is a full grid. A single page is kept as is.
@@ -1324,6 +1351,9 @@ private fun QuickPicksPager(
     }
     val rowsPerPage = (perPage + 2) / 3
     val pagerState = androidx.compose.foundation.pager.rememberPagerState { pages.size }
+    androidx.compose.runtime.LaunchedEffect(pagerState) {
+        androidx.compose.runtime.snapshotFlow { pagerState.isScrollInProgress }.collect { if (it) onSwipe() }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(GlassTokens.spaceSm)) {
         androidx.compose.foundation.pager.HorizontalPager(
             state = pagerState,

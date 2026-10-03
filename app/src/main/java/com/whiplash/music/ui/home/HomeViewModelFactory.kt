@@ -13,9 +13,10 @@ class HomeViewModelFactory(
     private val radioSource: QuickPicksRadio? = null,
     private val snapshot: com.whiplash.music.data.repository.QuickPicksSnapshot? = null,
     private val speedDialSnapshot: com.whiplash.music.data.repository.SpeedDialSnapshot? = null,
+    private val network: () -> QuickPicksRefreshPolicy.Network = { QuickPicksRefreshPolicy.Network.UNMETERED },
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
         @Suppress("UNCHECKED_CAST")
-        return HomeViewModel(libraryRepository, youtubeSearchRepository, settingsRepository, onlineChanges, radioSource, snapshot, speedDialSnapshot) as T
+        return HomeViewModel(libraryRepository, youtubeSearchRepository, settingsRepository, onlineChanges, radioSource, snapshot, speedDialSnapshot, network) as T
     }
 }

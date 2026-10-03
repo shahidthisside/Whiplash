@@ -171,6 +171,9 @@ class CloudSyncManager(
             caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }.getOrDefault(false)
 
+    /** True on mobile data or another network the system treats as metered. */
+    fun isMetered(): Boolean = runCatching { connectivity?.isActiveNetworkMetered ?: false }.getOrDefault(false)
+
     /** Online/offline as it changes (current value first). Shared by Home's reconnect retry. */
     fun onlineChanges(): Flow<Boolean> = callbackFlow {
         val callback = object : android.net.ConnectivityManager.NetworkCallback() {

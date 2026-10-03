@@ -30,6 +30,22 @@ class QuickPicksSnapshotTest {
         }
     }
 
+    @Test fun keepsBuildInfoAndReadsOldFiles() = runTest {
+        val dir = Files.createTempDirectory("qp").toFile()
+        try {
+            val file = File(dir, "quick_picks.json")
+            val snapshot = QuickPicksSnapshot(file)
+            val meta = QuickPicksSnapshot.Meta(builtAtMs = 1_700_000_000_000L, topArtists = listOf("Pritam", "A.R. Rahman"))
+            snapshot.write(listOf(track("a")), meta)
+            assertEquals(QuickPicksSnapshot.Saved(listOf(track("a")), meta), snapshot.readSaved())
+            // A list saved by an older version is still shown; it just has no build info.
+            file.writeText(YoutubeTrackJson.encode(listOf(track("b"))))
+            assertEquals(QuickPicksSnapshot.Saved(listOf(track("b")), null), snapshot.readSaved())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
     @Test fun damagedFileReadsAsEmpty() = runTest {
         val dir = Files.createTempDirectory("qp").toFile()
         try {

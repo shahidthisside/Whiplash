@@ -41,6 +41,10 @@ class QuickPicksRadio(
         }.filter { it.isNotEmpty() }
     }
 
+    /** How many songs were finished since [sinceMs]. */
+    suspend fun finishedSince(sinceMs: Long): Int =
+        runCatching { dao?.completedSince(sinceMs) }.getOrNull() ?: 0
+
     private suspend fun seeds(recent: List<PlayableItem>): List<String> {
         val top = runCatching { dao?.topCompleted(System.currentTimeMillis() - 30L * DAY, 16) }.getOrNull().orEmpty()
         val picked = mutableListOf<String>()

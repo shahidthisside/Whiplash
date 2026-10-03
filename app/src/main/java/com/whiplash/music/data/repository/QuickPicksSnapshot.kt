@@ -17,18 +17,26 @@ import java.io.File
  */
 class QuickPicksSnapshot(private val file: File) {
 
-    suspend fun read(): List<PlayableItem.YoutubeTrack> = withContext(Dispatchers.IO) {
-        if (!file.exists()) return@withContext emptyList()
-        runCatching { YoutubeTrackJson.decode(file.readText()) }
+    /** When a saved list was built and from which top artists, so a launch can tell if it's still fresh. */
+    data class Meta(val builtAtMs: Long, val topArtists: List<String>)
+
+    /** A saved list and its [Meta]; meta is null for lists saved before it was recorded. */
+    data class Saved(val tracks: List<PlayableItem.YoutubeTrack>, val meta: Meta?)
+
+    suspend fun read(): List<PlayableItem.YoutubeTrack> = readSaved().tracks
+
+    suspend fun readSaved(): Saved = withContext(Dispatchers.IO) {
+        if (!file.exists()) return@withContext Saved(emptyList(), null)
+        runCatching { decode(file.readText()) }
             .onFailure { Log.w(TAG, "Couldn't read saved Quick Picks", it) }
-            .getOrDefault(emptyList())
+            .getOrDefault(Saved(emptyList(), null))
     }
 
-    suspend fun write(tracks: List<PlayableItem.YoutubeTrack>) = withContext(Dispatchers.IO) {
+    suspend fun write(tracks: List<PlayableItem.YoutubeTrack>, meta: Meta? = null) = withContext(Dispatchers.IO) {
         runCatching {
             // Written to a temp file first so a crash mid-write never leaves half a list.
             val tmp = File(file.parentFile, "${file.name}.tmp")
-            tmp.writeText(YoutubeTrackJson.encode(tracks))
+            tmp.writeText(encode(tracks, meta))
             if (!tmp.renameTo(file)) {
                 file.delete()
                 tmp.renameTo(file)
@@ -41,8 +49,29 @@ class QuickPicksSnapshot(private val file: File) {
         runCatching { file.delete() }
     }
 
-    private companion object {
-        const val TAG = "QuickPicksSnapshot"
+    internal companion object {
+        private const val TAG = "QuickPicksSnapshot"
+
+        fun encode(tracks: List<PlayableItem.YoutubeTrack>, meta: Meta?): String {
+            if (meta == null) return YoutubeTrackJson.encode(tracks)
+            return JSONObject().apply {
+                put("builtAtMs", meta.builtAtMs)
+                put("topArtists", JSONArray(meta.topArtists))
+                put("tracks", JSONArray(YoutubeTrackJson.encode(tracks)))
+            }.toString()
+        }
+
+        /** Reads both the current form and the older bare list (no meta). */
+        fun decode(json: String): Saved {
+            if (json.trimStart().startsWith("[")) return Saved(YoutubeTrackJson.decode(json), null)
+            val obj = JSONObject(json)
+            val artists = obj.optJSONArray("topArtists")
+            val meta = Meta(
+                builtAtMs = obj.getLong("builtAtMs"),
+                topArtists = (0 until (artists?.length() ?: 0)).map { artists!!.getString(it) },
+            )
+            return Saved(YoutubeTrackJson.decode(obj.getJSONArray("tracks").toString()), meta)
+        }
     }
 }
 
