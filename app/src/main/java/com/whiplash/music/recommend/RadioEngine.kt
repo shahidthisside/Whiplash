@@ -151,6 +151,8 @@ class RadioEngine(
         energyByTime = EnergyByTime.from(plays)
         if (plays.isNotEmpty()) log("metrics: ${RadioMetrics.from(plays)} ranker n=${learned().ranker.examples}")
     }
+    // Written on the radio thread, also read from the playback scope.
+    @Volatile
     var current: RadioSession? = null
         private set
 

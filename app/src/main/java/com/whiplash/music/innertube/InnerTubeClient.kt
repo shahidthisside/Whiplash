@@ -78,7 +78,10 @@ class InnerTubeClient(
             .header("X-YouTube-Client-Version", version)
             .apply { visitorData?.let { header("X-Goog-Visitor-Id", it) } }
             .build()
-        http.newCall(request).execute().use { response ->
+        // A whole-call limit: the read timeout only covers gaps between bytes,
+        // so a response trickling in could otherwise hold up autoplay for minutes.
+        val call = http.newCall(request).apply { timeout().timeout(CALL_TIMEOUT_S, TimeUnit.SECONDS) }
+        call.execute().use { response ->
             if (!response.isSuccessful) throw IOException("InnerTube $endpoint: HTTP ${response.code}")
             val json = JSONObject(response.body.string())
             json.optJSONObject("responseContext")?.optString("visitorData")?.takeIf { it.isNotEmpty() }?.let { visitorData = it }
@@ -123,6 +126,7 @@ class InnerTubeClient(
         const val BASE = "$ORIGIN/youtubei/v1"
         const val FALLBACK_VERSION = "1.20250122.01.00"
         const val SCRAPE_TIMEOUT_S = 5L
+        const val CALL_TIMEOUT_S = 20L
         const val VERSION_REFRESH_AGE_MS = 24 * 3_600_000L
         const val VERSION_MAX_AGE_MS = 30 * 24 * 3_600_000L
         const val RADIO_PARAMS = "wAEB"
