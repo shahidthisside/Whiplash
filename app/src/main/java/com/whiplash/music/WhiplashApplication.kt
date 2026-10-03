@@ -234,6 +234,9 @@ class WhiplashApplication : Application() {
         NewPipe.init(OkHttpNewPipeDownloader(okHttpClient))
         // A small file; read now so Home opens with Speed dial already filled in.
         speedDialSnapshot.warm(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO), this)
+        // Opens the audio cache (its index is read from disk) off the main
+        // thread, so the first replay of a cached song doesn't wait on it.
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { audioCacheManager.currentCacheSizeBytes() }
         // YouTube asks for cookie consent before serving radio (Mix)
         // playlists in some regions; accepting it is what NewPipe's own
         // "accept YouTube cookies" setting does. Needed for song radio.
