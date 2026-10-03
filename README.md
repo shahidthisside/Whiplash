@@ -1,45 +1,71 @@
 # Whiplash
 
-**Whiplash** is a native Android music player focused on fast, resilient YouTube Music playback with full offline/local library support. Built entirely with Kotlin, Jetpack Compose, and Media3/ExoPlayer.
+**Whiplash** is a native Android music player for YouTube Music and your own songs, built from scratch by **Shahid Ansari** with Kotlin, Jetpack Compose and Media3/ExoPlayer.
 
-> This project was built as a hands-on exploration of modern Android media architecture — a real, working Media3 session pipeline, a multi-provider YouTube extraction/fallback system, and a custom dark, frosted-surface design system — rather than a wrapper around an existing SDK.
+Version **1.1.0** is the biggest update so far: a redesigned app, eight themes including Liquid Glass, smarter autoplay and Quick Picks that learn what you finish, full-screen synced lyrics, Monthly Replay, optional Google Drive sync, and a much more reliable playback engine.
+
+> **Proprietary software. All rights reserved.** The source code is published so it can be read. It may not be copied, modified, renamed, re-skinned, rebuilt, redistributed, or used to train or prompt AI models. See [LICENSE](LICENSE).
+
+---
+
+## Download
+
+Get the signed APK from the [Releases page](https://github.com/shahidthisside/Whiplash/releases/latest) or the [Whiplash website](https://shahidthisside.github.io/Whiplash/). Android 8.0 or newer.
+
+Only APKs from these two places are official.
 
 ---
 
 ## Features
 
 ### Playback
-- Background playback via a genuine `MediaSessionService` + `ExoPlayer` pipeline (survives Activity recreation, screen-off, and app backgrounding)
-- Real YouTube / YouTube Music search and streaming through [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) — no official API key required
-- Multi-provider fallback architecture (`PlaybackManager` + `ProviderHealthTracker`) designed to add additional extraction providers without touching call sites
-- Gapless playback, adjustable playback speed, and a fade between tracks (the current song fades out and the next fades in — a genuine audible fade rather than an overlapping two-stream crossfade, since the player holds one resolved track at a time)
-- Sleep timer (fixed durations, end-of-song, end-of-queue)
-- Queue with reordering, "play next," and "add to queue," plus an Autoplay on/off shortcut right in the Queue sheet — and it opens scrolled to the track that's playing rather than back at the top, which matters once autoplay has grown the queue past a screenful
-- YouTube-style autoplay: automatically extends the queue with related, music-only tracks when Autoplay is enabled (a video's YouTube category is checked so non-music results never sneak in)
-- Local/offline device music library (MediaStore-backed), including automatic library refresh via a `ContentObserver` when files change on disk
-- Offline downloads: save any YouTube track's audio for playback with no network at all, with its own Downloads tab, a per-row progress/checkmark/failed badge everywhere that track appears, and bulk "Download album/playlist" actions — download quality is configurable independently from streaming quality
+- Background playback through a real `MediaSessionService` + ExoPlayer pipeline, with lock screen, notification, headset and Bluetooth controls. Play from the notification or a headset always resumes, even after the app was closed.
+- Two stream sources: NewPipe, and YouTube direct as an automatic fallback. Choose Automatic, NewPipe only or YouTube direct only in Settings › Stream source.
+- Built for weak connections: a lighter stream is picked automatically on a slow link, a dropped connection is retried while the song keeps playing, and likely next songs are looked up before you tap them.
+- The queue, and where you were in the current song, are kept after the app closes.
+- Gapless playback, fade between tracks, playback speed 0.5x–2x, Skip Silence, and a sleep timer (fixed times, end of song, end of queue).
+- Separate audio quality for Wi-Fi and mobile data, plus an audio cache for instant replays.
+- Offline downloads with embedded tags and cover art, Wi-Fi-only downloads, Save to device, and Download album/playlist.
+- Your own on-device music (MediaStore), refreshed automatically when files change.
 
-### Library & Discovery
-- YouTube search across Songs, Albums, Artists and Playlists — each tab loads and fails independently, so one category erroring never blanks another and each shows its own retry — with YouTube-Music-style recent searches, live search suggestions while typing, and genuine infinite scroll on every result tab. On-device music has its own dedicated search inside the Library tab.
-- Album and Artist detail pages with real metadata, track listings, playback actions, and a Share button on search-result albums/playlists (shares the real YouTube link)
-- A full History screen (up to 200 recently played tracks, with per-item removal), Favorites, Playlists (create/rename/delete, plus importing a whole playlist by pasting a YouTube or YouTube Music playlist link), and a Speed Dial / Quick Picks home surface with a one-tap Play-all for the whole Quick Picks set
-- Pull Home down to refresh the whole screen — Speed dial and Quick Picks together — with the spinner held until the work actually finishes rather than released on a timer. The refresh button in the Quick Picks header keeps its narrower meaning and refreshes only that section, since that's the section it sits in
-- Favorites and Playlists both offer one-tap Shuffle and Play-all actions
-- Copy or move a song between playlists directly from its own long-press menu
-- Advanced, per-category local backup and restore — choose exactly which of Playlists, Favorites, History, Pinned songs, Downloads, and Settings to back up (or restore all of them, the previous all-or-nothing default)
-- Synchronized lyrics via [LRCLIB](https://lrclib.net) (a free, open lyrics database) with an honest "unavailable" state — lyrics are never fabricated
+### Autoplay and recommendations
+- Autoplay starts a YouTube Music radio for the song you play, falling back to NewPipe.
+- Songs are ranked on the device by mood, genre, energy, era and language. The radio learns from what you finish and skip, which artists go together, and what you play at each time of day.
+- Re-uploads, lyric videos and music videos of a song you already have are dropped, and the official audio is preferred.
+- Quick Picks are built from the radios of songs you finish and YouTube Music's "You might also like". They show instantly from the last list and refresh only when they're stale, on a new day, or when your listening has moved.
+- Settings › Reset recommendations forgets what the radio learned.
 
-### Design & UX
-- App-wide toast feedback on every action that would otherwise complete silently (favoriting, pinning, playlist changes, queue actions, clearing history/cache/search, and more)
-- A custom dark, frosted-surface design system built on Jetpack Compose + Material 3 (translucent tinted surfaces, soft borders, layered elevation)
-- Smooth transitions across navigation — tab switches crossfade, and drilling into an album or artist detail screen slides in the direction you're moving. Opening a playlist is a deliberate exception: it swaps instantly, because that screen's first composition costs a long frame and any animation across it visibly jumped rather than moved
-- Back returns to Home from any other tab rather than closing the app, and Favorites carries a matching back button
-- Six selectable color themes with instant, persisted switching
-- Four full-player seek bar visual styles (Classic, Wavy, Waveform, Minimal), picked live with mini-previews in Settings
-- Local backup and restore: saves whichever categories you choose (or everything) to a single file via the system file picker, and can restore from it later
-- Haptic feedback and micro-interactions on stateful actions (play/pause, favorite, queue reorder, toggles)
-- Swipe gestures on the mini-player (next/previous), always paired with accessible on-screen buttons
-- Accessibility-conscious touch targets (48dp+) and reduced-motion support that respects the system's animator duration scale
+### Now Playing and lyrics
+- Redesigned player with colours from the album art, an optional full-bleed cover, swipe the artwork to skip, and drag down to close.
+- Five seek bar styles: Classic, Wavy, Waveform, Minimal and Hairline.
+- Full-screen synced lyrics, opened by swiping up on the player, with word-by-word highlighting, optional blur, per-song timing, and the current line shown above the seek bar if you want it.
+- Lyrics come from LRCLIB, with lyrics.ovh as a fallback; they're cached for offline use and never made up.
+- The queue sheet has sections (played, now playing, from autoplay), drag to reorder, swipe to remove with undo, and shuffle up next.
+
+### Home, search and library
+- Home: Speed dial (pinned and recent songs, in pages, as a grid or list), Quick Picks with Play all, optional album and playlist shelves, and pull to refresh. Both show instantly on launch.
+- Explore in Search: new releases, charts, and mood and genre pages.
+- Search across songs, albums, artists and playlists, with suggestions, recent searches, infinite scroll and modern album, artist and playlist pages.
+- Library start page with Downloads, Songs, Albums, Artists, History and Shuffle all.
+- Playlists with custom covers (photo crop), pinning, grid or list view, and import from a YouTube or YouTube Music link.
+- Favorites, including adding a whole album or playlist.
+- Multi-select across song, album and playlist lists.
+
+### Monthly Replay
+- A recap of your month: top songs, top artists and listening time, shown as a story, with a poster you can share and Play top songs.
+
+### Look and feel
+- Eight themes: Dark, OLED Black, Light, Liquid Glass, Catppuccin Mocha, Nord, Rosé Pine Dawn and Custom, plus accent colours with a colour picker.
+- Liquid Glass: see-through glass with adjustable tint and lens strength, and a glass player and tab bar.
+- A redesigned navigation bar and mini player, and smooth page transitions.
+- Reduce animations, for less motion.
+- First-run onboarding: pick your languages, genres and artists, so Home is personal from the first launch.
+
+### Settings, backup and sync
+- Searchable Settings, organised into sections.
+- Local backup and restore by category: playlists, favorites, history, pinned songs, downloads and settings.
+- Optional Google Drive sync of playlists, favorites, history, Speed dial and settings. Your data is kept in a private folder in your own Drive.
+- Reset app and Quit Whiplash.
 
 ---
 
@@ -47,113 +73,59 @@
 
 ```
 UI (Compose)  →  ViewModel  →  PlaybackController  →  MediaController  →  MediaSessionService (ExoPlayer)
-                                       │
-                                       ├── PlaybackManager (provider fallback)
-                                       │      └── NewPipePlaybackProvider (NewPipeExtractor)
-                                       │
-                                       ├── LibraryRepository / LocalLibraryRepository (Room + MediaStore)
-                                       ├── SettingsRepository (DataStore Preferences)
-                                       └── LrcLibProvider (lyrics)
+                                      │
+                                      ├── PlaybackManager (stream sources with fallback)
+                                      │      ├── NewPipe (NewPipeExtractor)
+                                      │      └── YouTube direct
+                                      ├── RadioEngine + InnerTube client (autoplay and Quick Picks)
+                                      ├── LibraryRepository / LocalLibraryRepository (Room + MediaStore)
+                                      ├── SettingsRepository (DataStore)
+                                      ├── Lyrics providers (LRCLIB, lyrics.ovh)
+                                      └── Backup and Google Drive sync
 ```
-
-- **UI layer**: Jetpack Compose screens, one `ViewModel` per screen, no direct access to Media3 types.
-- **`PlaybackController`**: the single source of truth for playback state (`StateFlow<PlaybackState>`), queue management, shuffle/repeat, sleep timer, and autoplay. Talks to the playback service through a `MediaController`.
-- **`WhiplashPlaybackService`**: a `MediaSessionService` owning the real `ExoPlayer` instance and `MediaSession`. Wraps the player in a `QueueAwareForwardingPlayer` so the system (notification, lock screen, Bluetooth/AVRCP) can correctly report Next/Previous availability even though YouTube tracks are resolved and loaded one at a time (each requires an async network resolve before a playable `MediaItem` can exist).
-- **`PlaybackManager` / `ProviderHealthTracker`**: an extraction-provider abstraction with automatic health-based fallback, designed so a second provider can be added as a list entry with no changes to calling code.
-- **Persistence**: Room for library/queue/history/playlists/provider health, DataStore Preferences for user settings.
 
 ---
 
-## Tech Stack
+## Tech stack
 
 | Layer | Technology |
 |---|---|
 | Language | Kotlin |
 | UI | Jetpack Compose, Material 3 |
 | Playback | AndroidX Media3 (ExoPlayer, MediaSession) |
-| YouTube extraction | [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) |
-| Local persistence | Room, DataStore Preferences |
-| Local media | MediaStore |
+| YouTube | NewPipeExtractor, plus a small YouTube Music (InnerTube) client |
+| Storage | Room, DataStore |
 | Networking | OkHttp |
-| Image loading | Coil |
-| Lyrics | [LRCLIB](https://lrclib.net) public API |
-| Build | Gradle (Kotlin DSL), KSP |
+| Images | Coil |
+| Lyrics | LRCLIB, lyrics.ovh |
+| Sync | Google Drive (Google Play services sign-in) |
+| Performance | Baseline profile |
 
-**Minimum SDK:** 26 (Android 8.0) · **Target/Compile SDK:** 36
-
----
-
-## Download
-
-A prebuilt signed release APK is available on the [Releases page](https://github.com/shahidthisside/Whiplash/releases/latest) as `Whiplash.apk`, intended for personal/educational use — see [Building from Source](#building-from-source) below if you'd rather build it yourself.
+**Minimum SDK:** 26 (Android 8.0) · **Target SDK:** 36
 
 ---
 
-## Building from Source
+## Known limitations
 
-### Prerequisites
-- JDK 17
-- Android SDK (Platform 36, Build-Tools matching `compileSdk`)
-- Android Studio (recommended) or the command line
-
-### Build
-
-```bash
-git clone https://github.com/shahidthisside/Whiplash.git
-cd Whiplash
-./gradlew assembleDebug
-```
-
-The debug APK will be produced at `app/build/outputs/apk/debug/app-debug.apk`.
-
-### Install to a connected device/emulator
-
-```bash
-./gradlew installDebug
-```
-
-No API keys, secrets, or `local.properties` entries beyond the standard Android SDK path are required to build this project.
-
----
-
-## Project Structure
-
-```
-app/src/main/java/com/whiplash/music/
-├── data/            # Room entities/DAOs, repositories (library, settings, search cache)
-├── domain/          # Plain Kotlin domain models (PlayableItem, LyricsResult, etc.)
-├── localmedia/       # MediaStore scanning for the offline/local library
-├── playback/
-│   ├── controller/  # PlaybackController — the single source of truth for playback state
-│   ├── provider/    # NewPipeExtractor integration, provider fallback, lyrics provider
-│   └── service/     # MediaSessionService, ForwardingPlayer, session callback
-└── ui/              # Compose screens, ViewModels, and the frosted-surface design system
-```
-
----
-
-## Known Limitations
-
-Being transparent about what isn't (yet) fully solved:
-
-- **OEM "island" / live-activity style notifications** (e.g., Vivo/iQOO OriginOS's "Origin Island") are a vendor-OS reskin of the standard Android media notification, not a public API third-party apps can opt into. Whiplash uses the correct, standard `MediaSessionService` + `MediaStyle` architecture; whether the OS elevates it to an island view is outside the app's control, and is a documented inconsistency affecting other third-party media apps as well.
-- **Vivo/iQOO OriginOS's "Origin Player" quick-switch audio-source picker** only lists a small, hardcoded set of partner apps (confirmed on-device: it shows the system Music app plus Spotify as "installable," with no public, documented way for a third-party app to be added). Whiplash's `MediaSession` is verified fully correct and active via `dumpsys media_session` (real live `PlaybackState`, correct session flags, Bluetooth/AVRCP routing all confirmed working) — this omission is a closed vendor allowlist, not a gap in the app's own media-session implementation.
-- The in-app notification's own Next/Previous buttons may not appear on every OEM skin, even though the underlying session correctly reports Next/Previous availability to the system (verified via the legacy `PlaybackState` bridge that Bluetooth/AVRCP and most lock screens read). This stems from ExoPlayer only ever holding one resolved track at a time — YouTube streams require an async network resolve before they can be loaded — rather than a real multi-item timeline.
-- The playback queue lives in memory for the lifetime of the process. It survives Activity recreation, screen rotation and backgrounding, but closing the app (or the system reclaiming it) clears it — there is no queue table in the database, so a queue built up over a long autoplay session isn't restored on next launch. Playlists, Favorites, History, Pinned songs and Downloads are all persisted; the queue is not.
-- YouTube/YouTube Music access relies on NewPipeExtractor's unofficial extraction. YouTube can change its internal APIs at any time, which may require an extractor library update.
+- YouTube access relies on unofficial extraction. YouTube can change its systems at any time, which may need an app update; the second stream source makes this less likely to stop playback.
+- Some vendor skins (for example Vivo/iQOO OriginOS) limit which apps appear in their own island or quick-switch media pickers. Whiplash uses the standard Android media session, so this is outside the app's control.
+- Networks with YouTube Restricted Mode (common on school and office Wi-Fi) block some songs.
+- The app is portrait only.
 
 ---
 
 ## Disclaimer
 
-This project uses [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) to access publicly available YouTube/YouTube Music content and is intended for personal, educational use. It is not affiliated with, endorsed by, or sponsored by YouTube, Google, or LRCLIB. Users are responsible for complying with YouTube's Terms of Service in their jurisdiction.
+Whiplash uses NewPipeExtractor to access publicly available YouTube and YouTube Music content and is intended for personal use. It is not affiliated with, endorsed by or sponsored by YouTube, Google, LRCLIB or lyrics.ovh. Users are responsible for following YouTube's Terms of Service where they live.
 
 ## License
 
-Licensed under the [MIT License](LICENSE).
+**Copyright (c) 2026 Shahid Ansari. All rights reserved.**
+
+Whiplash is proprietary software under the [Whiplash Proprietary License](LICENSE). You may read the code and install the official APK for personal use. You may not copy, modify, rename, re-skin, build, redistribute or sell it, or use it to train or prompt AI models, without written permission. Versions before 1.1.0 were published under the MIT License, and copies obtained under it stay under it.
 
 ## Acknowledgements
 
-- [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) — YouTube/YouTube Music extraction
-- [LRCLIB](https://lrclib.net) — free, open synced-lyrics database
-- [AndroidX Media3](https://github.com/androidx/media) — ExoPlayer and MediaSession
+- [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor): YouTube and YouTube Music extraction
+- [LRCLIB](https://lrclib.net) and [lyrics.ovh](https://lyrics.ovh): lyrics
+- [AndroidX Media3](https://github.com/androidx/media): ExoPlayer and MediaSession
