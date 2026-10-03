@@ -66,7 +66,7 @@ The full list is in the [changelog](CHANGELOG.md).
 
 | Home | Now Playing | Lyrics | Themes |
 |:---:|:---:|:---:|:---:|
-| <img src="docs/assets/home.jpg" width="200" alt="Home with Speed dial and Quick Picks"> | <img src="docs/assets/player.jpg" width="200" alt="Now Playing screen"> | <img src="docs/assets/lyrics.jpg" width="200" alt="Synced lyrics"> | <img src="docs/assets/appearance.jpg" width="200" alt="Appearance settings"> |
+| <img src="docs/assets/home.jpg" width="200" alt="Home with Speed dial and Quick Picks"> | <img src="docs/assets/player.jpg" width="200" alt="Now Playing: Perfect by Ed Sheeran"> | <img src="docs/assets/lyrics.jpg" width="200" alt="Synced lyrics"> | <img src="docs/assets/appearance.jpg" width="200" alt="Appearance settings"> |
 
 </div>
 
