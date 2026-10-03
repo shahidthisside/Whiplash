@@ -31,7 +31,7 @@
       var apk = (rel.assets || []).find(function (a) { return /\.apk$/i.test(a.name); });
       var size = apk ? " · " + (apk.size / 1048576).toFixed(1) + " MB" : "";
       document.querySelectorAll("[data-release-meta]").forEach(function (el) {
-        el.textContent = tag + size + " · Android 8.0+ · Open source";
+        el.textContent = tag + size + " · Android 8.0+";
       });
     })
     .catch(function () {});
