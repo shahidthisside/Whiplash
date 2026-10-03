@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (c) 2026 Shahid Ansari. All rights reserved.
+  Proprietary software. Copying, modification, rebuilding or redistribution
+  is not permitted without written permission. See LICENSE.
+-->
 <paths>
     <!-- Replay posters only; nothing else in the app is shared as a file. -->
     <cache-path name="replay" path="replay/" />

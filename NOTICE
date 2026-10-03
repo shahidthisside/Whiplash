@@ -1,0 +1,27 @@
+Whiplash
+Copyright (c) 2026 Shahid Ansari. All rights reserved.
+
+Whiplash was designed and developed from scratch by Shahid Ansari
+(https://github.com/shahidthisside), who is the sole owner and author of
+this repository's original code, design, graphics and documentation.
+
+Every file in this repository that is not a third-party library is
+proprietary and covered by the Whiplash Proprietary License (LICENSE).
+This applies to the whole repository and its full history, except copies
+of versions before 1.1.0 already obtained under the MIT License.
+
+You may read the code. You may not copy, modify, rename, re-skin,
+rebuild, redistribute or sell it, publish it as your own, or use it to
+train, prompt or feed any AI or machine learning system, without written
+permission from Shahid Ansari.
+
+Official builds are published only on
+https://github.com/shahidthisside/Whiplash/releases and
+https://shahidthisside.github.io/Whiplash/ and are signed with the
+author's own key (certificate SHA-256
+ed09a3eded2634f1b299fa822f5a7e37f27ec54c5d95bbed26813c8c58faa18f).
+Any APK signed with a different key is not an official Whiplash build.
+
+Third-party libraries used by Whiplash (NewPipeExtractor, AndroidX,
+Media3, Room, OkHttp, Coil, Kotlin coroutines, Google Play services)
+remain under their own licenses.

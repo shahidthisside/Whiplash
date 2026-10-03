@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (c) 2026 Shahid Ansari. All rights reserved.
+  Proprietary software. Copying, modification, rebuilding or redistribution
+  is not permitted without written permission. See LICENSE.
+-->
 <!-- GitHub "Octocat mark" glyph, sourced from simple-icons
      (https://github.com/simple-icons/simple-icons, MIT License) -
      converted to a tintable Android vector drawable so it matches the
