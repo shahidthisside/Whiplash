@@ -39,6 +39,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -102,7 +103,9 @@ fun LyricsBody(
             is LyricsResult.Error -> MessageState(
                 icon = Icons.Filled.MusicOff,
                 title = "Couldn't load lyrics",
-                subtitle = result.message,
+                // The raw error (host names, IP addresses) means nothing to a
+                // listener; the lookup is tried again next time.
+                subtitle = "Check your connection and try again.",
             )
             LyricsResult.Unavailable -> MessageState(
                 icon = Icons.Filled.MusicOff,
@@ -167,6 +170,10 @@ private fun rememberSmoothedPositionMs(positionMs: Long, isPlaying: Boolean): Lo
     var smoothedMs by remember { mutableLongStateOf(positionMs) }
     var lastTickWallClock by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var lastTickPositionMs by remember { mutableLongStateOf(positionMs) }
+    // Between player ticks the position moves at the playback speed, not
+    // wall-clock speed; at 1.5x the lyrics otherwise lag and jump forward.
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.whiplash.music.WhiplashApplication
+    val speed by app.settingsRepository.playbackSpeed.collectAsState(initial = 1f)
 
     LaunchedEffect(positionMs) {
         lastTickWallClock = System.currentTimeMillis()
@@ -177,9 +184,9 @@ private fun rememberSmoothedPositionMs(positionMs: Long, isPlaying: Boolean): Lo
     LaunchedEffect(isPlaying) {
         if (!isPlaying) return@LaunchedEffect
         while (true) {
-            withFrameMillis { frameTimeMs ->
+            withFrameMillis {
                 val elapsed = System.currentTimeMillis() - lastTickWallClock
-                smoothedMs = lastTickPositionMs + elapsed
+                smoothedMs = interpolatedPositionMs(lastTickPositionMs, elapsed, speed)
             }
         }
     }
@@ -556,3 +563,7 @@ internal fun CurrentLyricStrip(
         )
     }
 }
+
+/** Where the song is [elapsedMs] of real time after [tickPositionMs], at playback [speed]. */
+internal fun interpolatedPositionMs(tickPositionMs: Long, elapsedMs: Long, speed: Float): Long =
+    tickPositionMs + (elapsedMs.coerceAtLeast(0L) * speed).toLong()
