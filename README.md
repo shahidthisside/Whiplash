@@ -193,10 +193,10 @@ Settings are searchable and grouped into sections:
 | **Lyrics** | Lyric line in the player, swipe up for lyrics, blur, lyrics source |
 | **Appearance** | Theme, accent colour, Liquid Glass tint and lens, Speed dial and Quick Picks layout, Reduce animations |
 | **Account & sync** | Google sign-in and Drive sync |
-| **Storage** | Audio cache, clear cache, clear downloads |
+| **Storage** | Cache songs, cached data, downloaded songs, Reset app |
 | **Backup & Restore** | Back up and restore by category |
 
-The start page also has Reset app and Quit Whiplash.
+The start page also has Quit Whiplash.
 
 ---
 
