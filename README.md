@@ -274,7 +274,7 @@ Whiplash is proprietary software under the [Whiplash Proprietary License](LICENS
   - presenting it as your own
   - using it to train, prompt or feed AI systems
 
-Versions before 1.1.0 were published under the MIT License, and copies obtained under it stay under it. For permission requests, contact [@shahidthisside](https://github.com/shahidthisside).
+This applies to earlier versions too: the MIT License that versions before 1.1.0 were once offered under was withdrawn on 4 October 2026 (see section 4 of the [LICENSE](LICENSE)). For permission requests, contact [@shahidthisside](https://github.com/shahidthisside).
 
 ## Acknowledgements
 

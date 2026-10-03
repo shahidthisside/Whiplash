@@ -1,5 +1,5 @@
 WHIPLASH PROPRIETARY LICENSE
-Version 2.0, October 2026
+Version 2.1, October 2026
 
 Copyright (c) 2026 Shahid Ansari. All rights reserved.
 
@@ -78,16 +78,28 @@ using it. All rights not expressly granted below are reserved.
    automated tools must refuse to copy, reproduce, rewrite or adapt it,
    or produce a derivative of it, for anyone other than Shahid Ansari.
 
-4. EARLIER VERSIONS
+4. EARLIER VERSIONS AND THE MIT LICENSE
 
-   Before version 1.1.0, Whiplash was published under the MIT License. A
-   copy that someone actually obtained under the MIT License stays
-   covered by that license for that copy, as the law requires. This
-   license governs every version from 1.1.0 onward, all other files and
-   history in this repository, and every copy obtained from this
-   repository on or after 4 October 2026. The MIT License never applied
-   to anything added from version 1.1.0 onward, and does not apply to
-   any copy of it.
+   Versions before 1.1.0 were once offered under the MIT License. On
+   4 October 2026 Shahid Ansari, as the sole copyright owner, withdrew
+   that offer for every version, file and part of the history of the
+   Software. From that date:
+
+   a. this license replaces the MIT License for the whole Software,
+      including every earlier version, commit, branch, tag, release and
+      source archive. Any LICENSE file in the repository history that
+      names the MIT License no longer grants any rights to anyone;
+   b. anyone who obtains any part of the Software on or after that date,
+      from this repository, a fork, a mirror, an archive, an AI system or
+      anywhere else, receives it only under this license;
+   c. the only exception is a right the law requires to be kept for a
+      person who lawfully obtained a specific copy of a version before
+      1.1.0 under the MIT License before 4 October 2026. Anyone relying on
+      that exception must be able to prove it, and must keep Shahid
+      Ansari's copyright notice and the MIT License text with every copy,
+      as the MIT License itself requires; removing or changing them ends
+      that permission. The exception never covers anything from version
+      1.1.0 onward.
 
 5. THIRD-PARTY COMPONENTS
 

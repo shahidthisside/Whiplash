@@ -58,7 +58,7 @@ The biggest update so far. Whiplash is now proprietary software (see License bel
 - Shuffle order, ranged downloads, queue removal, list keys, SQLite limits and settings corruption issues found in an audit.
 
 ### License
-- **Whiplash is now proprietary software under the [Whiplash Proprietary License](LICENSE).** All rights reserved: the code may be read, but not copied, modified, rebuilt, renamed, redistributed or used for AI training. Versions before 1.1.0 were released under the MIT License, and copies obtained under it stay under it.
+- **Whiplash is now proprietary software under the [Whiplash Proprietary License](LICENSE).** All rights reserved: the code may be read, but not copied, modified, rebuilt, renamed, redistributed or used for AI training. This covers earlier versions too: the MIT License they were once offered under was withdrawn on 4 October 2026.
 
 ### Also in this release
 The changes below were made on `main` after 0.4.0 and ship for the first time in 1.1.0.

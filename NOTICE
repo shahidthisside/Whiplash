@@ -7,8 +7,9 @@ this repository's original code, design, graphics and documentation.
 
 Every file in this repository that is not a third-party library is
 proprietary and covered by the Whiplash Proprietary License (LICENSE).
-This applies to the whole repository and its full history, except copies
-of versions before 1.1.0 already obtained under the MIT License.
+This applies to the whole repository and its full history, including
+versions before 1.1.0: the MIT License they were once offered under was
+withdrawn on 4 October 2026 (LICENSE, section 4).
 
 You may read the code. You may not copy, modify, rename, re-skin,
 rebuild, redistribute or sell it, publish it as your own, or use it to
