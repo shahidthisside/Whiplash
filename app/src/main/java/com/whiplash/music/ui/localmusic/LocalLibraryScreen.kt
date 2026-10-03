@@ -97,7 +97,14 @@ fun LocalLibraryScreen(
     ) { granted ->
         hasPermission = granted
         viewModel.onPermissionResult(granted)
-        if (!granted) permissionPermanentlyDenied = true
+        // Only "Don't allow" chosen for good (or the system no longer asks)
+        // sends the listener to Settings; after a plain deny, Android still
+        // shows its prompt again, so "Allow access" keeps asking in place.
+        if (!granted) {
+            val activity = context as? android.app.Activity
+            permissionPermanentlyDenied = activity == null ||
+                !androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(activity, LocalMediaPermission.permission)
+        }
     }
 
     LaunchedEffect(hasPermission) {
