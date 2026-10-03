@@ -171,6 +171,56 @@ private sealed interface SearchDestination {
     data class Genre(val id: String) : SearchDestination
 }
 
+/** Keeps the Search page stack when the app is recreated, as plain strings. */
+private val SearchStackSaver = androidx.compose.runtime.saveable.Saver<List<SearchDestination>, ArrayList<String>>(
+    save = { stack -> ArrayList(encodeSearchStack(stack.map { it.toKey() })) },
+    restore = { saved -> decodeSearchStack(saved).mapNotNull { it.toDestination() } },
+)
+
+private fun SearchDestination.toKey(): Pair<Char, String> = when (this) {
+    is SearchDestination.Album -> 'a' to url
+    is SearchDestination.Artist -> 'r' to channelUrl
+    is SearchDestination.Genre -> 'g' to id
+}
+
+private fun Pair<Char, String>.toDestination(): SearchDestination? = when (first) {
+    'a' -> SearchDestination.Album(second)
+    'r' -> SearchDestination.Artist(second)
+    'g' -> SearchDestination.Genre(second)
+    else -> null
+}
+
+/** "kind:value" per page; the value may itself contain ':' (URLs). */
+internal fun encodeSearchStack(pages: List<Pair<Char, String>>): List<String> = pages.map { (kind, value) -> "$kind:$value" }
+
+internal fun decodeSearchStack(saved: List<String>): List<Pair<Char, String>> =
+    saved.mapNotNull { s -> if (s.length >= 2 && s[1] == ':') s[0] to s.substring(2) else null }
+
+/** Keeps the open playlist across rotation. */
+private val OpenPlaylistSaver = androidx.compose.runtime.saveable.Saver<com.whiplash.music.domain.model.Playlist?, android.os.Bundle>(
+    save = { p ->
+        p?.let {
+            android.os.Bundle().apply {
+                putLong("id", it.id)
+                putString("name", it.name)
+                putString("description", it.description)
+                putString("artworkUrl", it.artworkUrl)
+                putBoolean("pinned", it.pinned)
+            }
+        } ?: android.os.Bundle()
+    },
+    restore = { b ->
+        if (!b.containsKey("id")) null
+        else com.whiplash.music.domain.model.Playlist(
+            id = b.getLong("id"),
+            name = b.getString("name").orEmpty(),
+            description = b.getString("description"),
+            artworkUrl = b.getString("artworkUrl"),
+            pinned = b.getBoolean("pinned"),
+        )
+    },
+)
+
 /**
  * Hosts [GlassMiniPlayer] with its own independent [PlaybackController]
  * state collection, rather than reading that state in [WhiplashApp]'s own
@@ -290,7 +340,7 @@ private fun WhiplashApp() {
     // Bumped when the Library tab is tapped again, to close an album/artist page.
     var libraryResetKey by remember { mutableStateOf(0) }
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.HOME) }
-    var openPlaylist by remember { mutableStateOf<com.whiplash.music.domain.model.Playlist?>(null) }
+    var openPlaylist by rememberSaveable(stateSaver = OpenPlaylistSaver) { mutableStateOf<com.whiplash.music.domain.model.Playlist?>(null) }
     // Same collapse-not-exit back pattern as openPlaylist, for the Home
     // tab's "see full History" screen (reached via Speed dial's History
     // button — see HomeScreen/SectionHeader).
@@ -305,9 +355,9 @@ private fun WhiplashApp() {
     // Simple back-stack for Search tab detail navigation (album/artist),
     // since an artist page can itself open an album (section 40 "albums"
     // tab), needing more than one level of "open detail" state.
-    var searchDetailStack by remember { mutableStateOf<List<SearchDestination>>(emptyList()) }
+    var searchDetailStack by rememberSaveable(stateSaver = SearchStackSaver) { mutableStateOf<List<SearchDestination>>(emptyList()) }
     // Search detail pages currently drawn (includes one still sliding out after Back).
-    var searchLayers by remember { mutableStateOf<List<SearchDestination>>(emptyList()) }
+    var searchLayers by rememberSaveable(stateSaver = SearchStackSaver) { mutableStateOf<List<SearchDestination>>(emptyList()) }
     // 4.7 Monthly Replay: full-screen story over everything but the full player.
     val replayViewModel: com.whiplash.music.ui.replay.ReplayViewModel = viewModel(
         factory = com.whiplash.music.ui.replay.ReplayViewModelFactory(app.libraryRepository, app.settingsRepository),
